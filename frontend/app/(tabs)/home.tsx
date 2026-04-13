@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image, ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,39 +19,66 @@ type Car = {
   transmission: string;
   fuel_type: string;
   image_url: string;
+  pickup_location?: { name: string; address?: string };
+  dropoff_location?: { name: string; address?: string };
+};
+
+type Location = {
+  id: string;
+  name: string;
+  city: string;
+  country: string;
+  address: string;
 };
 
 const CATEGORIES = ['All', 'SUV', 'Sedan', 'Luxury', 'Electric', 'Sports'];
 
 export default function HomeScreen() {
   const [cars, setCars] = useState<Car[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
+  const [activeCity, setActiveCity] = useState('');
   const { user } = useAuth();
   const router = useRouter();
 
+  // Derive unique cities from locations
+  const cities = [...new Set(locations.map(l => l.city))];
+
+  const fetchLocations = useCallback(async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/locations`);
+      if (res.ok) setLocations(await res.json());
+    } catch (e) { console.log('Fetch locations error:', e); }
+  }, []);
+
   const fetchCars = useCallback(async () => {
     try {
-      let url = `${BACKEND_URL}/api/cars?`;
-      if (activeCategory !== 'All') url += `category=${activeCategory}&`;
-      if (search) url += `search=${search}`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setCars(data);
-      }
-    } catch (e) {
-      console.log('Fetch cars error:', e);
-    }
+      const params = new URLSearchParams();
+      if (activeCategory !== 'All') params.append('category', activeCategory);
+      if (search) params.append('search', search);
+      if (activeCity) params.append('city', activeCity);
+      const res = await fetch(`${BACKEND_URL}/api/cars?${params.toString()}`);
+      if (res.ok) setCars(await res.json());
+    } catch (e) { console.log('Fetch cars error:', e); }
     setLoading(false);
     setRefreshing(false);
-  }, [activeCategory, search]);
+  }, [activeCategory, search, activeCity]);
 
+  useEffect(() => { fetchLocations(); }, [fetchLocations]);
   useEffect(() => { fetchCars(); }, [fetchCars]);
 
   const onRefresh = () => { setRefreshing(true); fetchCars(); };
+
+  const clearFilters = () => {
+    setActiveCity('');
+    setActiveCategory('All');
+    setSearch('');
+  };
+
+  const hasFilters = activeCity || activeCategory !== 'All' || search;
 
   const renderCar = ({ item }: { item: Car }) => (
     <TouchableOpacity
@@ -68,6 +95,12 @@ export default function HomeScreen() {
             <Text style={styles.categoryText}>{item.category}</Text>
           </View>
         </View>
+        {item.pickup_location && (
+          <View style={styles.locationRow}>
+            <Ionicons name="location-outline" size={13} color="#007AFF" />
+            <Text style={styles.locationText} numberOfLines={1}>{item.pickup_location.name}</Text>
+          </View>
+        )}
         <View style={styles.carSpecs}>
           <View style={styles.specItem}>
             <Ionicons name="people-outline" size={14} color="#666" />
@@ -115,12 +148,44 @@ export default function HomeScreen() {
           returnKeyType="search"
         />
         {search ? (
-          <TouchableOpacity onPress={() => { setSearch(''); }}>
+          <TouchableOpacity onPress={() => setSearch('')}>
             <Ionicons name="close-circle" size={20} color="#999" />
           </TouchableOpacity>
         ) : null}
       </View>
 
+      {/* Location filter */}
+      {cities.length > 0 && (
+        <View>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="location" size={16} color="#FF3B30" />
+            <Text style={styles.sectionLabel}>Location</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterList}>
+            <TouchableOpacity
+              testID="location-all"
+              style={[styles.locationPill, !activeCity && styles.locationPillActive]}
+              onPress={() => setActiveCity('')}
+            >
+              <Ionicons name="globe-outline" size={14} color={!activeCity ? '#FFF' : '#FF3B30'} />
+              <Text style={[styles.locationPillText, !activeCity && styles.locationPillTextActive]}>All Locations</Text>
+            </TouchableOpacity>
+            {cities.map(c => (
+              <TouchableOpacity
+                key={c}
+                testID={`location-${c.replace(/\s/g, '-')}`}
+                style={[styles.locationPill, activeCity === c && styles.locationPillActive]}
+                onPress={() => setActiveCity(activeCity === c ? '' : c)}
+              >
+                <Ionicons name="location-outline" size={14} color={activeCity === c ? '#FFF' : '#FF3B30'} />
+                <Text style={[styles.locationPillText, activeCity === c && styles.locationPillTextActive]}>{c}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Category filter */}
       <FlatList
         horizontal
         data={CATEGORIES}
@@ -138,6 +203,17 @@ export default function HomeScreen() {
         )}
       />
 
+      {/* Active filters bar */}
+      {hasFilters ? (
+        <View style={styles.activeFiltersBar}>
+          <Text style={styles.resultCount}>{cars.length} car{cars.length !== 1 ? 's' : ''} found</Text>
+          <TouchableOpacity testID="clear-filters-btn" onPress={clearFilters} style={styles.clearBtn}>
+            <Ionicons name="close-circle" size={16} color="#FF3B30" />
+            <Text style={styles.clearBtnText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {loading ? (
         <View style={styles.centerContent}>
           <ActivityIndicator size="large" color="#FF3B30" />
@@ -146,6 +222,11 @@ export default function HomeScreen() {
         <View style={styles.centerContent}>
           <Ionicons name="car-outline" size={64} color="#E5E5E5" />
           <Text style={styles.emptyText}>No cars found</Text>
+          {hasFilters ? (
+            <TouchableOpacity testID="clear-filters-empty-btn" style={styles.clearFiltersBtn} onPress={clearFilters}>
+              <Text style={styles.clearFiltersBtnText}>Clear Filters</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : (
         <FlatList
@@ -170,19 +251,32 @@ const styles = StyleSheet.create({
   avatar: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 16, paddingHorizontal: 16, marginHorizontal: 24, marginTop: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E5E5' },
   searchInput: { flex: 1, fontSize: 16, color: '#0A0A0A', paddingVertical: 14, marginLeft: 10 },
-  categoriesList: { paddingHorizontal: 24, paddingVertical: 12, gap: 8 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 24, paddingTop: 8, paddingBottom: 4 },
+  sectionLabel: { fontSize: 12, fontWeight: '800', color: '#0A0A0A', textTransform: 'uppercase', letterSpacing: 1 },
+  filterList: { paddingHorizontal: 24, paddingVertical: 8, gap: 8 },
+  locationPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 50, backgroundColor: '#FFF0F0', borderWidth: 1, borderColor: '#FFD5D5' },
+  locationPillActive: { backgroundColor: '#FF3B30', borderColor: '#FF3B30' },
+  locationPillText: { fontSize: 13, fontWeight: '700', color: '#FF3B30' },
+  locationPillTextActive: { color: '#FFFFFF' },
+  categoriesList: { paddingHorizontal: 24, paddingVertical: 6, gap: 8 },
   categoryPill: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 50, backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E5E5E5' },
   categoryPillActive: { backgroundColor: '#0A0A0A', borderColor: '#0A0A0A' },
   categoryPillText: { fontSize: 14, fontWeight: '600', color: '#666' },
   categoryPillTextActive: { color: '#FFFFFF' },
+  activeFiltersBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 6 },
+  resultCount: { fontSize: 13, fontWeight: '700', color: '#666' },
+  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  clearBtnText: { fontSize: 13, fontWeight: '700', color: '#FF3B30' },
   carList: { paddingHorizontal: 24, paddingBottom: 24 },
   carCard: { backgroundColor: '#FFFFFF', borderRadius: 24, overflow: 'hidden', marginBottom: 20, borderWidth: 1, borderColor: '#E5E5E5', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   carImage: { width: '100%', height: 180, backgroundColor: '#F5F5F5' },
   carInfo: { padding: 16 },
-  carHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  carHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   carName: { fontSize: 18, fontWeight: '800', color: '#0A0A0A', flex: 1 },
   categoryBadge: { backgroundColor: '#F5F5F5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   categoryText: { fontSize: 11, fontWeight: '700', color: '#666', textTransform: 'uppercase', letterSpacing: 1 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
+  locationText: { fontSize: 12, color: '#007AFF', fontWeight: '600' },
   carSpecs: { flexDirection: 'row', gap: 16, marginBottom: 12 },
   specItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   specText: { fontSize: 13, color: '#666' },
@@ -191,4 +285,6 @@ const styles = StyleSheet.create({
   priceUnit: { fontSize: 14, color: '#999', marginLeft: 2 },
   centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   emptyText: { fontSize: 16, color: '#999' },
+  clearFiltersBtn: { backgroundColor: '#FF3B30', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 50, marginTop: 8 },
+  clearFiltersBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
 });

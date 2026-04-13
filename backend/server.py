@@ -350,16 +350,39 @@ def serialize_car(car):
     return car
 
 @api_router.get("/cars")
-async def get_cars(category: Optional[str] = None, search: Optional[str] = None):
+async def get_cars(category: Optional[str] = None, search: Optional[str] = None, location: Optional[str] = None, city: Optional[str] = None):
     query = {"available": True}
     if category and category != "All":
         query["category"] = category
     if search:
-        query["$or"] = [
+        search_conditions = [
             {"name": {"$regex": search, "$options": "i"}},
             {"brand": {"$regex": search, "$options": "i"}},
             {"model": {"$regex": search, "$options": "i"}}
         ]
+        if "$and" not in query:
+            query["$and"] = []
+        query["$and"].append({"$or": search_conditions})
+    if location:
+        loc_conditions = [
+            {"pickup_location.name": {"$regex": location, "$options": "i"}},
+            {"dropoff_location.name": {"$regex": location, "$options": "i"}},
+            {"pickup_location.address": {"$regex": location, "$options": "i"}},
+            {"dropoff_location.address": {"$regex": location, "$options": "i"}}
+        ]
+        if "$and" not in query:
+            query["$and"] = []
+        query["$and"].append({"$or": loc_conditions})
+    if city:
+        city_conditions = [
+            {"pickup_location.name": {"$regex": city, "$options": "i"}},
+            {"dropoff_location.name": {"$regex": city, "$options": "i"}},
+            {"pickup_location.address": {"$regex": city, "$options": "i"}},
+            {"dropoff_location.address": {"$regex": city, "$options": "i"}}
+        ]
+        if "$and" not in query:
+            query["$and"] = []
+        query["$and"].append({"$or": city_conditions})
     cars = await db.cars.find(query).to_list(100)
     return [serialize_car(c) for c in cars]
 

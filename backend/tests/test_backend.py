@@ -167,6 +167,94 @@ class TestCars:
             assert "tesla" in search_fields, "Search should match Tesla"
         print(f"✓ Search works: {len(data)} results for 'Tesla'")
 
+    def test_get_cars_with_city_filter_miami(self, api_client):
+        """Test GET /api/cars?city=Miami returns 2 cars"""
+        response = api_client.get(f"{BASE_URL}/api/cars?city=Miami")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert len(data) == 2, f"Expected 2 cars in Miami, got {len(data)}"
+        
+        # Verify car names
+        car_names = [car["name"] for car in data]
+        assert "Mercedes-Benz S-Class" in car_names, "Should include Mercedes-Benz S-Class"
+        assert "Porsche 911 Carrera" in car_names, "Should include Porsche 911 Carrera"
+        
+        # Verify location contains Miami
+        for car in data:
+            pickup_loc = car.get("pickup_location", {})
+            dropoff_loc = car.get("dropoff_location", {})
+            pickup_match = "miami" in pickup_loc.get("name", "").lower() or "miami" in pickup_loc.get("address", "").lower()
+            dropoff_match = "miami" in dropoff_loc.get("name", "").lower() or "miami" in dropoff_loc.get("address", "").lower()
+            assert pickup_match or dropoff_match, f"Car {car['name']} should have Miami in pickup or dropoff location"
+        
+        print(f"✓ City filter Miami works: {len(data)} cars - {car_names}")
+
+    def test_get_cars_with_city_filter_punta_cana(self, api_client):
+        """Test GET /api/cars?city=Punta Cana returns 2 cars"""
+        response = api_client.get(f"{BASE_URL}/api/cars?city=Punta+Cana")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert len(data) == 2, f"Expected 2 cars in Punta Cana, got {len(data)}"
+        
+        # Verify car names
+        car_names = [car["name"] for car in data]
+        assert "Tesla Model 3" in car_names, "Should include Tesla Model 3"
+        assert "Range Rover Sport" in car_names, "Should include Range Rover Sport"
+        
+        print(f"✓ City filter Punta Cana works: {len(data)} cars - {car_names}")
+
+    def test_get_cars_with_city_filter_santo_domingo(self, api_client):
+        """Test GET /api/cars?city=Santo Domingo returns 1 car"""
+        response = api_client.get(f"{BASE_URL}/api/cars?city=Santo+Domingo")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert len(data) == 1, f"Expected 1 car in Santo Domingo, got {len(data)}"
+        
+        # Verify car name
+        assert data[0]["name"] == "BMW X5 xDrive", "Should be BMW X5 xDrive"
+        
+        print(f"✓ City filter Santo Domingo works: {len(data)} car - {data[0]['name']}")
+
+    def test_get_cars_with_city_filter_new_york(self, api_client):
+        """Test GET /api/cars?city=New York returns 1 car"""
+        response = api_client.get(f"{BASE_URL}/api/cars?city=New+York")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert len(data) == 1, f"Expected 1 car in New York, got {len(data)}"
+        
+        # Verify car name
+        assert data[0]["name"] == "Toyota Camry", "Should be Toyota Camry"
+        
+        print(f"✓ City filter New York works: {len(data)} car - {data[0]['name']}")
+
+    def test_get_cars_without_city_filter(self, api_client):
+        """Test GET /api/cars without city filter returns all 6 cars"""
+        response = api_client.get(f"{BASE_URL}/api/cars")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert len(data) == 6, f"Expected 6 cars total, got {len(data)}"
+        
+        print(f"✓ No city filter returns all cars: {len(data)} cars")
+
+    def test_get_cars_with_city_and_category_filter(self, api_client):
+        """Test GET /api/cars?city=Miami&category=Luxury returns 1 car"""
+        response = api_client.get(f"{BASE_URL}/api/cars?city=Miami&category=Luxury")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert len(data) == 1, f"Expected 1 car (Miami + Luxury), got {len(data)}"
+        
+        # Verify it's Mercedes-Benz S-Class
+        assert data[0]["name"] == "Mercedes-Benz S-Class", "Should be Mercedes-Benz S-Class"
+        assert data[0]["category"] == "Luxury", "Should be Luxury category"
+        
+        print(f"✓ Combined filter (Miami + Luxury) works: {data[0]['name']}")
+
     def test_get_car_detail(self, api_client):
         """Test GET /api/cars/{id}"""
         # First get a car ID
