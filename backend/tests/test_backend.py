@@ -1,6 +1,6 @@
 """
 Backend API Tests for Dams Car Rental
-Tests: Auth (register, login, me), Cars (list, detail, admin CRUD), Bookings, Admin Stats
+Tests: Auth (register, login, me), Cars (list, detail, admin CRUD), Bookings, Admin Stats, Locations (list, CRUD, city filter)
 """
 import pytest
 import requests
@@ -410,3 +410,207 @@ class TestAdmin:
         )
         assert response.status_code == 403, f"Expected 403, got {response.status_code}"
         print("✓ Non-admin blocked from /api/admin/stats")
+
+    def test_admin_stats_includes_locations(self, api_client, admin_token):
+        """Test GET /api/admin/stats includes total_locations"""
+        response = api_client.get(f"{BASE_URL}/api/admin/stats",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert "total_locations" in data, "Stats should include total_locations"
+        assert data["total_locations"] >= 8, f"Should have at least 8 seeded locations, got {data['total_locations']}"
+        print(f"✓ Admin stats includes total_locations: {data['total_locations']}")
+
+# ==================== LOCATION TESTS ====================
+
+class TestLocations:
+    """Location endpoint tests"""
+
+    def test_get_locations_public(self, api_client):
+        """Test GET /api/locations (public endpoint)"""
+        response = api_client.get(f"{BASE_URL}/api/locations")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert isinstance(data, list), "Response should be a list"
+        assert len(data) >= 8, f"Should have at least 8 seeded locations, got {len(data)}"
+        
+        # Verify location structure
+        loc = data[0]
+        assert "id" in loc, "Location should have id"
+        assert "name" in loc, "Location should have name"
+        assert "address" in loc, "Location should have address"
+        assert "city" in loc, "Location should have city"
+        assert "country" in loc, "Location should have country"
+        assert "lat" in loc, "Location should have lat"
+        assert "lng" in loc, "Location should have lng"
+        assert "type" in loc, "Location should have type"
+        assert "_id" not in loc, "MongoDB _id should be excluded"
+        print(f"✓ GET /api/locations success: {len(data)} locations")
+
+    def test_get_locations_with_city_filter(self, api_client):
+        """Test GET /api/locations with city filter"""
+        response = api_client.get(f"{BASE_URL}/api/locations?city=Punta Cana")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+        
+        data = response.json()
+        assert len(data) >= 2, f"Should have at least 2 Punta Cana locations, got {len(data)}"
+        for loc in data:
+            assert "punta cana" in loc["city"].lower(), f"All locations should be in Punta Cana, got {loc['city']}"
+        print(f"✓ City filter works: {len(data)} locations in Punta Cana")
+
+    def test_get_locations_cities_list(self, api_client):
+        """Test GET /api/locations/cities/list"""
+        response = api_client.get(f"{BASE_URL}/api/locations/cities/list")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert isinstance(data, list), "Response should be a list"
+        assert len(data) >= 4, f"Should have at least 4 cities (Punta Cana, Santo Domingo, Miami, New York), got {len(data)}"
+        
+        # Check for expected cities
+        cities_lower = [c.lower() for c in data]
+        assert "punta cana" in cities_lower, "Should include Punta Cana"
+        assert "santo domingo" in cities_lower, "Should include Santo Domingo"
+        assert "miami" in cities_lower, "Should include Miami"
+        assert "new york" in cities_lower, "Should include New York"
+        print(f"✓ GET /api/locations/cities/list success: {data}")
+
+    def test_get_location_detail(self, api_client):
+        """Test GET /api/locations/{id}"""
+        # First get a location ID
+        locs_response = api_client.get(f"{BASE_URL}/api/locations")
+        locs = locs_response.json()
+        assert len(locs) > 0, "Need at least one location"
+        
+        loc_id = locs[0]["id"]
+        response = api_client.get(f"{BASE_URL}/api/locations/{loc_id}")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert data["id"] == loc_id, "Location ID should match"
+        assert "name" in data, "Location should have name"
+        assert "_id" not in data, "MongoDB _id should be excluded"
+        print(f"✓ GET /api/locations/{loc_id} success")
+
+    def test_create_location_admin(self, api_client, admin_token):
+        """Test POST /api/locations (admin only) - Create and verify"""
+        loc_data = {
+            "name": "TEST_Test Location",
+            "address": "123 Test St",
+            "city": "Test City",
+            "country": "Test Country",
+            "lat": 40.7128,
+            "lng": -74.0060,
+            "type": "both"
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/locations", 
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=loc_data
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        created_loc = response.json()
+        assert "id" in created_loc, "Created location should have id"
+        assert created_loc["name"] == loc_data["name"], "Name should match"
+        loc_id = created_loc["id"]
+        
+        # Verify persistence with GET
+        get_response = api_client.get(f"{BASE_URL}/api/locations/{loc_id}")
+        assert get_response.status_code == 200, "Created location should be retrievable"
+        retrieved_loc = get_response.json()
+        assert retrieved_loc["name"] == loc_data["name"], "Retrieved location name should match"
+        
+        # Cleanup
+        api_client.delete(f"{BASE_URL}/api/locations/{loc_id}", headers={"Authorization": f"Bearer {admin_token}"})
+        print(f"✓ POST /api/locations success and verified: {loc_id}")
+
+    def test_update_location_admin(self, api_client, admin_token):
+        """Test PUT /api/locations/{id} (admin only) - Update and verify"""
+        # Create test location first
+        loc_data = {
+            "name": "TEST_Update Location",
+            "address": "123 Update St",
+            "city": "Update City",
+            "country": "Update Country",
+            "lat": 40.7128,
+            "lng": -74.0060,
+            "type": "both"
+        }
+        create_response = api_client.post(f"{BASE_URL}/api/locations",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=loc_data
+        )
+        loc_id = create_response.json()["id"]
+        
+        # Update location
+        update_data = {"name": "TEST_Updated Location", "city": "New City"}
+        response = api_client.put(f"{BASE_URL}/api/locations/{loc_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=update_data
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        updated_loc = response.json()
+        assert updated_loc["name"] == "TEST_Updated Location", "Name should be updated"
+        assert updated_loc["city"] == "New City", "City should be updated"
+        
+        # Verify persistence with GET
+        get_response = api_client.get(f"{BASE_URL}/api/locations/{loc_id}")
+        retrieved_loc = get_response.json()
+        assert retrieved_loc["name"] == "TEST_Updated Location", "Updated name should persist"
+        
+        # Cleanup
+        api_client.delete(f"{BASE_URL}/api/locations/{loc_id}", headers={"Authorization": f"Bearer {admin_token}"})
+        print(f"✓ PUT /api/locations/{loc_id} success and verified")
+
+    def test_delete_location_admin(self, api_client, admin_token):
+        """Test DELETE /api/locations/{id} (admin only) - Delete and verify"""
+        # Create test location first
+        loc_data = {
+            "name": "TEST_Delete Location",
+            "address": "123 Delete St",
+            "city": "Delete City",
+            "country": "Delete Country",
+            "lat": 40.7128,
+            "lng": -74.0060,
+            "type": "both"
+        }
+        create_response = api_client.post(f"{BASE_URL}/api/locations",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=loc_data
+        )
+        loc_id = create_response.json()["id"]
+        
+        # Delete location
+        response = api_client.delete(f"{BASE_URL}/api/locations/{loc_id}",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        # Verify deletion with GET (should return 404)
+        get_response = api_client.get(f"{BASE_URL}/api/locations/{loc_id}")
+        assert get_response.status_code == 404, "Deleted location should return 404"
+        print(f"✓ DELETE /api/locations/{loc_id} success and verified")
+
+    def test_create_location_non_admin(self, api_client, test_user_token):
+        """Test POST /api/locations as non-admin (should fail)"""
+        token, _ = test_user_token
+        loc_data = {
+            "name": "Test Location",
+            "address": "123 Test St",
+            "city": "Test City",
+            "country": "Test Country",
+            "lat": 40.7128,
+            "lng": -74.0060,
+            "type": "both"
+        }
+        response = api_client.post(f"{BASE_URL}/api/locations",
+            headers={"Authorization": f"Bearer {token}"},
+            json=loc_data
+        )
+        assert response.status_code == 403, f"Expected 403, got {response.status_code}"
+        print("✓ Non-admin blocked from POST /api/locations")

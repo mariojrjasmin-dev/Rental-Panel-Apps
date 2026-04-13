@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,14 +8,22 @@ export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
 
+  const doLogout = async () => {
+    await logout();
+    router.replace('/(auth)/login');
+  };
+
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout', style: 'destructive', onPress: async () => {
-        await logout();
-        router.replace('/(auth)/login');
-      }},
-    ]);
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Are you sure you want to logout?')) {
+        doLogout();
+      }
+    } else {
+      Alert.alert('Logout', 'Are you sure you want to logout?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Logout', style: 'destructive', onPress: doLogout },
+      ]);
+    }
   };
 
   return (
@@ -48,6 +56,14 @@ export default function ProfileScreen() {
             <TouchableOpacity testID="admin-panel-btn" style={styles.menuItem} onPress={() => router.push('/admin')} activeOpacity={0.7}>
               <View style={[styles.menuIcon, { backgroundColor: '#FFF0F0' }]}><Ionicons name="settings-outline" size={22} color="#FF3B30" /></View>
               <Text style={styles.menuText}>Admin Panel</Text>
+              <Ionicons name="chevron-forward" size={20} color="#999" />
+            </TouchableOpacity>
+          )}
+
+          {user?.role === 'admin' && (
+            <TouchableOpacity testID="admin-locations-btn" style={styles.menuItem} onPress={() => router.push('/admin-locations')} activeOpacity={0.7}>
+              <View style={[styles.menuIcon, { backgroundColor: '#F0F8FF' }]}><Ionicons name="location-outline" size={22} color="#007AFF" /></View>
+              <Text style={styles.menuText}>Manage Locations</Text>
               <Ionicons name="chevron-forward" size={20} color="#999" />
             </TouchableOpacity>
           )}

@@ -175,6 +175,24 @@ class CheckoutRequest(BaseModel):
     booking_id: str
     origin_url: str
 
+class LocationCreate(BaseModel):
+    name: str
+    address: str
+    city: str
+    country: str
+    lat: float
+    lng: float
+    type: str = "both"  # pickup, dropoff, both
+
+class LocationUpdate(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    type: Optional[str] = None
+
 # App setup
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -582,15 +600,175 @@ async def get_admin_stats(request: Request):
     total_bookings = await db.bookings.count_documents({})
     total_users = await db.users.count_documents({})
     active_bookings = await db.bookings.count_documents({"status": "confirmed"})
+    total_locations = await db.locations.count_documents({})
     
     return {
         "total_cars": total_cars,
         "total_bookings": total_bookings,
         "total_users": total_users,
-        "active_bookings": active_bookings
+        "active_bookings": active_bookings,
+        "total_locations": total_locations
     }
 
+# ==================== LOCATION ROUTES ====================
+
+def serialize_location(loc):
+    loc["id"] = str(loc["_id"])
+    del loc["_id"]
+    return loc
+
+@api_router.get("/locations")
+async def get_locations(city: Optional[str] = None, type: Optional[str] = None):
+    query = {}
+    if city:
+        query["city"] = {"$regex": city, "$options": "i"}
+    if type and type != "both":
+        query["$or"] = [{"type": type}, {"type": "both"}]
+    locations = await db.locations.find(query).to_list(100)
+    return [serialize_location(l) for l in locations]
+
+@api_router.get("/locations/{location_id}")
+async def get_location(location_id: str):
+    loc = await db.locations.find_one({"_id": ObjectId(location_id)})
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return serialize_location(loc)
+
+@api_router.post("/locations")
+async def create_location(loc: LocationCreate, request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    loc_dict = loc.dict()
+    loc_dict["created_at"] = datetime.now(timezone.utc)
+    result = await db.locations.insert_one(loc_dict)
+    loc_dict["id"] = str(result.inserted_id)
+    del loc_dict["_id"]
+    return loc_dict
+
+@api_router.put("/locations/{location_id}")
+async def update_location(location_id: str, loc: LocationUpdate, request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    update_data = {k: v for k, v in loc.dict().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.locations.update_one({"_id": ObjectId(location_id)}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Location not found")
+    updated = await db.locations.find_one({"_id": ObjectId(location_id)})
+    return serialize_location(updated)
+
+@api_router.delete("/locations/{location_id}")
+async def delete_location(location_id: str, request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    result = await db.locations.delete_one({"_id": ObjectId(location_id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"message": "Location deleted"}
+
+@api_router.get("/locations/cities/list")
+async def get_location_cities():
+    cities = await db.locations.distinct("city")
+    return cities
+
+# Browse cars by location
+@api_router.get("/cars/by-location/{location_id}")
+async def get_cars_by_location(location_id: str):
+    loc = await db.locations.find_one({"_id": ObjectId(location_id)})
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    loc_name = loc.get("name", "")
+    cars = await db.cars.find({
+        "available": True,
+        "$or": [
+            {"pickup_location.name": loc_name},
+            {"dropoff_location.name": loc_name},
+            {"pickup_location.location_id": location_id},
+            {"dropoff_location.location_id": location_id},
+        ]
+    }).to_list(100)
+    return [serialize_car(c) for c in cars]
+
 # ==================== SEED DATA ====================
+
+SEED_LOCATIONS = [
+    {
+        "name": "Punta Cana Airport",
+        "address": "Carretera Coral, Punta Cana 23000",
+        "city": "Punta Cana",
+        "country": "Dominican Republic",
+        "lat": 18.5670,
+        "lng": -68.3634,
+        "type": "both"
+    },
+    {
+        "name": "Bavaro Beach Hub",
+        "address": "Av. Alemania, Bavaro, Punta Cana 23301",
+        "city": "Punta Cana",
+        "country": "Dominican Republic",
+        "lat": 18.6871,
+        "lng": -68.4484,
+        "type": "both"
+    },
+    {
+        "name": "Santo Domingo Downtown",
+        "address": "Calle El Conde 103, Zona Colonial, Santo Domingo 10210",
+        "city": "Santo Domingo",
+        "country": "Dominican Republic",
+        "lat": 18.4722,
+        "lng": -69.8830,
+        "type": "both"
+    },
+    {
+        "name": "Las Americas Airport SDQ",
+        "address": "Autopista Las Americas Km 22, Santo Domingo Este",
+        "city": "Santo Domingo",
+        "country": "Dominican Republic",
+        "lat": 18.4297,
+        "lng": -69.6689,
+        "type": "both"
+    },
+    {
+        "name": "Miami International Airport",
+        "address": "2100 NW 42nd Ave, Miami, FL 33126",
+        "city": "Miami",
+        "country": "USA",
+        "lat": 25.7959,
+        "lng": -80.2870,
+        "type": "both"
+    },
+    {
+        "name": "Miami Beach Rental Center",
+        "address": "1200 Collins Ave, Miami Beach, FL 33139",
+        "city": "Miami",
+        "country": "USA",
+        "lat": 25.7826,
+        "lng": -80.1341,
+        "type": "both"
+    },
+    {
+        "name": "JFK Airport New York",
+        "address": "Queens, NY 11430",
+        "city": "New York",
+        "country": "USA",
+        "lat": 40.6413,
+        "lng": -73.7781,
+        "type": "both"
+    },
+    {
+        "name": "Manhattan Midtown Hub",
+        "address": "420 W 42nd St, New York, NY 10036",
+        "city": "New York",
+        "country": "USA",
+        "lat": 40.7580,
+        "lng": -73.9941,
+        "type": "both"
+    }
+]
 
 SEED_CARS = [
     {
@@ -605,8 +783,8 @@ SEED_CARS = [
         "fuel_type": "Electric",
         "description": "Premium electric sedan with autopilot. 358 miles of range.",
         "image_url": "https://images.unsplash.com/photo-1560958089-b8a1929cea89?w=800",
-        "pickup_location": {"name": "Downtown Hub", "lat": 40.7128, "lng": -74.0060},
-        "dropoff_location": {"name": "Airport Terminal", "lat": 40.6413, "lng": -73.7781},
+        "pickup_location": {"name": "Punta Cana Airport", "lat": 18.5670, "lng": -68.3634, "address": "Carretera Coral, Punta Cana 23000"},
+        "dropoff_location": {"name": "Bavaro Beach Hub", "lat": 18.6871, "lng": -68.4484, "address": "Av. Alemania, Bavaro, Punta Cana 23301"},
         "available": True
     },
     {
@@ -621,8 +799,8 @@ SEED_CARS = [
         "fuel_type": "Gasoline",
         "description": "Luxury SUV with spacious interior and advanced tech.",
         "image_url": "https://images.unsplash.com/photo-1637575694029-383a6c97a806?w=800",
-        "pickup_location": {"name": "City Center", "lat": 40.7580, "lng": -73.9855},
-        "dropoff_location": {"name": "Brooklyn Depot", "lat": 40.6782, "lng": -73.9442},
+        "pickup_location": {"name": "Santo Domingo Downtown", "lat": 18.4722, "lng": -69.8830, "address": "Calle El Conde 103, Zona Colonial"},
+        "dropoff_location": {"name": "Las Americas Airport SDQ", "lat": 18.4297, "lng": -69.6689, "address": "Autopista Las Americas Km 22"},
         "available": True
     },
     {
@@ -637,8 +815,8 @@ SEED_CARS = [
         "fuel_type": "Gasoline",
         "description": "The pinnacle of luxury sedans. Unmatched comfort and technology.",
         "image_url": "https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?w=800",
-        "pickup_location": {"name": "Luxury Garage", "lat": 40.7614, "lng": -73.9776},
-        "dropoff_location": {"name": "Hotel Plaza", "lat": 40.7644, "lng": -73.9735},
+        "pickup_location": {"name": "Miami International Airport", "lat": 25.7959, "lng": -80.2870, "address": "2100 NW 42nd Ave, Miami, FL 33126"},
+        "dropoff_location": {"name": "Miami Beach Rental Center", "lat": 25.7826, "lng": -80.1341, "address": "1200 Collins Ave, Miami Beach"},
         "available": True
     },
     {
@@ -653,8 +831,8 @@ SEED_CARS = [
         "fuel_type": "Gasoline",
         "description": "Reliable and fuel-efficient sedan. Perfect for daily commuting.",
         "image_url": "https://images.unsplash.com/photo-1621007947382-bb3c3994e3fb?w=800",
-        "pickup_location": {"name": "Main Station", "lat": 40.7527, "lng": -73.9772},
-        "dropoff_location": {"name": "Midtown Office", "lat": 40.7549, "lng": -73.9840},
+        "pickup_location": {"name": "JFK Airport New York", "lat": 40.6413, "lng": -73.7781, "address": "Queens, NY 11430"},
+        "dropoff_location": {"name": "Manhattan Midtown Hub", "lat": 40.7580, "lng": -73.9941, "address": "420 W 42nd St, New York, NY 10036"},
         "available": True
     },
     {
@@ -669,8 +847,8 @@ SEED_CARS = [
         "fuel_type": "Gasoline",
         "description": "Iconic sports car. Raw driving thrills with everyday usability.",
         "image_url": "https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800",
-        "pickup_location": {"name": "Sports Hub", "lat": 40.7484, "lng": -73.9857},
-        "dropoff_location": {"name": "Track Center", "lat": 40.7282, "lng": -73.7949},
+        "pickup_location": {"name": "Miami Beach Rental Center", "lat": 25.7826, "lng": -80.1341, "address": "1200 Collins Ave, Miami Beach"},
+        "dropoff_location": {"name": "Miami International Airport", "lat": 25.7959, "lng": -80.2870, "address": "2100 NW 42nd Ave, Miami, FL 33126"},
         "available": True
     },
     {
@@ -685,8 +863,8 @@ SEED_CARS = [
         "fuel_type": "Gasoline",
         "description": "Premium SUV combining off-road capability with luxury.",
         "image_url": "https://images.unsplash.com/photo-1736794111724-f7ddff6ab8f4?w=800",
-        "pickup_location": {"name": "North Point", "lat": 40.7831, "lng": -73.9712},
-        "dropoff_location": {"name": "East Side", "lat": 40.7681, "lng": -73.9586},
+        "pickup_location": {"name": "Bavaro Beach Hub", "lat": 18.6871, "lng": -68.4484, "address": "Av. Alemania, Bavaro, Punta Cana 23301"},
+        "dropoff_location": {"name": "Punta Cana Airport", "lat": 18.5670, "lng": -68.3634, "address": "Carretera Coral, Punta Cana 23000"},
         "available": True
     }
 ]
@@ -709,7 +887,15 @@ async def seed_data():
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
         logger.info("Admin password updated")
     
-    # Seed cars
+    # Seed locations
+    loc_count = await db.locations.count_documents({})
+    if loc_count == 0:
+        for loc in SEED_LOCATIONS:
+            loc["created_at"] = datetime.now(timezone.utc)
+            await db.locations.insert_one(loc)
+        logger.info(f"Seeded {len(SEED_LOCATIONS)} locations")
+    
+    # Seed cars - drop old and reseed with new locations
     car_count = await db.cars.count_documents({})
     if car_count == 0:
         for car in SEED_CARS:
@@ -723,6 +909,7 @@ async def seed_data():
     await db.cars.create_index("category")
     await db.bookings.create_index("user_id")
     await db.payment_transactions.create_index("session_id")
+    await db.locations.create_index("city")
     
     # Write test credentials
     creds_path = Path("/app/memory/test_credentials.md")
@@ -741,6 +928,12 @@ async def seed_data():
 - POST /api/auth/logout
 - POST /api/auth/refresh
 - POST /api/auth/google/session
+
+## Location Endpoints
+- GET /api/locations
+- POST /api/locations (admin)
+- PUT /api/locations/{{id}} (admin)
+- DELETE /api/locations/{{id}} (admin)
 """)
 
 @app.on_event("startup")

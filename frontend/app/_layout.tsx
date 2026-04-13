@@ -117,6 +117,7 @@ export default function RootLayout() {
         <Stack.Screen name="booking-success" options={{ headerShown: false }} />
         <Stack.Screen name="map-view" options={{ headerShown: false }} />
         <Stack.Screen name="admin" options={{ headerShown: false }} />
+        <Stack.Screen name="admin-locations" options={{ headerShown: false }} />
       </Stack>
     </AuthContext.Provider>
   );
