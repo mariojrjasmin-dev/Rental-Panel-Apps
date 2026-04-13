@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DatePickerField from '../components/DatePickerField';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -15,16 +16,61 @@ export default function BookingScreen() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('cash');
   const router = useRouter();
 
-  // Default dates: tomorrow pickup, day after dropoff
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const dayAfter = new Date();
-  dayAfter.setDate(dayAfter.getDate() + 3);
+  // Default dates: tomorrow pickup, 3 days later dropoff
+  const [pickupDate, setPickupDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const [dropoffDate, setDropoffDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 4);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
 
-  const [pickupDate] = useState(tomorrow.toISOString().split('T')[0]);
-  const [dropoffDate] = useState(dayAfter.toISOString().split('T')[0]);
+  // Minimum dates
+  const minPickup = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
 
-  const days = Math.max(1, Math.ceil((dayAfter.getTime() - tomorrow.getTime()) / (1000 * 60 * 60 * 24)));
+  const minDropoff = useMemo(() => {
+    const d = new Date(pickupDate);
+    d.setDate(d.getDate() + 1);
+    return d;
+  }, [pickupDate]);
+
+  // Calculate days and total dynamically
+  const days = useMemo(() => {
+    const diff = dropoffDate.getTime() - pickupDate.getTime();
+    return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }, [pickupDate, dropoffDate]);
+
+  const total = useMemo(() => {
+    if (!car) return '0.00';
+    return (days * car.price_per_day).toFixed(2);
+  }, [days, car]);
+
+  // When pickup changes, ensure dropoff is after pickup
+  const handlePickupChange = (newDate: Date) => {
+    setPickupDate(newDate);
+    const nextDay = new Date(newDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+    if (dropoffDate <= newDate) {
+      setDropoffDate(nextDay);
+    }
+  };
+
+  const handleDropoffChange = (newDate: Date) => {
+    if (newDate <= pickupDate) {
+      Alert.alert('Invalid Date', 'Drop-off date must be after pickup date');
+      return;
+    }
+    setDropoffDate(newDate);
+  };
 
   useEffect(() => {
     const fetchCar = async () => {
@@ -42,13 +88,16 @@ export default function BookingScreen() {
     setBooking(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
+      const pickupStr = pickupDate.toISOString().split('T')[0];
+      const dropoffStr = dropoffDate.toISOString().split('T')[0];
+
       const res = await fetch(`${BACKEND_URL}/api/bookings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           car_id: carId,
-          pickup_date: pickupDate,
-          dropoff_date: dropoffDate,
+          pickup_date: pickupStr,
+          dropoff_date: dropoffStr,
           pickup_location: car.pickup_location || { name: 'TBD', lat: 0, lng: 0 },
           dropoff_location: car.dropoff_location || { name: 'TBD', lat: 0, lng: 0 },
           payment_method: paymentMethod,
@@ -65,7 +114,6 @@ export default function BookingScreen() {
       const bookingData = await res.json();
 
       if (paymentMethod === 'stripe') {
-        // Create Stripe checkout
         const originUrl = typeof window !== 'undefined' ? window.location.origin : BACKEND_URL;
         const checkoutRes = await fetch(`${BACKEND_URL}/api/payments/checkout`, {
           method: 'POST',
@@ -95,10 +143,8 @@ export default function BookingScreen() {
   }
 
   if (!car) {
-    return <SafeAreaView style={styles.center}><Text>Car not found</Text></SafeAreaView>;
+    return <SafeAreaView style={styles.center}><Text style={{ fontSize: 16, color: '#666' }}>Car not found</Text></SafeAreaView>;
   }
-
-  const total = (days * car.price_per_day).toFixed(2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -121,22 +167,25 @@ export default function BookingScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Rental Period</Text>
-          <View style={styles.dateCards}>
-            <View style={styles.dateCard}>
-              <Ionicons name="calendar-outline" size={20} color="#34C759" />
-              <View>
-                <Text style={styles.dateLabel}>PICK UP</Text>
-                <Text style={styles.dateValue}>{new Date(pickupDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
-              </View>
+          <View style={styles.datePickerGroup}>
+            <DatePickerField
+              date={pickupDate}
+              onDateChange={handlePickupChange}
+              minimumDate={minPickup}
+              label="Pick Up"
+              accentColor="#34C759"
+            />
+            <View style={styles.dateArrow}>
+              <Ionicons name="arrow-down" size={20} color="#999" />
+              <Text style={styles.daysLabel}>{days} day{days !== 1 ? 's' : ''}</Text>
             </View>
-            <View style={styles.dateSep}><Ionicons name="arrow-forward" size={16} color="#999" /></View>
-            <View style={styles.dateCard}>
-              <Ionicons name="calendar-outline" size={20} color="#FF3B30" />
-              <View>
-                <Text style={styles.dateLabel}>DROP OFF</Text>
-                <Text style={styles.dateValue}>{new Date(dropoffDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
-              </View>
-            </View>
+            <DatePickerField
+              date={dropoffDate}
+              onDateChange={handleDropoffChange}
+              minimumDate={minDropoff}
+              label="Drop Off"
+              accentColor="#FF3B30"
+            />
           </View>
         </View>
 
@@ -197,7 +246,15 @@ export default function BookingScreen() {
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Duration</Text>
-            <Text style={styles.summaryValue}>{days} day{days > 1 ? 's' : ''}</Text>
+            <Text style={styles.summaryValue}>{days} day{days !== 1 ? 's' : ''}</Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Pickup</Text>
+            <Text style={styles.summaryValue}>{pickupDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Drop-off</Text>
+            <Text style={styles.summaryValue}>{dropoffDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
           </View>
           <View style={[styles.summaryRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>Total</Text>
@@ -241,11 +298,9 @@ const styles = StyleSheet.create({
   priceUnit: { fontSize: 13, fontWeight: '400', color: '#999' },
   section: { marginBottom: 24 },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: '#0A0A0A', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
-  dateCards: { flexDirection: 'row', alignItems: 'center' },
-  dateCard: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F5F5F5', padding: 14, borderRadius: 14 },
-  dateSep: { marginHorizontal: 8 },
-  dateLabel: { fontSize: 10, color: '#999', fontWeight: '700', letterSpacing: 0.5 },
-  dateValue: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
+  datePickerGroup: { gap: 8 },
+  dateArrow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 4 },
+  daysLabel: { fontSize: 13, fontWeight: '700', color: '#999' },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F0F8FF', padding: 16, borderRadius: 14 },
   locationText: { flex: 1, fontSize: 15, fontWeight: '600', color: '#007AFF' },
   paymentOptions: { flexDirection: 'row', gap: 12 },
