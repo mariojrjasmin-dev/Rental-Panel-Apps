@@ -3,6 +3,7 @@ from pathlib import Path as _Path
 load_dotenv(_Path(__file__).parent / '.env')
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
@@ -747,6 +748,62 @@ async def get_cars_by_location(location_id: str):
     }).to_list(100)
     return [serialize_car(c) for c in cars]
 
+# ==================== IMAGE UPLOAD ====================
+
+import base64
+
+UPLOAD_DIR = _Path(__file__).parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+class ImageUpload(BaseModel):
+    image_data: str  # base64 encoded image
+    filename: Optional[str] = None
+
+@api_router.post("/upload/image")
+async def upload_image(data: ImageUpload, request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    try:
+        # Handle data URL format (data:image/jpeg;base64,...)
+        image_str = data.image_data
+        if "," in image_str:
+            image_str = image_str.split(",", 1)[1]
+        
+        image_bytes = base64.b64decode(image_str)
+        
+        # Generate unique filename
+        ext = "jpg"
+        if data.filename:
+            ext = data.filename.rsplit(".", 1)[-1].lower() if "." in data.filename else "jpg"
+        if ext not in ["jpg", "jpeg", "png", "webp"]:
+            ext = "jpg"
+        
+        fname = f"{uuid.uuid4().hex[:12]}.{ext}"
+        filepath = UPLOAD_DIR / fname
+        filepath.write_bytes(image_bytes)
+        
+        # Return the URL - use public URL from env or construct from request headers
+        frontend_url = os.environ.get("FRONTEND_URL", "")
+        if frontend_url:
+            base_url = frontend_url.rstrip("/")
+        else:
+            # Try to get from X-Forwarded-Host header (set by ingress)
+            forwarded_host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host")
+            forwarded_proto = request.headers.get("X-Forwarded-Proto", "https")
+            if forwarded_host:
+                base_url = f"{forwarded_proto}://{forwarded_host}"
+            else:
+                base_url = str(request.base_url).rstrip("/")
+        
+        image_url = f"{base_url}/api/uploads/{fname}"
+        
+        return {"url": image_url, "filename": fname}
+    except Exception as e:
+        logger.error(f"Image upload error: {e}")
+        raise HTTPException(status_code=400, detail=f"Upload failed: {str(e)}")
+
 # ==================== REVIEW ROUTES ====================
 
 def serialize_review(rev):
@@ -1064,6 +1121,9 @@ async def shutdown():
 
 # Include router
 app.include_router(api_router)
+
+# Serve uploaded images
+app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,

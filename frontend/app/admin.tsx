@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, TextInput, Modal, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, TextInput, Modal, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Image, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from './_layout';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
@@ -16,6 +17,8 @@ const EMPTY_CAR = {
   available: true,
 };
 
+const CATEGORIES = ['Sedan', 'SUV', 'Luxury', 'Electric', 'Sports', 'Compact'];
+
 export default function AdminScreen() {
   const [cars, setCars] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +27,7 @@ export default function AdminScreen() {
   const [form, setForm] = useState({ ...EMPTY_CAR });
   const [saving, setSaving] = useState(false);
   const [stats, setStats] = useState<any>(null);
+  const [uploading, setUploading] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
 
@@ -57,9 +61,108 @@ export default function AdminScreen() {
     setShowModal(true);
   };
 
+  const pickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        const msg = 'Permission to access photos is required';
+        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Permission needed', msg);
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        
+        if (asset.base64) {
+          setUploading(true);
+          try {
+            const token = await AsyncStorage.getItem('auth_token');
+            const ext = asset.uri?.split('.').pop() || 'jpg';
+            const res = await fetch(`${BACKEND_URL}/api/upload/image`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({
+                image_data: asset.base64,
+                filename: `car_${Date.now()}.${ext}`,
+              }),
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              setForm(prev => ({ ...prev, image_url: data.url }));
+            } else {
+              const err = await res.json();
+              const msg = typeof err.detail === 'string' ? err.detail : 'Upload failed';
+              Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+            }
+          } catch (e: any) {
+            Platform.OS === 'web' ? window.alert(e.message) : Alert.alert('Error', e.message);
+          }
+          setUploading(false);
+        }
+      }
+    } catch (e: any) {
+      console.log('Image picker error:', e);
+    }
+  };
+
+  const takePhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        const msg = 'Permission to access camera is required';
+        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Permission needed', msg);
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        if (asset.base64) {
+          setUploading(true);
+          try {
+            const token = await AsyncStorage.getItem('auth_token');
+            const res = await fetch(`${BACKEND_URL}/api/upload/image`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({
+                image_data: asset.base64,
+                filename: `car_${Date.now()}.jpg`,
+              }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              setForm(prev => ({ ...prev, image_url: data.url }));
+            }
+          } catch (e: any) {
+            console.log('Upload error:', e);
+          }
+          setUploading(false);
+        }
+      }
+    } catch (e: any) {
+      console.log('Camera error:', e);
+    }
+  };
+
   const saveCar = async () => {
     if (!form.name || !form.brand || !form.price_per_day) {
-      Alert.alert('Error', 'Name, brand, and price are required');
+      const msg = 'Name, brand, and price are required';
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
       return;
     }
     setSaving(true);
@@ -76,27 +179,33 @@ export default function AdminScreen() {
         fetchData();
       } else {
         const err = await res.json();
-        Alert.alert('Error', typeof err.detail === 'string' ? err.detail : 'Save failed');
+        const msg = typeof err.detail === 'string' ? err.detail : 'Save failed';
+        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
       }
-    } catch (e: any) { Alert.alert('Error', e.message); }
+    } catch (e: any) {
+      Platform.OS === 'web' ? window.alert(e.message) : Alert.alert('Error', e.message);
+    }
     setSaving(false);
   };
 
   const deleteCar = (car: any) => {
-    Alert.alert('Delete Car', `Delete ${car.name}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        const token = await AsyncStorage.getItem('auth_token');
-        await fetch(`${BACKEND_URL}/api/cars/${car.id}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        fetchData();
-      }},
-    ]);
+    const doDelete = async () => {
+      const token = await AsyncStorage.getItem('auth_token');
+      await fetch(`${BACKEND_URL}/api/cars/${car.id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      fetchData();
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Delete ${car.name}?`)) doDelete();
+    } else {
+      Alert.alert('Delete Car', `Delete ${car.name}?`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: doDelete },
+      ]);
+    }
   };
-
-  const CATEGORIES = ['Sedan', 'SUV', 'Luxury', 'Electric', 'Sports', 'Compact'];
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -129,6 +238,13 @@ export default function AdminScreen() {
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
             <View style={styles.carRow}>
+              {item.image_url ? (
+                <Image source={{ uri: item.image_url }} style={styles.carThumb} resizeMode="cover" />
+              ) : (
+                <View style={[styles.carThumb, styles.carThumbPlaceholder]}>
+                  <Ionicons name="car-outline" size={20} color="#999" />
+                </View>
+              )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.carName}>{item.name}</Text>
                 <Text style={styles.carSub}>{item.category} - ${item.price_per_day}/day</Text>
@@ -156,6 +272,71 @@ export default function AdminScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled">
+              {/* Image upload section */}
+              <Text style={styles.label}>Car Photo</Text>
+              <View style={styles.imageSection}>
+                {form.image_url ? (
+                  <View style={styles.imagePreviewWrap}>
+                    <Image source={{ uri: form.image_url }} style={styles.imagePreview} resizeMode="cover" />
+                    <Pressable
+                      testID="remove-image-btn"
+                      style={styles.removeImageBtn}
+                      onPress={() => setForm({ ...form, image_url: '' })}
+                      // @ts-ignore
+                      onClick={() => setForm({ ...form, image_url: '' })}
+                    >
+                      <Ionicons name="close-circle" size={28} color="#FF3B30" />
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.imagePlaceholder}>
+                    <Ionicons name="image-outline" size={40} color="#CCC" />
+                    <Text style={styles.imagePlaceholderText}>No image selected</Text>
+                  </View>
+                )}
+
+                <View style={styles.imageActions}>
+                  <Pressable
+                    testID="pick-image-btn"
+                    style={styles.imageActionBtn}
+                    onPress={pickImage}
+                    // @ts-ignore
+                    onClick={pickImage}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator color="#FF3B30" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="images-outline" size={20} color="#FF3B30" />
+                        <Text style={styles.imageActionText}>Gallery</Text>
+                      </>
+                    )}
+                  </Pressable>
+
+                  {Platform.OS !== 'web' && (
+                    <Pressable
+                      testID="take-photo-btn"
+                      style={styles.imageActionBtn}
+                      onPress={takePhoto}
+                      disabled={uploading}
+                    >
+                      <Ionicons name="camera-outline" size={20} color="#FF3B30" />
+                      <Text style={styles.imageActionText}>Camera</Text>
+                    </Pressable>
+                  )}
+                </View>
+
+                <Text style={[styles.label, { marginTop: 8 }]}>Or paste URL</Text>
+                <TextInput
+                  testID="car-image-input"
+                  style={styles.input}
+                  value={form.image_url}
+                  onChangeText={(v) => setForm({ ...form, image_url: v })}
+                  placeholder="https://..."
+                />
+              </View>
+
               <Text style={styles.label}>Name</Text>
               <TextInput testID="car-name-input" style={styles.input} value={form.name} onChangeText={(v) => setForm({ ...form, name: v })} placeholder="e.g. Tesla Model 3" />
               
@@ -182,9 +363,6 @@ export default function AdminScreen() {
               
               <Text style={styles.label}>Seats</Text>
               <TextInput style={styles.input} value={String(form.seats)} onChangeText={(v) => setForm({ ...form, seats: parseInt(v) || 5 })} keyboardType="numeric" />
-              
-              <Text style={styles.label}>Image URL</Text>
-              <TextInput testID="car-image-input" style={styles.input} value={form.image_url} onChangeText={(v) => setForm({ ...form, image_url: v })} placeholder="https://..." />
 
               <Text style={styles.label}>Description</Text>
               <TextInput style={[styles.input, { height: 80 }]} value={form.description} onChangeText={(v) => setForm({ ...form, description: v })} multiline placeholder="Brief description..." />
@@ -212,18 +390,30 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 11, color: '#999', fontWeight: '600', textTransform: 'uppercase', marginTop: 2 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list: { paddingHorizontal: 16 },
-  carRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  carRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', gap: 12 },
+  carThumb: { width: 56, height: 42, borderRadius: 10, backgroundColor: '#F5F5F5' },
+  carThumbPlaceholder: { justifyContent: 'center', alignItems: 'center' },
   carName: { fontSize: 16, fontWeight: '700', color: '#0A0A0A' },
   carSub: { fontSize: 13, color: '#666', marginTop: 2 },
   carActions: { flexDirection: 'row', gap: 8 },
   actionBtn: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
+  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#E5E5E5' },
   modalTitle: { fontSize: 20, fontWeight: '800', color: '#0A0A0A' },
   modalScroll: { padding: 20 },
   label: { fontSize: 13, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 12 },
   input: { backgroundColor: '#F5F5F5', borderRadius: 12, padding: 14, fontSize: 16, color: '#0A0A0A', borderWidth: 1, borderColor: '#E5E5E5' },
+  // Image section
+  imageSection: { gap: 8 },
+  imagePreviewWrap: { position: 'relative', borderRadius: 16, overflow: 'hidden' },
+  imagePreview: { width: '100%', height: 180, borderRadius: 16, backgroundColor: '#F5F5F5' },
+  removeImageBtn: { position: 'absolute', top: 8, right: 8, backgroundColor: '#FFF', borderRadius: 14, cursor: 'pointer' as any },
+  imagePlaceholder: { width: '100%', height: 140, borderRadius: 16, backgroundColor: '#F5F5F5', borderWidth: 2, borderColor: '#E5E5E5', borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center', gap: 8 },
+  imagePlaceholderText: { fontSize: 14, color: '#999' },
+  imageActions: { flexDirection: 'row', gap: 10 },
+  imageActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: '#FFF0F0', cursor: 'pointer' as any },
+  imageActionText: { fontSize: 15, fontWeight: '700', color: '#FF3B30' },
   catRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   catPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 50, backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E5E5E5' },
   catPillActive: { backgroundColor: '#0A0A0A', borderColor: '#0A0A0A' },

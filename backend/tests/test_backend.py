@@ -1,10 +1,11 @@
 """
 Backend API Tests for Dams Car Rental
-Tests: Auth (register, login, me), Cars (list, detail, admin CRUD), Bookings, Admin Stats, Locations (list, CRUD, city filter)
+Tests: Auth (register, login, me), Cars (list, detail, admin CRUD), Bookings, Admin Stats, Locations (list, CRUD, city filter), Image Upload
 """
 import pytest
 import requests
 import os
+import base64
 
 BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
@@ -1083,3 +1084,209 @@ class TestReviews:
         # Cleanup
         api_client.delete(f"{BASE_URL}/api/reviews/{review_id}", headers={"Authorization": f"Bearer {token}"})
         print(f"✓ GET /api/cars/{car_id} includes reviews array: {len(car['reviews'])} reviews")
+
+# ==================== IMAGE UPLOAD TESTS ====================
+
+class TestImageUpload:
+    """Image upload endpoint tests"""
+
+    def test_upload_image_admin_success(self, api_client, admin_token):
+        """Test POST /api/upload/image (admin only) - Upload and verify"""
+        # Create a small test image (1x1 red pixel PNG)
+        test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        
+        upload_data = {
+            "image_data": test_image_base64,
+            "filename": "test_car.png"
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/upload/image",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=upload_data
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert "url" in data, "Response should include url"
+        assert "filename" in data, "Response should include filename"
+        assert "/api/uploads/" in data["url"], "URL should contain /api/uploads/"
+        assert data["filename"].endswith(".png"), "Filename should have .png extension"
+        
+        # Verify the uploaded image is accessible (use fresh session for static files)
+        image_url = data["url"]
+        import requests
+        get_response = requests.get(image_url)
+        assert get_response.status_code == 200, f"Uploaded image should be accessible, got {get_response.status_code}"
+        assert len(get_response.content) > 0, "Image content should not be empty"
+        
+        print(f"✓ POST /api/upload/image success: {data['url']}")
+
+    def test_upload_image_with_data_url_format(self, api_client, admin_token):
+        """Test POST /api/upload/image with data URL format (data:image/png;base64,...)"""
+        test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        
+        # Test with data URL format
+        upload_data = {
+            "image_data": f"data:image/png;base64,{test_image_base64}",
+            "filename": "test_car_dataurl.png"
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/upload/image",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=upload_data
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert "url" in data, "Response should include url"
+        print(f"✓ Data URL format upload success: {data['url']}")
+
+    def test_upload_image_unauthenticated(self, api_client):
+        """Test POST /api/upload/image without auth (should fail)"""
+        test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        
+        upload_data = {
+            "image_data": test_image_base64,
+            "filename": "test.png"
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/upload/image", json=upload_data)
+        assert response.status_code == 401, f"Expected 401, got {response.status_code}"
+        print("✓ Unauthenticated upload rejected with 401")
+
+    def test_upload_image_non_admin(self, api_client, test_user_token):
+        """Test POST /api/upload/image as non-admin (should fail)"""
+        token, _ = test_user_token
+        test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        
+        upload_data = {
+            "image_data": test_image_base64,
+            "filename": "test.png"
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/upload/image",
+            headers={"Authorization": f"Bearer {token}"},
+            json=upload_data
+        )
+        assert response.status_code == 403, f"Expected 403, got {response.status_code}"
+        print("✓ Non-admin upload rejected with 403")
+
+    def test_upload_image_invalid_base64(self, api_client, admin_token):
+        """Test POST /api/upload/image with invalid base64 data"""
+        upload_data = {
+            "image_data": "not-valid-base64!!!",
+            "filename": "test.png"
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/upload/image",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=upload_data
+        )
+        assert response.status_code == 400, f"Expected 400 for invalid base64, got {response.status_code}"
+        print("✓ Invalid base64 rejected with 400")
+
+    def test_upload_image_different_extensions(self, api_client, admin_token):
+        """Test POST /api/upload/image with different file extensions (jpg, jpeg, png, webp)"""
+        test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        
+        extensions = ["jpg", "jpeg", "png", "webp"]
+        for ext in extensions:
+            upload_data = {
+                "image_data": test_image_base64,
+                "filename": f"test_car.{ext}"
+            }
+            
+            response = api_client.post(f"{BASE_URL}/api/upload/image",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json=upload_data
+            )
+            assert response.status_code == 200, f"Expected 200 for .{ext}, got {response.status_code}: {response.text}"
+            
+            data = response.json()
+            assert data["filename"].endswith(f".{ext}"), f"Filename should have .{ext} extension"
+        
+        print(f"✓ All extensions supported: {', '.join(extensions)}")
+
+    def test_static_file_serving(self, api_client, admin_token):
+        """Test GET /api/uploads/{filename} - Static file serving"""
+        # First upload an image
+        test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        
+        upload_data = {
+            "image_data": test_image_base64,
+            "filename": "test_static.png"
+        }
+        
+        upload_response = api_client.post(f"{BASE_URL}/api/upload/image",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=upload_data
+        )
+        assert upload_response.status_code == 200, "Upload should succeed"
+        
+        uploaded_url = upload_response.json()["url"]
+        
+        # Test static file serving (no auth required, use fresh session)
+        import requests
+        get_response = requests.get(uploaded_url)
+        assert get_response.status_code == 200, f"Expected 200 for static file, got {get_response.status_code}"
+        assert len(get_response.content) > 0, "Static file content should not be empty"
+        
+        # Verify content type header
+        content_type = get_response.headers.get("content-type", "")
+        assert "image" in content_type.lower() or "octet-stream" in content_type.lower(), f"Content-Type should be image, got {content_type}"
+        
+        print(f"✓ Static file serving works: {uploaded_url}")
+
+    def test_car_with_uploaded_image(self, api_client, admin_token):
+        """Test full flow: Upload image → Create car with image URL → Verify car has image"""
+        # Upload image
+        test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        
+        upload_data = {
+            "image_data": test_image_base64,
+            "filename": "test_car_full_flow.png"
+        }
+        
+        upload_response = api_client.post(f"{BASE_URL}/api/upload/image",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=upload_data
+        )
+        assert upload_response.status_code == 200, "Upload should succeed"
+        image_url = upload_response.json()["url"]
+        
+        # Create car with uploaded image
+        car_data = {
+            "name": "TEST_Car with Uploaded Image",
+            "brand": "Test",
+            "model": "Upload",
+            "year": 2024,
+            "category": "Sedan",
+            "price_per_day": 50.00,
+            "seats": 5,
+            "transmission": "Automatic",
+            "fuel_type": "Gasoline",
+            "image_url": image_url,
+            "available": True
+        }
+        
+        car_response = api_client.post(f"{BASE_URL}/api/cars",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json=car_data
+        )
+        assert car_response.status_code == 200, f"Car creation should succeed, got {car_response.status_code}: {car_response.text}"
+        
+        created_car = car_response.json()
+        assert created_car["image_url"] == image_url, "Car should have uploaded image URL"
+        car_id = created_car["id"]
+        
+        # Verify car retrieval includes image URL
+        get_car_response = api_client.get(f"{BASE_URL}/api/cars/{car_id}")
+        assert get_car_response.status_code == 200, "Car retrieval should succeed"
+        retrieved_car = get_car_response.json()
+        assert retrieved_car["image_url"] == image_url, "Retrieved car should have image URL"
+        
+        # Cleanup
+        api_client.delete(f"{BASE_URL}/api/cars/{car_id}", headers={"Authorization": f"Bearer {admin_token}"})
+        
+        print(f"✓ Full flow works: Upload → Create car → Verify image URL: {image_url}")
+
