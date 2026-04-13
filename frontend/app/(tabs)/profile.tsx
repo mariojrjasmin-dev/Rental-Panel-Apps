@@ -1,4 +1,5 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
+import { useState, useCallback } from 'react';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,28 +8,31 @@ import { useAuth } from '../_layout';
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
-  const doLogout = async () => {
-    await logout();
-    router.replace('/(auth)/login');
-  };
-
-  const handleLogout = () => {
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm('Are you sure you want to logout?')) {
-        doLogout();
-      }
-    } else {
-      Alert.alert('Logout', 'Are you sure you want to logout?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: doLogout },
-      ]);
+  const doLogout = useCallback(async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+      router.replace('/(auth)/login');
+    } catch (e) {
+      console.log('Logout error:', e);
+      setLoggingOut(false);
     }
-  };
+  }, [logout, router]);
+
+  const showConfirm = useCallback(() => {
+    setConfirmLogout(true);
+  }, []);
+
+  const hideConfirm = useCallback(() => {
+    setConfirmLogout(false);
+  }, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <View style={styles.content}>
         <Text style={styles.title}>Profile</Text>
 
         <View style={styles.profileCard}>
@@ -46,41 +50,68 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.menuSection}>
-          <TouchableOpacity testID="my-bookings-btn" style={styles.menuItem} onPress={() => router.push('/(tabs)/bookings')} activeOpacity={0.7}>
+          <Pressable testID="my-bookings-btn" style={styles.menuItem} onPress={() => router.push('/(tabs)/bookings')}>
             <View style={styles.menuIcon}><Ionicons name="calendar-outline" size={22} color="#0A0A0A" /></View>
             <Text style={styles.menuText}>My Bookings</Text>
             <Ionicons name="chevron-forward" size={20} color="#999" />
-          </TouchableOpacity>
+          </Pressable>
 
           {user?.role === 'admin' && (
-            <TouchableOpacity testID="admin-panel-btn" style={styles.menuItem} onPress={() => router.push('/admin')} activeOpacity={0.7}>
+            <Pressable testID="admin-panel-btn" style={styles.menuItem} onPress={() => router.push('/admin')}>
               <View style={[styles.menuIcon, { backgroundColor: '#FFF0F0' }]}><Ionicons name="settings-outline" size={22} color="#FF3B30" /></View>
               <Text style={styles.menuText}>Admin Panel</Text>
               <Ionicons name="chevron-forward" size={20} color="#999" />
-            </TouchableOpacity>
+            </Pressable>
           )}
 
           {user?.role === 'admin' && (
-            <TouchableOpacity testID="admin-locations-btn" style={styles.menuItem} onPress={() => router.push('/admin-locations')} activeOpacity={0.7}>
+            <Pressable testID="admin-locations-btn" style={styles.menuItem} onPress={() => router.push('/admin-locations')}>
               <View style={[styles.menuIcon, { backgroundColor: '#F0F8FF' }]}><Ionicons name="location-outline" size={22} color="#007AFF" /></View>
               <Text style={styles.menuText}>Manage Locations</Text>
               <Ionicons name="chevron-forward" size={20} color="#999" />
-            </TouchableOpacity>
+            </Pressable>
           )}
         </View>
 
-        <TouchableOpacity testID="logout-button" style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.7}>
-          <Ionicons name="log-out-outline" size={22} color="#FF3B30" />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        <View style={styles.logoutArea}>
+          {!confirmLogout ? (
+            <Pressable
+              testID="logout-button"
+              style={styles.logoutBtn}
+              onPress={showConfirm}
+              // @ts-ignore - onClick needed for web
+              onClick={showConfirm}
+              accessibilityRole="button"
+            >
+              <Ionicons name="log-out-outline" size={22} color="#FF3B30" />
+              <Text style={styles.logoutText}>Logout</Text>
+            </Pressable>
+          ) : (
+            <View testID="logout-confirm-section" style={styles.confirmSection}>
+              <Text style={styles.confirmText}>Are you sure you want to logout?</Text>
+              <View style={styles.confirmActions}>
+                <Pressable testID="logout-cancel-btn" style={styles.cancelBtn} onPress={hideConfirm} disabled={loggingOut} accessibilityRole="button"
+                  // @ts-ignore
+                  onClick={hideConfirm}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable testID="logout-confirm-btn" style={styles.confirmBtn} onPress={doLogout} disabled={loggingOut} accessibilityRole="button"
+                  // @ts-ignore
+                  onClick={loggingOut ? undefined : doLogout}>
+                  {loggingOut ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.confirmBtnText}>Yes, Logout</Text>}
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-  scroll: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 40 },
+  content: { flex: 1, paddingHorizontal: 24, paddingTop: 8 },
   title: { fontSize: 28, fontWeight: '900', color: '#0A0A0A', letterSpacing: -0.5, marginBottom: 24 },
   profileCard: { alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 24, padding: 32, marginBottom: 24 },
   avatarCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
@@ -88,10 +119,18 @@ const styles = StyleSheet.create({
   userEmail: { fontSize: 14, color: '#666', marginTop: 4 },
   adminBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, backgroundColor: '#FFF0F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 50 },
   adminText: { fontSize: 13, fontWeight: '700', color: '#FF3B30' },
-  menuSection: { gap: 4, marginBottom: 32 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  menuSection: { gap: 4, marginBottom: 24 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', cursor: 'pointer' as any },
   menuIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   menuText: { flex: 1, fontSize: 16, fontWeight: '600', color: '#0A0A0A' },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 16, borderWidth: 1.5, borderColor: '#FF3B30' },
+  logoutArea: { marginTop: 'auto' as any, paddingBottom: 40 },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 16, borderWidth: 1.5, borderColor: '#FF3B30', cursor: 'pointer' as any },
   logoutText: { fontSize: 16, fontWeight: '700', color: '#FF3B30' },
+  confirmSection: { backgroundColor: '#FFF0F0', borderRadius: 16, padding: 20, alignItems: 'center', gap: 16 },
+  confirmText: { fontSize: 16, fontWeight: '700', color: '#0A0A0A', textAlign: 'center' },
+  confirmActions: { flexDirection: 'row', gap: 12, width: '100%' },
+  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 50, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' as any },
+  cancelBtnText: { fontSize: 16, fontWeight: '700', color: '#666' },
+  confirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 50, backgroundColor: '#FF3B30', alignItems: 'center', justifyContent: 'center', minHeight: 48, cursor: 'pointer' as any },
+  confirmBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
 });
