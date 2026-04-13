@@ -702,3 +702,384 @@ class TestLocations:
         )
         assert response.status_code == 403, f"Expected 403, got {response.status_code}"
         print("✓ Non-admin blocked from POST /api/locations")
+
+# ==================== REVIEW TESTS ====================
+
+class TestReviews:
+    """Review endpoint tests"""
+
+    def test_create_review_authenticated(self, api_client, test_user_token):
+        """Test POST /api/reviews - Create review and verify"""
+        token, email = test_user_token
+        
+        # Get a car first
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        cars = cars_response.json()
+        assert len(cars) > 0, "Need at least one car"
+        car_id = cars[0]["id"]
+        
+        review_data = {
+            "car_id": car_id,
+            "rating": 5,
+            "comment": "TEST_Excellent car! Very comfortable and clean."
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_data
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        created_review = response.json()
+        assert "id" in created_review, "Review should have id"
+        assert created_review["car_id"] == car_id, "Car ID should match"
+        assert created_review["rating"] == 5, "Rating should match"
+        assert created_review["comment"] == review_data["comment"], "Comment should match"
+        review_id = created_review["id"]
+        
+        # Verify review appears in GET /api/reviews/{car_id}
+        get_response = api_client.get(f"{BASE_URL}/api/reviews/{car_id}")
+        assert get_response.status_code == 200, "Should be able to get reviews"
+        reviews = get_response.json()
+        assert len(reviews) > 0, "Should have at least one review"
+        assert any(r["id"] == review_id for r in reviews), "Created review should be in list"
+        
+        # Cleanup
+        api_client.delete(f"{BASE_URL}/api/reviews/{review_id}", headers={"Authorization": f"Bearer {token}"})
+        print(f"✓ POST /api/reviews success and verified: {review_id}")
+
+    def test_create_review_upsert(self, api_client, test_user_token):
+        """Test POST /api/reviews - Duplicate from same user updates existing (upsert)"""
+        token, email = test_user_token
+        
+        # Get a car
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        cars = cars_response.json()
+        car_id = cars[0]["id"]
+        
+        # Create first review
+        review_data_1 = {
+            "car_id": car_id,
+            "rating": 3,
+            "comment": "TEST_First review - okay car"
+        }
+        response_1 = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_data_1
+        )
+        assert response_1.status_code == 200, "First review should succeed"
+        review_1 = response_1.json()
+        review_id_1 = review_1["id"]
+        
+        # Create second review for same car by same user (should update)
+        review_data_2 = {
+            "car_id": car_id,
+            "rating": 5,
+            "comment": "TEST_Updated review - actually great car!"
+        }
+        response_2 = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_data_2
+        )
+        assert response_2.status_code == 200, "Second review should succeed (upsert)"
+        review_2 = response_2.json()
+        
+        # Should be same review ID (updated, not new)
+        assert review_2["id"] == review_id_1, "Should update existing review, not create new one"
+        assert review_2["rating"] == 5, "Rating should be updated to 5"
+        assert review_2["comment"] == review_data_2["comment"], "Comment should be updated"
+        
+        # Verify only one review exists for this user+car
+        get_response = api_client.get(f"{BASE_URL}/api/reviews/{car_id}")
+        reviews = get_response.json()
+        user_reviews = [r for r in reviews if r["id"] == review_id_1]
+        assert len(user_reviews) == 1, "Should have exactly one review from this user"
+        
+        # Cleanup
+        api_client.delete(f"{BASE_URL}/api/reviews/{review_id_1}", headers={"Authorization": f"Bearer {token}"})
+        print(f"✓ Review upsert works: {review_id_1} updated instead of creating duplicate")
+
+    def test_get_reviews_for_car(self, api_client, test_user_token):
+        """Test GET /api/reviews/{car_id}"""
+        token, email = test_user_token
+        
+        # Get a car
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        cars = cars_response.json()
+        car_id = cars[0]["id"]
+        
+        # Create a review
+        review_data = {
+            "car_id": car_id,
+            "rating": 4,
+            "comment": "TEST_Good car for testing"
+        }
+        create_response = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_data
+        )
+        review_id = create_response.json()["id"]
+        
+        # Get reviews for car
+        response = api_client.get(f"{BASE_URL}/api/reviews/{car_id}")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        reviews = response.json()
+        assert isinstance(reviews, list), "Response should be a list"
+        assert len(reviews) > 0, "Should have at least one review"
+        
+        # Verify review structure
+        review = reviews[0]
+        assert "id" in review, "Review should have id"
+        assert "rating" in review, "Review should have rating"
+        assert "comment" in review, "Review should have comment"
+        assert "user_name" in review, "Review should have user_name"
+        assert "created_at" in review, "Review should have created_at"
+        assert "_id" not in review, "MongoDB _id should be excluded"
+        
+        # Cleanup
+        api_client.delete(f"{BASE_URL}/api/reviews/{review_id}", headers={"Authorization": f"Bearer {token}"})
+        print(f"✓ GET /api/reviews/{car_id} success: {len(reviews)} reviews")
+
+    def test_delete_own_review(self, api_client, test_user_token):
+        """Test DELETE /api/reviews/{review_id} - User can delete own review"""
+        token, email = test_user_token
+        
+        # Get a car and create review
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        car_id = cars_response.json()[0]["id"]
+        
+        review_data = {
+            "car_id": car_id,
+            "rating": 4,
+            "comment": "TEST_Review to delete"
+        }
+        create_response = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_data
+        )
+        review_id = create_response.json()["id"]
+        
+        # Delete review
+        response = api_client.delete(f"{BASE_URL}/api/reviews/{review_id}",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        # Verify deletion - review should not appear in car's reviews
+        get_response = api_client.get(f"{BASE_URL}/api/reviews/{car_id}")
+        reviews = get_response.json()
+        assert not any(r["id"] == review_id for r in reviews), "Deleted review should not appear in list"
+        print(f"✓ DELETE /api/reviews/{review_id} success (own review)")
+
+    def test_delete_review_admin(self, api_client, admin_token, test_user_token):
+        """Test DELETE /api/reviews/{review_id} - Admin can delete any review"""
+        user_token, email = test_user_token
+        
+        # User creates review
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        car_id = cars_response.json()[0]["id"]
+        
+        review_data = {
+            "car_id": car_id,
+            "rating": 3,
+            "comment": "TEST_User review to be deleted by admin"
+        }
+        create_response = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {user_token}"},
+            json=review_data
+        )
+        review_id = create_response.json()["id"]
+        
+        # Admin deletes user's review
+        response = api_client.delete(f"{BASE_URL}/api/reviews/{review_id}",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        # Verify deletion
+        get_response = api_client.get(f"{BASE_URL}/api/reviews/{car_id}")
+        reviews = get_response.json()
+        assert not any(r["id"] == review_id for r in reviews), "Admin-deleted review should not appear"
+        print(f"✓ Admin can delete any review: {review_id}")
+
+    def test_delete_review_unauthorized(self, test_user_token):
+        """Test DELETE /api/reviews/{review_id} - User cannot delete other's review"""
+        import requests
+        token_1, email_1 = test_user_token
+        
+        # Create second user with fresh session
+        import uuid
+        email_2 = f"test_{uuid.uuid4().hex[:8]}@test.com"
+        session_2 = requests.Session()
+        register_response = session_2.post(f"{BASE_URL}/api/auth/register", json={
+            "email": email_2,
+            "password": "Test@123",
+            "name": "Test User 2"
+        })
+        token_2 = register_response.json()["token"]
+        
+        # User 1 creates review
+        session_1 = requests.Session()
+        cars_response = session_1.get(f"{BASE_URL}/api/cars")
+        car_id = cars_response.json()[0]["id"]
+        
+        review_data = {
+            "car_id": car_id,
+            "rating": 4,
+            "comment": "TEST_User 1 review for auth test"
+        }
+        create_response = session_1.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token_1}", "Content-Type": "application/json"},
+            json=review_data
+        )
+        review_id = create_response.json()["id"]
+        
+        # User 2 tries to delete User 1's review with fresh session
+        response = session_2.delete(f"{BASE_URL}/api/reviews/{review_id}",
+            headers={"Authorization": f"Bearer {token_2}"}
+        )
+        assert response.status_code == 403, f"Expected 403, got {response.status_code}"
+        
+        # Cleanup
+        session_1.delete(f"{BASE_URL}/api/reviews/{review_id}", headers={"Authorization": f"Bearer {token_1}"})
+        print("✓ User cannot delete other user's review (403)")
+
+    def test_review_rating_validation_low(self, api_client, test_user_token):
+        """Test POST /api/reviews - Rating < 1 should fail"""
+        token, email = test_user_token
+        
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        car_id = cars_response.json()[0]["id"]
+        
+        review_data = {
+            "car_id": car_id,
+            "rating": 0,  # Invalid: too low
+            "comment": "TEST_Invalid rating"
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_data
+        )
+        assert response.status_code == 400, f"Expected 400 for rating < 1, got {response.status_code}"
+        print("✓ Rating < 1 rejected with 400")
+
+    def test_review_rating_validation_high(self, api_client, test_user_token):
+        """Test POST /api/reviews - Rating > 5 should fail"""
+        token, email = test_user_token
+        
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        car_id = cars_response.json()[0]["id"]
+        
+        review_data = {
+            "car_id": car_id,
+            "rating": 6,  # Invalid: too high
+            "comment": "TEST_Invalid rating"
+        }
+        
+        response = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_data
+        )
+        assert response.status_code == 400, f"Expected 400 for rating > 5, got {response.status_code}"
+        print("✓ Rating > 5 rejected with 400")
+
+    def test_cars_include_avg_rating_and_count(self, api_client, test_user_token):
+        """Test GET /api/cars includes avg_rating and review_count fields"""
+        token, email = test_user_token
+        
+        # Get a car
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        cars = cars_response.json()
+        car_id = cars[0]["id"]
+        
+        # Create two reviews with different ratings
+        review_1 = {
+            "car_id": car_id,
+            "rating": 4,
+            "comment": "TEST_Review 1"
+        }
+        response_1 = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_1
+        )
+        review_id_1 = response_1.json()["id"]
+        
+        # Create second user for second review
+        import uuid
+        email_2 = f"test_{uuid.uuid4().hex[:8]}@test.com"
+        register_response = api_client.post(f"{BASE_URL}/api/auth/register", json={
+            "email": email_2,
+            "password": "Test@123",
+            "name": "Test User 2"
+        })
+        token_2 = register_response.json()["token"]
+        
+        review_2 = {
+            "car_id": car_id,
+            "rating": 5,
+            "comment": "TEST_Review 2"
+        }
+        response_2 = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token_2}"},
+            json=review_2
+        )
+        review_id_2 = response_2.json()["id"]
+        
+        # Get cars again and verify avg_rating and review_count
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        cars = cars_response.json()
+        car = next((c for c in cars if c["id"] == car_id), None)
+        
+        assert car is not None, "Car should exist"
+        assert "avg_rating" in car, "Car should have avg_rating field"
+        assert "review_count" in car, "Car should have review_count field"
+        assert car["review_count"] >= 2, f"Should have at least 2 reviews, got {car['review_count']}"
+        # Average of 4 and 5 is 4.5
+        assert car["avg_rating"] >= 4.0, f"Average rating should be >= 4.0, got {car['avg_rating']}"
+        
+        # Cleanup
+        api_client.delete(f"{BASE_URL}/api/reviews/{review_id_1}", headers={"Authorization": f"Bearer {token}"})
+        api_client.delete(f"{BASE_URL}/api/reviews/{review_id_2}", headers={"Authorization": f"Bearer {token_2}"})
+        print(f"✓ GET /api/cars includes avg_rating ({car['avg_rating']}) and review_count ({car['review_count']})")
+
+    def test_car_detail_includes_reviews_array(self, api_client, test_user_token):
+        """Test GET /api/cars/{id} includes reviews array"""
+        token, email = test_user_token
+        
+        # Get a car
+        cars_response = api_client.get(f"{BASE_URL}/api/cars")
+        car_id = cars_response.json()[0]["id"]
+        
+        # Create a review
+        review_data = {
+            "car_id": car_id,
+            "rating": 5,
+            "comment": "TEST_Review for detail page"
+        }
+        create_response = api_client.post(f"{BASE_URL}/api/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json=review_data
+        )
+        review_id = create_response.json()["id"]
+        
+        # Get car detail
+        response = api_client.get(f"{BASE_URL}/api/cars/{car_id}")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        car = response.json()
+        assert "reviews" in car, "Car detail should include reviews array"
+        assert isinstance(car["reviews"], list), "Reviews should be a list"
+        assert len(car["reviews"]) > 0, "Should have at least one review"
+        
+        # Verify review structure
+        review = car["reviews"][0]
+        assert "id" in review, "Review should have id"
+        assert "rating" in review, "Review should have rating"
+        assert "comment" in review, "Review should have comment"
+        assert "user_name" in review, "Review should have user_name"
+        
+        # Cleanup
+        api_client.delete(f"{BASE_URL}/api/reviews/{review_id}", headers={"Authorization": f"Bearer {token}"})
+        print(f"✓ GET /api/cars/{car_id} includes reviews array: {len(car['reviews'])} reviews")

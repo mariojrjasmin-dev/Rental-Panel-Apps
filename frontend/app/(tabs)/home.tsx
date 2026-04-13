@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
+import StarRating from '../../components/StarRating';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -21,6 +22,8 @@ type Car = {
   image_url: string;
   pickup_location?: { name: string; address?: string };
   dropoff_location?: { name: string; address?: string };
+  avg_rating?: number;
+  review_count?: number;
 };
 
 type Location = {
@@ -99,6 +102,11 @@ export default function HomeScreen() {
           <View style={styles.locationRow}>
             <Ionicons name="location-outline" size={13} color="#007AFF" />
             <Text style={styles.locationText} numberOfLines={1}>{item.pickup_location.name}</Text>
+          </View>
+        )}
+        {(item.avg_rating !== undefined && item.avg_rating > 0) && (
+          <View style={styles.ratingRow}>
+            <StarRating rating={item.avg_rating} size={14} showValue count={item.review_count} />
           </View>
         )}
         <View style={styles.carSpecs}>
@@ -275,8 +283,9 @@ const styles = StyleSheet.create({
   carName: { fontSize: 18, fontWeight: '800', color: '#0A0A0A', flex: 1 },
   categoryBadge: { backgroundColor: '#F5F5F5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   categoryText: { fontSize: 11, fontWeight: '700', color: '#666', textTransform: 'uppercase', letterSpacing: 1 },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   locationText: { fontSize: 12, color: '#007AFF', fontWeight: '600' },
+  ratingRow: { marginBottom: 4 },
   carSpecs: { flexDirection: 'row', gap: 16, marginBottom: 12 },
   specItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   specText: { fontSize: 13, color: '#666' },

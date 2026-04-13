@@ -193,6 +193,11 @@ class LocationUpdate(BaseModel):
     lng: Optional[float] = None
     type: Optional[str] = None
 
+class ReviewCreate(BaseModel):
+    car_id: str
+    rating: int  # 1-5
+    comment: str = ""
+
 # App setup
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -349,6 +354,22 @@ def serialize_car(car):
     del car["_id"]
     return car
 
+async def enrich_car_with_rating(car):
+    """Add avg_rating and review_count to a car dict."""
+    car_id = car.get("id") or str(car.get("_id", ""))
+    pipeline = [
+        {"$match": {"car_id": car_id}},
+        {"$group": {"_id": None, "avg": {"$avg": "$rating"}, "count": {"$sum": 1}}}
+    ]
+    result = await db.reviews.aggregate(pipeline).to_list(1)
+    if result:
+        car["avg_rating"] = round(result[0]["avg"], 1)
+        car["review_count"] = result[0]["count"]
+    else:
+        car["avg_rating"] = 0
+        car["review_count"] = 0
+    return car
+
 @api_router.get("/cars")
 async def get_cars(category: Optional[str] = None, search: Optional[str] = None, location: Optional[str] = None, city: Optional[str] = None):
     query = {"available": True}
@@ -384,7 +405,12 @@ async def get_cars(category: Optional[str] = None, search: Optional[str] = None,
             query["$and"] = []
         query["$and"].append({"$or": city_conditions})
     cars = await db.cars.find(query).to_list(100)
-    return [serialize_car(c) for c in cars]
+    result = []
+    for c in cars:
+        c = serialize_car(c)
+        c = await enrich_car_with_rating(c)
+        result.append(c)
+    return result
 
 @api_router.get("/cars/all")
 async def get_all_cars(request: Request):
@@ -399,7 +425,12 @@ async def get_car(car_id: str):
     car = await db.cars.find_one({"_id": ObjectId(car_id)})
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
-    return serialize_car(car)
+    car = serialize_car(car)
+    car = await enrich_car_with_rating(car)
+    # Include recent reviews
+    reviews = await db.reviews.find({"car_id": car_id}).sort("created_at", -1).to_list(20)
+    car["reviews"] = [serialize_review(r) for r in reviews]
+    return car
 
 @api_router.post("/cars")
 async def create_car(car: CarCreate, request: Request):
@@ -716,6 +747,68 @@ async def get_cars_by_location(location_id: str):
     }).to_list(100)
     return [serialize_car(c) for c in cars]
 
+# ==================== REVIEW ROUTES ====================
+
+def serialize_review(rev):
+    rev["id"] = str(rev["_id"])
+    del rev["_id"]
+    return rev
+
+@api_router.get("/reviews/{car_id}")
+async def get_car_reviews(car_id: str):
+    reviews = await db.reviews.find({"car_id": car_id}).sort("created_at", -1).to_list(50)
+    return [serialize_review(r) for r in reviews]
+
+@api_router.post("/reviews")
+async def create_review(review: ReviewCreate, request: Request):
+    user = await get_authenticated_user(request)
+    user_id = str(user.get("_id") or user.get("id") or user.get("user_id"))
+
+    if review.rating < 1 or review.rating > 5:
+        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+
+    # Check car exists
+    car = await db.cars.find_one({"_id": ObjectId(review.car_id)})
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+
+    # Check if user already reviewed this car
+    existing = await db.reviews.find_one({"car_id": review.car_id, "user_id": user_id})
+    if existing:
+        # Update existing review
+        await db.reviews.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {"rating": review.rating, "comment": review.comment, "updated_at": datetime.now(timezone.utc)}}
+        )
+        updated = await db.reviews.find_one({"_id": existing["_id"]})
+        return serialize_review(updated)
+
+    review_doc = {
+        "car_id": review.car_id,
+        "user_id": user_id,
+        "user_name": user.get("name", "Anonymous"),
+        "user_email": user.get("email", ""),
+        "rating": review.rating,
+        "comment": review.comment,
+        "created_at": datetime.now(timezone.utc)
+    }
+    result = await db.reviews.insert_one(review_doc)
+    review_doc["id"] = str(result.inserted_id)
+    del review_doc["_id"]
+    return review_doc
+
+@api_router.delete("/reviews/{review_id}")
+async def delete_review(review_id: str, request: Request):
+    user = await get_authenticated_user(request)
+    review = await db.reviews.find_one({"_id": ObjectId(review_id)})
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    user_id = str(user.get("_id") or user.get("id") or user.get("user_id"))
+    if review["user_id"] != user_id and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+    await db.reviews.delete_one({"_id": ObjectId(review_id)})
+    return {"message": "Review deleted"}
+
 # ==================== SEED DATA ====================
 
 SEED_LOCATIONS = [
@@ -933,6 +1026,8 @@ async def seed_data():
     await db.bookings.create_index("user_id")
     await db.payment_transactions.create_index("session_id")
     await db.locations.create_index("city")
+    await db.reviews.create_index("car_id")
+    await db.reviews.create_index([("car_id", 1), ("user_id", 1)], unique=True)
     
     # Write test credentials
     creds_path = Path("/app/memory/test_credentials.md")

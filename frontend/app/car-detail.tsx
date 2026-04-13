@@ -1,163 +1,267 @@
-import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, ActivityIndicator, Dimensions } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, ActivityIndicator, Dimensions, TextInput, Alert, Platform, KeyboardAvoidingView } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import StarRating from '../components/StarRating';
+import { useAuth } from './_layout';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const { width } = Dimensions.get('window');
+
+type Review = {
+  id: string;
+  user_name: string;
+  rating: number;
+  comment: string;
+  created_at: string;
+  user_id: string;
+};
 
 export default function CarDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [car, setCar] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const { user } = useAuth();
   const router = useRouter();
 
-  useEffect(() => {
-    const fetchCar = async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/cars/${id}`);
-        if (res.ok) setCar(await res.json());
-      } catch (e) {
-        console.log('Fetch car error:', e);
-      }
-      setLoading(false);
-    };
-    if (id) fetchCar();
+  const fetchCar = useCallback(async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/cars/${id}`);
+      if (res.ok) setCar(await res.json());
+    } catch (e) {
+      console.log('Fetch car error:', e);
+    }
+    setLoading(false);
   }, [id]);
 
-  if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" color="#FF3B30" /></View>;
-  }
+  useEffect(() => { if (id) fetchCar(); }, [fetchCar]);
 
-  if (!car) {
-    return (
-      <SafeAreaView style={styles.center}>
-        <Text style={styles.errorText}>Car not found</Text>
-        <TouchableOpacity onPress={() => router.back()}><Text style={styles.backLink}>Go Back</Text></TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
+  const submitReview = async () => {
+    if (reviewRating === 0) {
+      Platform.OS === 'web' ? window.alert('Please select a rating') : Alert.alert('Error', 'Please select a rating');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${BACKEND_URL}/api/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ car_id: id, rating: reviewRating, comment: reviewComment }),
+      });
+      if (res.ok) {
+        setReviewRating(0);
+        setReviewComment('');
+        setShowReviewForm(false);
+        fetchCar(); // Refresh to show updated reviews
+      } else {
+        const err = await res.json();
+        const msg = typeof err.detail === 'string' ? err.detail : 'Failed to submit review';
+        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      }
+    } catch (e: any) {
+      Platform.OS === 'web' ? window.alert(e.message) : Alert.alert('Error', e.message);
+    }
+    setSubmitting(false);
+  };
+
+  const deleteReview = async (reviewId: string) => {
+    const doDelete = async () => {
+      const token = await AsyncStorage.getItem('auth_token');
+      await fetch(`${BACKEND_URL}/api/reviews/${reviewId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      fetchCar();
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm('Delete your review?')) doDelete();
+    } else {
+      Alert.alert('Delete Review', 'Delete your review?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: doDelete },
+      ]);
+    }
+  };
+
+  const formatDate = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#FF3B30" /></View>;
+  if (!car) return (
+    <SafeAreaView style={styles.center}>
+      <Text style={styles.errorText}>Car not found</Text>
+      <TouchableOpacity onPress={() => router.back()}><Text style={styles.backLink}>Go Back</Text></TouchableOpacity>
+    </SafeAreaView>
+  );
+
+  const reviews: Review[] = car.reviews || [];
+  const userId = user?.id || user?.user_id || '';
+  const userReview = reviews.find(r => r.user_id === userId);
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <View style={styles.heroContainer}>
-          <Image source={{ uri: car.image_url }} style={styles.heroImage} resizeMode="cover" />
-          <SafeAreaView style={styles.heroOverlay} edges={['top']}>
-            <TouchableOpacity testID="back-button" style={styles.backBtn} onPress={() => router.back()}>
-              <Ionicons name="arrow-back" size={24} color="#0A0A0A" />
-            </TouchableOpacity>
-          </SafeAreaView>
-        </View>
-
-        <View style={styles.content}>
-          <View style={styles.titleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.carName}>{car.name}</Text>
-              <Text style={styles.carYear}>{car.year} {car.brand}</Text>
-            </View>
-            <View style={styles.categoryTag}>
-              <Text style={styles.categoryTagText}>{car.category}</Text>
-            </View>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.heroContainer}>
+            <Image source={{ uri: car.image_url }} style={styles.heroImage} resizeMode="cover" />
+            <SafeAreaView style={styles.heroOverlay} edges={['top']}>
+              <TouchableOpacity testID="back-button" style={styles.backBtn} onPress={() => router.back()}>
+                <Ionicons name="arrow-back" size={24} color="#0A0A0A" />
+              </TouchableOpacity>
+            </SafeAreaView>
           </View>
 
-          <View style={styles.specsGrid}>
-            <View style={styles.specCard}>
-              <Ionicons name="people-outline" size={24} color="#FF3B30" />
-              <Text style={styles.specValue}>{car.seats}</Text>
-              <Text style={styles.specLabel}>Seats</Text>
+          <View style={styles.content}>
+            <View style={styles.titleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.carName}>{car.name}</Text>
+                <Text style={styles.carYear}>{car.year} {car.brand}</Text>
+                {car.avg_rating > 0 && (
+                  <View style={styles.ratingRow}>
+                    <StarRating rating={car.avg_rating} size={16} showValue count={car.review_count} />
+                  </View>
+                )}
+              </View>
+              <View style={styles.categoryTag}>
+                <Text style={styles.categoryTagText}>{car.category}</Text>
+              </View>
             </View>
-            <View style={styles.specCard}>
-              <Ionicons name="cog-outline" size={24} color="#FF3B30" />
-              <Text style={styles.specValue}>{car.transmission}</Text>
-              <Text style={styles.specLabel}>Transmission</Text>
+
+            <View style={styles.specsGrid}>
+              <View style={styles.specCard}>
+                <Ionicons name="people-outline" size={24} color="#FF3B30" />
+                <Text style={styles.specValue}>{car.seats}</Text>
+                <Text style={styles.specLabel}>Seats</Text>
+              </View>
+              <View style={styles.specCard}>
+                <Ionicons name="cog-outline" size={24} color="#FF3B30" />
+                <Text style={styles.specValue}>{car.transmission}</Text>
+                <Text style={styles.specLabel}>Transmission</Text>
+              </View>
+              <View style={styles.specCard}>
+                <Ionicons name="flash-outline" size={24} color="#FF3B30" />
+                <Text style={styles.specValue}>{car.fuel_type}</Text>
+                <Text style={styles.specLabel}>Fuel</Text>
+              </View>
             </View>
-            <View style={styles.specCard}>
-              <Ionicons name="flash-outline" size={24} color="#FF3B30" />
-              <Text style={styles.specValue}>{car.fuel_type}</Text>
-              <Text style={styles.specLabel}>Fuel</Text>
+
+            {car.description ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>About</Text>
+                <Text style={styles.description}>{car.description}</Text>
+              </View>
+            ) : null}
+
+            {(car.pickup_location || car.dropoff_location) && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Locations</Text>
+                {car.pickup_location && (
+                  <TouchableOpacity testID="pickup-location-btn" style={styles.locationRow}
+                    onPress={() => router.push({ pathname: '/map-view', params: { pickupLat: car.pickup_location.lat, pickupLng: car.pickup_location.lng, pickupName: car.pickup_location.name, dropoffLat: car.dropoff_location?.lat, dropoffLng: car.dropoff_location?.lng, dropoffName: car.dropoff_location?.name } })}>
+                    <View style={styles.locationIcon}><Ionicons name="location" size={18} color="#34C759" /></View>
+                    <View style={{ flex: 1 }}><Text style={styles.locationLabel}>Pickup</Text><Text style={styles.locationName}>{car.pickup_location.name}</Text></View>
+                    <Ionicons name="map-outline" size={20} color="#007AFF" />
+                  </TouchableOpacity>
+                )}
+                {car.dropoff_location && (
+                  <TouchableOpacity testID="dropoff-location-btn" style={styles.locationRow}
+                    onPress={() => router.push({ pathname: '/map-view', params: { pickupLat: car.pickup_location?.lat, pickupLng: car.pickup_location?.lng, pickupName: car.pickup_location?.name, dropoffLat: car.dropoff_location.lat, dropoffLng: car.dropoff_location.lng, dropoffName: car.dropoff_location.name } })}>
+                    <View style={[styles.locationIcon, { backgroundColor: '#FFF0F0' }]}><Ionicons name="location" size={18} color="#FF3B30" /></View>
+                    <View style={{ flex: 1 }}><Text style={styles.locationLabel}>Drop-off</Text><Text style={styles.locationName}>{car.dropoff_location.name}</Text></View>
+                    <Ionicons name="map-outline" size={20} color="#007AFF" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* Reviews Section */}
+            <View style={styles.section}>
+              <View style={styles.reviewsHeader}>
+                <Text style={styles.sectionTitle}>Reviews</Text>
+                {user && !userReview && (
+                  <TouchableOpacity testID="write-review-btn" style={styles.writeReviewBtn} onPress={() => setShowReviewForm(!showReviewForm)}>
+                    <Ionicons name="create-outline" size={16} color="#FF3B30" />
+                    <Text style={styles.writeReviewText}>Write Review</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Review Form */}
+              {showReviewForm && (
+                <View testID="review-form" style={styles.reviewForm}>
+                  <Text style={styles.formLabel}>Your Rating</Text>
+                  <StarRating rating={reviewRating} size={32} onRate={setReviewRating} />
+                  <Text style={styles.formLabel}>Comment (optional)</Text>
+                  <TextInput
+                    testID="review-comment-input"
+                    style={styles.commentInput}
+                    value={reviewComment}
+                    onChangeText={setReviewComment}
+                    placeholder="Share your experience..."
+                    placeholderTextColor="#999"
+                    multiline
+                    numberOfLines={3}
+                  />
+                  <View style={styles.formActions}>
+                    <TouchableOpacity style={styles.cancelFormBtn} onPress={() => { setShowReviewForm(false); setReviewRating(0); setReviewComment(''); }}>
+                      <Text style={styles.cancelFormText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity testID="submit-review-btn" style={styles.submitReviewBtn} onPress={submitReview} disabled={submitting}>
+                      {submitting ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.submitReviewText}>Submit</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {reviews.length === 0 && !showReviewForm ? (
+                <View style={styles.noReviews}>
+                  <Ionicons name="chatbubble-outline" size={32} color="#E5E5E5" />
+                  <Text style={styles.noReviewsText}>No reviews yet. Be the first!</Text>
+                </View>
+              ) : (
+                reviews.map((r) => (
+                  <View key={r.id} testID={`review-${r.id}`} style={styles.reviewCard}>
+                    <View style={styles.reviewTop}>
+                      <View style={styles.reviewerInfo}>
+                        <View style={styles.reviewerAvatar}>
+                          <Text style={styles.reviewerInitial}>{(r.user_name || 'A')[0].toUpperCase()}</Text>
+                        </View>
+                        <View>
+                          <Text style={styles.reviewerName}>{r.user_name}</Text>
+                          <Text style={styles.reviewDate}>{formatDate(r.created_at)}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.reviewRightCol}>
+                        <StarRating rating={r.rating} size={14} />
+                        {(r.user_id === userId || user?.role === 'admin') && (
+                          <TouchableOpacity testID={`delete-review-${r.id}`} onPress={() => deleteReview(r.id)} style={styles.deleteReviewBtn}>
+                            <Ionicons name="trash-outline" size={14} color="#FF3B30" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                    {r.comment ? <Text style={styles.reviewComment}>{r.comment}</Text> : null}
+                  </View>
+                ))
+              )}
             </View>
           </View>
-
-          {car.description ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>About</Text>
-              <Text style={styles.description}>{car.description}</Text>
-            </View>
-          ) : null}
-
-          {(car.pickup_location || car.dropoff_location) && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Locations</Text>
-              {car.pickup_location && (
-                <TouchableOpacity
-                  testID="pickup-location-btn"
-                  style={styles.locationRow}
-                  onPress={() => router.push({
-                    pathname: '/map-view',
-                    params: {
-                      pickupLat: car.pickup_location.lat,
-                      pickupLng: car.pickup_location.lng,
-                      pickupName: car.pickup_location.name,
-                      dropoffLat: car.dropoff_location?.lat,
-                      dropoffLng: car.dropoff_location?.lng,
-                      dropoffName: car.dropoff_location?.name,
-                    }
-                  })}
-                >
-                  <View style={styles.locationIcon}>
-                    <Ionicons name="location" size={18} color="#34C759" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.locationLabel}>Pickup</Text>
-                    <Text style={styles.locationName}>{car.pickup_location.name}</Text>
-                  </View>
-                  <Ionicons name="map-outline" size={20} color="#007AFF" />
-                </TouchableOpacity>
-              )}
-              {car.dropoff_location && (
-                <TouchableOpacity
-                  testID="dropoff-location-btn"
-                  style={styles.locationRow}
-                  onPress={() => router.push({
-                    pathname: '/map-view',
-                    params: {
-                      pickupLat: car.pickup_location?.lat,
-                      pickupLng: car.pickup_location?.lng,
-                      pickupName: car.pickup_location?.name,
-                      dropoffLat: car.dropoff_location.lat,
-                      dropoffLng: car.dropoff_location.lng,
-                      dropoffName: car.dropoff_location.name,
-                    }
-                  })}
-                >
-                  <View style={[styles.locationIcon, { backgroundColor: '#FFF0F0' }]}>
-                    <Ionicons name="location" size={18} color="#FF3B30" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.locationLabel}>Drop-off</Text>
-                    <Text style={styles.locationName}>{car.dropoff_location.name}</Text>
-                  </View>
-                  <Ionicons name="map-outline" size={20} color="#007AFF" />
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <View style={styles.bottomBar}>
         <View>
           <Text style={styles.bottomPrice}>${car.price_per_day}</Text>
           <Text style={styles.bottomPriceUnit}>per day</Text>
         </View>
-        <TouchableOpacity
-          testID="book-now-button"
-          style={styles.bookBtn}
-          activeOpacity={0.7}
-          onPress={() => router.push({ pathname: '/booking', params: { carId: car.id } })}
-        >
+        <TouchableOpacity testID="book-now-button" style={styles.bookBtn} activeOpacity={0.7}
+          onPress={() => router.push({ pathname: '/booking', params: { carId: car.id } })}>
           <Text style={styles.bookBtnText}>Book Now</Text>
           <Ionicons name="arrow-forward" size={20} color="#FFF" />
         </TouchableOpacity>
@@ -171,7 +275,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF' },
   errorText: { fontSize: 18, color: '#666' },
   backLink: { fontSize: 16, color: '#FF3B30', marginTop: 8 },
-  scrollContent: { paddingBottom: 100 },
+  scrollContent: { paddingBottom: 110 },
   heroContainer: { width, height: 280, backgroundColor: '#F5F5F5' },
   heroImage: { width: '100%', height: '100%' },
   heroOverlay: { position: 'absolute', top: 0, left: 0, right: 0 },
@@ -180,6 +284,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
   carName: { fontSize: 28, fontWeight: '900', color: '#0A0A0A', letterSpacing: -0.5 },
   carYear: { fontSize: 15, color: '#666', marginTop: 2 },
+  ratingRow: { marginTop: 6 },
   categoryTag: { backgroundColor: '#0A0A0A', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 50 },
   categoryTagText: { color: '#FFF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
   specsGrid: { flexDirection: 'row', gap: 12, marginBottom: 24 },
@@ -193,6 +298,31 @@ const styles = StyleSheet.create({
   locationIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F0FFF4', justifyContent: 'center', alignItems: 'center' },
   locationLabel: { fontSize: 11, color: '#999', textTransform: 'uppercase', fontWeight: '700', letterSpacing: 0.5 },
   locationName: { fontSize: 15, fontWeight: '600', color: '#0A0A0A' },
+  // Reviews
+  reviewsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  writeReviewBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 50, backgroundColor: '#FFF0F0' },
+  writeReviewText: { fontSize: 13, fontWeight: '700', color: '#FF3B30' },
+  reviewForm: { backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, marginBottom: 16, gap: 12 },
+  formLabel: { fontSize: 12, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
+  commentInput: { backgroundColor: '#FFF', borderRadius: 12, padding: 14, fontSize: 15, color: '#0A0A0A', minHeight: 80, textAlignVertical: 'top', borderWidth: 1, borderColor: '#E5E5E5' },
+  formActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end' },
+  cancelFormBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 50, backgroundColor: '#E5E5E5' },
+  cancelFormText: { fontSize: 14, fontWeight: '700', color: '#666' },
+  submitReviewBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 50, backgroundColor: '#FF3B30', minWidth: 90, alignItems: 'center' },
+  submitReviewText: { fontSize: 14, fontWeight: '700', color: '#FFF' },
+  noReviews: { alignItems: 'center', paddingVertical: 24, gap: 8 },
+  noReviewsText: { fontSize: 14, color: '#999' },
+  reviewCard: { backgroundColor: '#F5F5F5', borderRadius: 14, padding: 14, marginBottom: 10 },
+  reviewTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  reviewerInfo: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reviewerAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center' },
+  reviewerInitial: { fontSize: 16, fontWeight: '800', color: '#FFF' },
+  reviewerName: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
+  reviewDate: { fontSize: 11, color: '#999' },
+  reviewRightCol: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  deleteReviewBtn: { padding: 6 },
+  reviewComment: { fontSize: 14, color: '#666', marginTop: 10, lineHeight: 20 },
+  // Bottom bar
   bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, paddingBottom: 32, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E5E5' },
   bottomPrice: { fontSize: 26, fontWeight: '900', color: '#0A0A0A' },
   bottomPriceUnit: { fontSize: 13, color: '#999' },
