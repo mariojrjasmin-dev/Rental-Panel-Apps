@@ -1,0 +1,155 @@
+{
+  "project_name": "Dams Car Rental",
+  "app_type": "hybrid_fullstack",
+  "framework": "Expo React Native",
+  "design_identity": {
+    "designer": "E1",
+    "theme": "LIGHT",
+    "archetype": "Archetype 4 (Swiss & High-Contrast)",
+    "vibe": "Industrial Minimalist, Stark, Fast, Premium",
+    "core_concept": "The car is the hero. The interface is just the invisible valet. Everything must feel frictionless, with aggressive contrast for immediate action clarity."
+  },
+  "color_palette": {
+    "background": {
+      "primary": "#FFFFFF",
+      "secondary": "#F5F5F5",
+      "tertiary": "#E5E5E5"
+    },
+    "text": {
+      "primary": "#0A0A0A",
+      "secondary": "#666666",
+      "inverse": "#FFFFFF"
+    },
+    "accent": {
+      "primary": "#FF3B30",
+      "primary_hover": "#E03025",
+      "secondary": "#007AFF"
+    },
+    "status": {
+      "success": "#34C759",
+      "warning": "#FFCC00",
+      "error": "#FF3B30"
+    },
+    "border": "#E5E5E5"
+  },
+  "typography": {
+    "strategy": "The Anti-Default Rule. We are avoiding standard Inter for headings. Since this is an Expo app, use a strong sans-serif for headings and a clean sans for body.",
+    "fonts": {
+      "heading": "Outfit, Clash Display, or system font heavily weighted (fontWeight: '900')",
+      "body": "Manrope or standard system sans-serif (fontWeight: '400', '500')"
+    },
+    "sizes": {
+      "h1": "text-4xl sm:text-5xl tracking-tighter font-black",
+      "h2": "text-3xl tracking-tight font-bold",
+      "h3": "text-xl font-bold",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm text-gray-500",
+      "overline": "text-xs tracking-widest uppercase font-bold text-gray-400"
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing Philosophy. Native app screens need breathing room.",
+    "screen_padding": "px-6 py-4",
+    "card_padding": "p-6",
+    "item_gap": "gap-4 or gap-6",
+    "radius": {
+      "button": "rounded-full",
+      "card": "rounded-3xl",
+      "input": "rounded-2xl"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#FF3B30] rounded-full py-4 items-center justify-center shadow-md",
+      "primary_text": "text-white font-bold text-lg",
+      "secondary": "bg-[#F5F5F5] rounded-full py-4 items-center justify-center",
+      "secondary_text": "text-[#0A0A0A] font-bold text-lg"
+    },
+    "cards": {
+      "car_listing": "bg-white border border-[#E5E5E5] rounded-3xl overflow-hidden mb-6 shadow-sm",
+      "image_container": "w-full h-48 bg-[#F5F5F5]",
+      "content_container": "p-4"
+    },
+    "inputs": {
+      "text_field": "border border-[#E5E5E5] bg-[#F5F5F5] rounded-2xl p-4 text-base text-[#0A0A0A] font-medium"
+    },
+    "bottom_sheet": {
+      "container": "bg-white rounded-t-3xl p-6 shadow-lg border-t border-[#E5E5E5]"
+    }
+  },
+  "screens_and_flows": {
+    "authentication": {
+      "layout": "Minimalist stack. Giant logo/Title at top. Wide inputs. Prominent Google OAuth button with distinct border.",
+      "background": "bg-white",
+      "actions": "Primary red button for JWT login, white/grey button for Google."
+    },
+    "home_browse": {
+      "header": "Sticky top nav with user avatar and minimalist title 'Dams Car Rental'.",
+      "search": "Large touch target search bar 'Find a vehicle...'",
+      "categories": "Horizontal FlatList for categories (SUVs, Luxury, Electric) - active state is black pill, inactive is grey text.",
+      "listings": "Vertical FlatList of cars. Huge images, minimal text (Make, Model, Price/day)."
+    },
+    "car_details": {
+      "hero": "Cover image taking up top 40% of screen. Back button floating top-left.",
+      "specs": "Grid of icons (seats, transmission, speed) with minimal labels.",
+      "booking_bar": "Fixed bottom view (absolute positioning) with Total Price on left and 'Book Now' red button on right."
+    },
+    "booking_map_flow": {
+      "map_view": "react-native-maps taking up 60% of upper screen.",
+      "controls": "Bottom 40% sheet containing datetime picker and pickup/dropoff selectors.",
+      "payment_toggle": "Segmented control or elegant toggle between Stripe and Cash."
+    },
+    "admin_panel": {
+      "layout": "Strict grid hierarchy. List of cars with swipe-to-delete or right-side action menu. 'Add New Car' floating action button (FAB)."
+    }
+  },
+  "micro_interactions": {
+    "active_states": "Use TouchableOpacity with activeOpacity={0.7} for all clickable elements.",
+    "screen_transitions": "Slide from right for deeper navigation (Stack).",
+    "modals": "Use bottom sheet style modals for date selection and payments."
+  },
+  "media": {
+    "instructions_to_main_agent": "Use these precise image URLs where applicable. DO NOT USE PLACEHOLDERS. The app should feel premium.",
+    "images": {
+      "car_listings": [
+        {
+          "url": "https://images.unsplash.com/photo-1637575694029-383a6c97a806?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHw0fHxzbGVlayUyMGNhcnxlbnwwfHx8fDE3NzYwOTI2MDd8MA&ixlib=rb-4.1.0&q=85",
+          "description": "Silver sleek car for listing"
+        },
+        {
+          "url": "https://images.pexels.com/photos/36279231/pexels-photo-36279231.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+          "description": "White sports car for listing"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1736794111724-f7ddff6ab8f4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzR8MHwxfHNlYXJjaHwzfHxlbGVjdHJpYyUyMHN1dnxlbnwwfHx8fDE3NzYwOTI2MTh8MA&ixlib=rb-4.1.0&q=85",
+          "description": "Black SUV driving"
+        }
+      ],
+      "hero_or_splash": {
+        "url": "https://images.pexels.com/photos/4065796/pexels-photo-4065796.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Drone shot of white sports car for splash screen or hero background"
+      },
+      "interiors": [
+        {
+          "url": "https://images.pexels.com/photos/9513402/pexels-photo-9513402.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+          "description": "Luxury white interior for detail page"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1625690180114-5530b1304127?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwzfHxjYXIlMjBpbnRlcmlvcnxlbnwwfHx8fDE3NzYwOTI2MTd8MA&ixlib=rb-4.1.0&q=85",
+          "description": "Black interior"
+        }
+      ],
+      "map_placeholder": {
+        "url": "https://images.unsplash.com/photo-1754299096069-d73ae7fc95b7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwzfHxtaW5pbWFsJTIwY2l0eSUyMG1hcHxlbnwwfHx8fDE3NzYwOTI2MTd8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Minimal map texture if API fails or for background elements"
+      }
+    }
+  },
+  "development_rules": {
+    "styling": "Use NativeWind (Tailwind className strings) for React Native. If custom styling is needed, use standard StyleSheet.create().",
+    "icons": "Use @expo/vector-icons (Feather or Ionicons) for minimal line icons.",
+    "testing": "All interactive and key informational elements MUST include a data-testid attribute. E.g., <TouchableOpacity testID='login-submit-button'> (Note: React Native uses testID, not data-testid).",
+    "maps": "Use react-native-maps. Render minimal custom map styling if possible via customMapStyle JSON.",
+    "auth": "Implement simple JWT store in AsyncStorage + expo-auth-session for Google."
+  }
+}
