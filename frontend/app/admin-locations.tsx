@@ -1,18 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, TextInput, Modal, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, TextInput, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-
 const EMPTY_LOC = { name: '', address: '', city: '', country: '', lat: '', lng: '', type: 'both' };
 
 export default function AdminLocationsScreen() {
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [editLoc, setEditLoc] = useState<any>(null);
   const [form, setForm] = useState({ ...EMPTY_LOC });
   const [saving, setSaving] = useState(false);
@@ -31,20 +30,19 @@ export default function AdminLocationsScreen() {
 
   useEffect(() => { fetchLocations(); }, [fetchLocations]);
 
-  const openAdd = () => { setEditLoc(null); setForm({ ...EMPTY_LOC }); setShowModal(true); };
+  const openAdd = () => { setEditLoc(null); setForm({ ...EMPTY_LOC }); setShowForm(true); };
   const openEdit = (loc: any) => {
     setEditLoc(loc);
     setForm({
-      name: loc.name, address: loc.address, city: loc.city, country: loc.country,
-      lat: String(loc.lat), lng: String(loc.lng), type: loc.type || 'both',
+      name: loc.name || '', address: loc.address || '', city: loc.city || '', country: loc.country || '',
+      lat: String(loc.lat ?? ''), lng: String(loc.lng ?? ''), type: loc.type || 'both',
     });
-    setShowModal(true);
+    setShowForm(true);
   };
 
   const saveLoc = async () => {
     if (!form.name || !form.city || !form.lat || !form.lng) {
-      if (Platform.OS === 'web') { window.alert('Name, city, latitude, and longitude are required'); }
-      else { Alert.alert('Error', 'Name, city, latitude, and longitude are required'); }
+      Platform.OS === 'web' ? window.alert('Name, city, latitude, and longitude are required') : Alert.alert('Error', 'Name, city, latitude, and longitude are required');
       return;
     }
     setSaving(true);
@@ -57,7 +55,7 @@ export default function AdminLocationsScreen() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      if (res.ok) { setShowModal(false); fetchLocations(); }
+      if (res.ok) { setShowForm(false); fetchLocations(); }
       else {
         const err = await res.json();
         const msg = typeof err.detail === 'string' ? err.detail : 'Save failed';
@@ -72,23 +70,72 @@ export default function AdminLocationsScreen() {
   const deleteLoc = (loc: any) => {
     const doDelete = async () => {
       const token = await AsyncStorage.getItem('auth_token');
-      await fetch(`${BACKEND_URL}/api/locations/${loc.id}`, {
-        method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
-      });
+      await fetch(`${BACKEND_URL}/api/locations/${loc.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
       fetchLocations();
     };
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Delete ${loc.name}?`)) doDelete();
-    } else {
-      Alert.alert('Delete Location', `Delete ${loc.name}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: doDelete },
-      ]);
-    }
+    if (Platform.OS === 'web') { if (window.confirm(`Delete ${loc.name}?`)) doDelete(); }
+    else { Alert.alert('Delete Location', `Delete ${loc.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: doDelete }]); }
   };
 
   const cities = [...new Set(locations.map(l => l.city))];
 
+  // ============ FORM VIEW ============
+  if (showForm) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.topBar}>
+          <TouchableOpacity testID="form-back-btn" style={styles.backBtn} onPress={() => setShowForm(false)}>
+            <Ionicons name="arrow-back" size={24} color="#0A0A0A" />
+          </TouchableOpacity>
+          <Text style={styles.topTitle}>{editLoc ? 'Edit Location' : 'Add Location'}</Text>
+          <View style={{ width: 44 }} />
+        </View>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView style={styles.formScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 60 }}>
+            <Text style={styles.label}>Name *</Text>
+            <TextInput testID="loc-name-input" style={styles.input} value={form.name} onChangeText={v => setForm({...form, name: v})} placeholder="e.g. Punta Cana Airport" />
+
+            <Text style={styles.label}>Address</Text>
+            <TextInput testID="loc-address-input" style={styles.input} value={form.address} onChangeText={v => setForm({...form, address: v})} placeholder="Full address" />
+
+            <Text style={styles.label}>City *</Text>
+            <TextInput testID="loc-city-input" style={styles.input} value={form.city} onChangeText={v => setForm({...form, city: v})} placeholder="e.g. Punta Cana" />
+
+            <Text style={styles.label}>Country</Text>
+            <TextInput testID="loc-country-input" style={styles.input} value={form.country} onChangeText={v => setForm({...form, country: v})} placeholder="e.g. Dominican Republic" />
+
+            <View style={styles.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Latitude *</Text>
+                <TextInput testID="loc-lat-input" style={styles.input} value={form.lat} onChangeText={v => setForm({...form, lat: v})} keyboardType="decimal-pad" placeholder="18.5670" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Longitude *</Text>
+                <TextInput testID="loc-lng-input" style={styles.input} value={form.lng} onChangeText={v => setForm({...form, lng: v})} keyboardType="decimal-pad" placeholder="-68.3634" />
+              </View>
+            </View>
+
+            <Text style={styles.label}>Type</Text>
+            <View style={styles.typeRow}>
+              {['both', 'pickup', 'dropoff'].map(t => (
+                <TouchableOpacity key={t} style={[styles.typePill, form.type === t && styles.typePillActive]} onPress={() => setForm({...form, type: t})}>
+                  <Text style={[styles.typeText, form.type === t && styles.typeTextActive]}>
+                    {t === 'both' ? 'Pickup & Dropoff' : t.charAt(0).toUpperCase() + t.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity testID="save-loc-btn" style={styles.saveBtn} onPress={saveLoc} disabled={saving}>
+              {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveBtnText}>{editLoc ? 'Update Location' : 'Add Location'}</Text>}
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
+  // ============ LIST VIEW ============
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.topBar}>
@@ -101,20 +148,12 @@ export default function AdminLocationsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* City filter */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-        <TouchableOpacity
-          style={[styles.filterPill, !filterCity && styles.filterPillActive]}
-          onPress={() => setFilterCity('')}
-        >
+        <TouchableOpacity style={[styles.filterPill, !filterCity && styles.filterPillActive]} onPress={() => setFilterCity('')}>
           <Text style={[styles.filterText, !filterCity && styles.filterTextActive]}>All</Text>
         </TouchableOpacity>
         {cities.map(c => (
-          <TouchableOpacity
-            key={c}
-            style={[styles.filterPill, filterCity === c && styles.filterPillActive]}
-            onPress={() => setFilterCity(filterCity === c ? '' : c)}
-          >
+          <TouchableOpacity key={c} style={[styles.filterPill, filterCity === c && styles.filterPillActive]} onPress={() => setFilterCity(filterCity === c ? '' : c)}>
             <Text style={[styles.filterText, filterCity === c && styles.filterTextActive]}>{c}</Text>
           </TouchableOpacity>
         ))}
@@ -131,10 +170,10 @@ export default function AdminLocationsScreen() {
         <FlatList
           testID="locations-list"
           data={locations}
-          keyExtractor={(item) => item.id}
+          keyExtractor={item => item.id}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <View style={styles.locCard}>
+            <TouchableOpacity style={styles.locCard} onPress={() => openEdit(item)} activeOpacity={0.7}>
               <View style={styles.locIconWrap}>
                 <Ionicons name="location" size={24} color="#FF3B30" />
               </View>
@@ -144,7 +183,6 @@ export default function AdminLocationsScreen() {
                 <View style={styles.locMeta}>
                   <View style={styles.locTag}><Text style={styles.locTagText}>{item.city}</Text></View>
                   <View style={styles.locTag}><Text style={styles.locTagText}>{item.country}</Text></View>
-                  <Text style={styles.locCoords}>{item.lat.toFixed(4)}, {item.lng.toFixed(4)}</Text>
                 </View>
               </View>
               <View style={styles.locActions}>
@@ -155,61 +193,10 @@ export default function AdminLocationsScreen() {
                   <Ionicons name="trash-outline" size={18} color="#FF3B30" />
                 </TouchableOpacity>
               </View>
-            </View>
+            </TouchableOpacity>
           )}
         />
       )}
-
-      {/* Add/Edit Modal */}
-      <Modal visible={showModal} animationType="slide" transparent>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editLoc ? 'Edit Location' : 'Add Location'}</Text>
-              <TouchableOpacity testID="close-loc-modal" onPress={() => setShowModal(false)}>
-                <Ionicons name="close" size={24} color="#0A0A0A" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled">
-              <Text style={styles.label}>Name *</Text>
-              <TextInput testID="loc-name-input" style={styles.input} value={form.name} onChangeText={v => setForm({...form, name: v})} placeholder="e.g. Punta Cana Airport" />
-
-              <Text style={styles.label}>Address</Text>
-              <TextInput testID="loc-address-input" style={styles.input} value={form.address} onChangeText={v => setForm({...form, address: v})} placeholder="Full address" />
-
-              <Text style={styles.label}>City *</Text>
-              <TextInput testID="loc-city-input" style={styles.input} value={form.city} onChangeText={v => setForm({...form, city: v})} placeholder="e.g. Punta Cana" />
-
-              <Text style={styles.label}>Country</Text>
-              <TextInput testID="loc-country-input" style={styles.input} value={form.country} onChangeText={v => setForm({...form, country: v})} placeholder="e.g. Dominican Republic" />
-
-              <View style={styles.row}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Latitude *</Text>
-                  <TextInput testID="loc-lat-input" style={styles.input} value={form.lat} onChangeText={v => setForm({...form, lat: v})} keyboardType="decimal-pad" placeholder="18.5670" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Longitude *</Text>
-                  <TextInput testID="loc-lng-input" style={styles.input} value={form.lng} onChangeText={v => setForm({...form, lng: v})} keyboardType="decimal-pad" placeholder="-68.3634" />
-                </View>
-              </View>
-
-              <Text style={styles.label}>Type</Text>
-              <View style={styles.typeRow}>
-                {['both', 'pickup', 'dropoff'].map(t => (
-                  <TouchableOpacity key={t} style={[styles.typePill, form.type === t && styles.typePillActive]} onPress={() => setForm({...form, type: t})}>
-                    <Text style={[styles.typeText, form.type === t && styles.typeTextActive]}>{t === 'both' ? 'Pickup & Dropoff' : t.charAt(0).toUpperCase() + t.slice(1)}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <TouchableOpacity testID="save-loc-btn" style={styles.saveBtn} onPress={saveLoc} disabled={saving}>
-                {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveBtnText}>{editLoc ? 'Update' : 'Add Location'}</Text>}
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -235,15 +222,11 @@ const styles = StyleSheet.create({
   locMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   locTag: { backgroundColor: '#F5F5F5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   locTagText: { fontSize: 10, fontWeight: '700', color: '#666', textTransform: 'uppercase' },
-  locCoords: { fontSize: 10, color: '#999' },
   locActions: { gap: 6 },
   actionBtn: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#E5E5E5' },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#0A0A0A' },
-  modalScroll: { padding: 20 },
-  label: { fontSize: 12, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 14 },
+  // Form
+  formScroll: { flex: 1, paddingHorizontal: 24 },
+  label: { fontSize: 12, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 16 },
   input: { backgroundColor: '#F5F5F5', borderRadius: 12, padding: 14, fontSize: 15, color: '#0A0A0A', borderWidth: 1, borderColor: '#E5E5E5' },
   row: { flexDirection: 'row', gap: 12 },
   typeRow: { flexDirection: 'row', gap: 8 },
@@ -251,6 +234,6 @@ const styles = StyleSheet.create({
   typePillActive: { backgroundColor: '#FF3B30', borderColor: '#FF3B30' },
   typeText: { fontSize: 12, fontWeight: '600', color: '#666' },
   typeTextActive: { color: '#FFF' },
-  saveBtn: { backgroundColor: '#FF3B30', borderRadius: 50, paddingVertical: 18, alignItems: 'center', marginTop: 24, marginBottom: 40 },
+  saveBtn: { backgroundColor: '#FF3B30', borderRadius: 50, paddingVertical: 18, alignItems: 'center', marginTop: 24 },
   saveBtnText: { color: '#FFF', fontSize: 17, fontWeight: '700' },
 });
