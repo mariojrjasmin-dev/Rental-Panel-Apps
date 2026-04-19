@@ -1,17 +1,5 @@
-import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, ActivityIndicator } from 'react-native';
-import * as Location from 'expo-location';
-
-let MapView: any = null;
-let Marker: any = null;
-
-try {
-  const maps = require('react-native-maps');
-  MapView = maps.default;
-  Marker = maps.Marker;
-} catch (e) {
-  console.log('react-native-maps not available');
-}
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Linking, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 const { width, height } = Dimensions.get('window');
 
@@ -25,87 +13,89 @@ type Props = {
 };
 
 export default function MapComponent({ pickupLat, pickupLng, pickupName, dropoffLat, dropoffLng, dropoffName }: Props) {
-  const [hasLocationPermission, setHasLocationPermission] = useState(false);
-  const [mapError, setMapError] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
+  const pLat = isNaN(pickupLat) ? 0 : pickupLat;
+  const pLng = isNaN(pickupLng) ? 0 : pickupLng;
+  const dLat = isNaN(dropoffLat) ? 0 : dropoffLat;
+  const dLng = isNaN(dropoffLng) ? 0 : dropoffLng;
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        setHasLocationPermission(status === 'granted');
-      } catch (e) {
-        console.log('Location permission error:', e);
-      }
-    })();
-  }, []);
+  const openRoute = () => {
+    const url = Platform.select({
+      ios: `maps:0,0?saddr=${pLat},${pLng}&daddr=${dLat},${dLng}`,
+      android: `google.navigation:q=${dLat},${dLng}&waypoints=${pLat},${pLng}`,
+      default: `https://www.google.com/maps/dir/${pLat},${pLng}/${dLat},${dLng}`,
+    });
+    if (url) {
+      Linking.openURL(url).catch(() => {
+        Linking.openURL(`https://www.google.com/maps/dir/${pLat},${pLng}/${dLat},${dLng}`);
+      });
+    }
+  };
 
-  // Validate coordinates
-  const pLat = isNaN(pickupLat) ? 40.7128 : pickupLat;
-  const pLng = isNaN(pickupLng) ? -74.006 : pickupLng;
-  const dLat = isNaN(dropoffLat) ? 40.6413 : dropoffLat;
-  const dLng = isNaN(dropoffLng) ? -73.7781 : dropoffLng;
-
-  const centerLat = (pLat + dLat) / 2;
-  const centerLng = (pLng + dLng) / 2;
-  const latDelta = Math.max(Math.abs(pLat - dLat) * 1.8, 0.02);
-  const lngDelta = Math.max(Math.abs(pLng - dLng) * 1.8, 0.02);
-
-  if (!MapView || mapError) {
-    return (
-      <View style={styles.fallback}>
-        <Text style={styles.fallbackText}>Map unavailable</Text>
-      </View>
-    );
-  }
+  const openLocation = (lat: number, lng: number, label: string) => {
+    const url = Platform.select({
+      ios: `maps:0,0?q=${encodeURIComponent(label)}&ll=${lat},${lng}`,
+      android: `geo:0,0?q=${lat},${lng}(${encodeURIComponent(label)})`,
+      default: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+    });
+    if (url) {
+      Linking.openURL(url).catch(() => {
+        Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
+      });
+    }
+  };
 
   return (
-    <View style={styles.mapContainer}>
-      {!mapReady && (
-        <View style={styles.loading}>
-          <ActivityIndicator size="large" color="#FF3B30" />
-          <Text style={styles.loadingText}>Loading map...</Text>
+    <View style={styles.container}>
+      {/* Visual map representation */}
+      <View style={styles.mapVisual}>
+        <View style={styles.routeLine} />
+
+        <View style={styles.pinRow}>
+          <TouchableOpacity style={styles.pinCard} onPress={() => openLocation(pLat, pLng, pickupName)} activeOpacity={0.7}>
+            <View style={styles.pinDotGreen} />
+            <Text style={styles.pinLabel}>PICKUP</Text>
+            <Text style={styles.pinName} numberOfLines={2}>{pickupName}</Text>
+            <Text style={styles.pinCoords}>{pLat.toFixed(4)}, {pLng.toFixed(4)}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.pinArrow}>
+            <Ionicons name="arrow-forward" size={24} color="#999" />
+          </View>
+
+          <TouchableOpacity style={styles.pinCard} onPress={() => openLocation(dLat, dLng, dropoffName)} activeOpacity={0.7}>
+            <View style={styles.pinDotRed} />
+            <Text style={styles.pinLabel}>DROP-OFF</Text>
+            <Text style={styles.pinName} numberOfLines={2}>{dropoffName}</Text>
+            <Text style={styles.pinCoords}>{dLat.toFixed(4)}, {dLng.toFixed(4)}</Text>
+          </TouchableOpacity>
         </View>
-      )}
-      <MapView
-        style={styles.map}
-        initialRegion={{
-          latitude: centerLat,
-          longitude: centerLng,
-          latitudeDelta: latDelta,
-          longitudeDelta: lngDelta,
-        }}
-        showsUserLocation={hasLocationPermission}
-        showsMyLocationButton={hasLocationPermission}
-        onMapReady={() => setMapReady(true)}
-        onError={() => setMapError(true)}
-      >
-        {Marker && (
-          <>
-            <Marker
-              coordinate={{ latitude: pLat, longitude: pLng }}
-              title={pickupName || 'Pickup'}
-              description="Pickup Location"
-              pinColor="#34C759"
-            />
-            <Marker
-              coordinate={{ latitude: dLat, longitude: dLng }}
-              title={dropoffName || 'Drop-off'}
-              description="Drop-off Location"
-              pinColor="#FF3B30"
-            />
-          </>
-        )}
-      </MapView>
+
+        <TouchableOpacity
+          testID="open-full-route-btn"
+          style={styles.routeBtn}
+          onPress={openRoute}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="navigate" size={22} color="#FFF" />
+          <Text style={styles.routeBtnText}>Open Full Route in Maps</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  mapContainer: { width, height: height * 0.6, backgroundColor: '#F5F5F5' },
-  map: { width: '100%', height: '100%' },
-  loading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', zIndex: 1, backgroundColor: '#F5F5F5' },
-  loadingText: { marginTop: 8, fontSize: 14, color: '#666' },
-  fallback: { width, height: height * 0.5, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
-  fallbackText: { fontSize: 16, color: '#999' },
+  container: { width: '100%', height: height * 0.55, backgroundColor: '#F5F5F5' },
+  mapVisual: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 20 },
+  routeLine: { position: 'absolute', top: '35%', left: '50%', width: 2, height: '20%', backgroundColor: '#E5E5E5', marginLeft: -1 },
+  pinRow: { flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%', marginBottom: 24 },
+  pinCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 16, padding: 16, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+  pinArrow: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
+  pinDotGreen: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#34C759', marginBottom: 8 },
+  pinDotRed: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#FF3B30', marginBottom: 8 },
+  pinLabel: { fontSize: 10, fontWeight: '800', color: '#999', letterSpacing: 1, marginBottom: 4 },
+  pinName: { fontSize: 14, fontWeight: '700', color: '#0A0A0A', textAlign: 'center' },
+  pinCoords: { fontSize: 10, color: '#BBB', marginTop: 4 },
+  routeBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#007AFF', paddingHorizontal: 28, paddingVertical: 16, borderRadius: 50, shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  routeBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
 });
