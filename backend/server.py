@@ -867,6 +867,51 @@ async def delete_review(review_id: str, request: Request):
     await db.reviews.delete_one({"_id": ObjectId(review_id)})
     return {"message": "Review deleted"}
 
+# ==================== DATA MIGRATION ====================
+
+@api_router.get("/admin/export")
+async def export_data(request: Request):
+    """Export all cars and locations for migration to another environment."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    cars = await db.cars.find({}, {"_id": 0, "created_at": 0}).to_list(500)
+    locations_data = await db.locations.find({}, {"_id": 0, "created_at": 0}).to_list(500)
+    
+    return {"cars": cars, "locations": locations_data, "count": {"cars": len(cars), "locations": len(locations_data)}}
+
+@api_router.post("/admin/import")
+async def import_data(request: Request):
+    """Import cars and locations from another environment. Replaces existing data."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    body = await request.json()
+    imported_cars = 0
+    imported_locs = 0
+    
+    # Import locations first (cars reference them)
+    if "locations" in body and body["locations"]:
+        for loc in body["locations"]:
+            existing = await db.locations.find_one({"name": loc.get("name"), "city": loc.get("city")})
+            if not existing:
+                loc["created_at"] = datetime.now(timezone.utc)
+                await db.locations.insert_one(loc)
+                imported_locs += 1
+    
+    # Import cars
+    if "cars" in body and body["cars"]:
+        for car in body["cars"]:
+            existing = await db.cars.find_one({"name": car.get("name"), "brand": car.get("brand")})
+            if not existing:
+                car["created_at"] = datetime.now(timezone.utc)
+                await db.cars.insert_one(car)
+                imported_cars += 1
+    
+    return {"message": f"Imported {imported_cars} cars and {imported_locs} locations", "imported_cars": imported_cars, "imported_locations": imported_locs}
+
 # ==================== SEED DATA ====================
 
 SEED_LOCATIONS = [
