@@ -185,6 +185,7 @@ class LocationCreate(BaseModel):
     lat: float
     lng: float
     type: str = "both"  # pickup, dropoff, both
+    tax_rate: float = 0.0  # percentage e.g. 18.0 for 18%
 
 class LocationUpdate(BaseModel):
     name: Optional[str] = None
@@ -194,6 +195,7 @@ class LocationUpdate(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     type: Optional[str] = None
+    tax_rate: Optional[float] = None
 
 class ReviewCreate(BaseModel):
     car_id: str
@@ -495,7 +497,18 @@ async def create_booking(booking: BookingCreate, request: Request):
     pickup = datetime.fromisoformat(booking.pickup_date)
     dropoff = datetime.fromisoformat(booking.dropoff_date)
     days = max(1, (dropoff - pickup).days)
-    total = round(days * car["price_per_day"], 2)
+    subtotal = round(days * car["price_per_day"], 2)
+    
+    # Look up tax rate from pickup location
+    tax_rate = 0.0
+    pickup_loc_name = booking.pickup_location.get("name", "")
+    if pickup_loc_name:
+        loc = await db.locations.find_one({"name": pickup_loc_name}, {"_id": 0})
+        if loc:
+            tax_rate = loc.get("tax_rate", 0.0)
+    
+    tax_amount = round(subtotal * (tax_rate / 100), 2)
+    total = round(subtotal + tax_amount, 2)
     
     booking_doc = {
         "user_id": str(user_id),
@@ -510,6 +523,9 @@ async def create_booking(booking: BookingCreate, request: Request):
         "dropoff_location": booking.dropoff_location,
         "days": days,
         "price_per_day": car["price_per_day"],
+        "subtotal": subtotal,
+        "tax_rate": tax_rate,
+        "tax_amount": tax_amount,
         "total_price": total,
         "payment_method": booking.payment_method,
         "payment_status": "pending" if booking.payment_method == "stripe" else "paid",
@@ -683,6 +699,19 @@ async def get_locations(city: Optional[str] = None, type: Optional[str] = None):
     locations = await db.locations.find(query).to_list(100)
     return [serialize_location(l) for l in locations]
 
+@api_router.get("/locations/cities/list")
+async def get_location_cities():
+    cities = await db.locations.distinct("city")
+    return cities
+
+@api_router.get("/locations/tax-by-name")
+async def get_tax_by_location_name(name: str):
+    """Get tax rate for a location by name."""
+    loc = await db.locations.find_one({"name": {"$regex": name, "$options": "i"}}, {"_id": 0, "tax_rate": 1, "name": 1, "city": 1})
+    if loc:
+        return {"tax_rate": loc.get("tax_rate", 0.0), "name": loc.get("name", ""), "city": loc.get("city", "")}
+    return {"tax_rate": 0.0, "name": name, "city": ""}
+
 @api_router.get("/locations/{location_id}")
 async def get_location(location_id: str):
     loc = await db.locations.find_one({"_id": ObjectId(location_id)})
@@ -725,11 +754,6 @@ async def delete_location(location_id: str, request: Request):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Location not found")
     return {"message": "Location deleted"}
-
-@api_router.get("/locations/cities/list")
-async def get_location_cities():
-    cities = await db.locations.distinct("city")
-    return cities
 
 # Browse cars by location
 @api_router.get("/cars/by-location/{location_id}")
@@ -922,7 +946,8 @@ SEED_LOCATIONS = [
         "country": "Dominican Republic",
         "lat": 18.5670,
         "lng": -68.3634,
-        "type": "both"
+        "type": "both",
+        "tax_rate": 18.0
     },
     {
         "name": "Bavaro Beach Hub",
@@ -931,7 +956,8 @@ SEED_LOCATIONS = [
         "country": "Dominican Republic",
         "lat": 18.6871,
         "lng": -68.4484,
-        "type": "both"
+        "type": "both",
+        "tax_rate": 18.0
     },
     {
         "name": "Santo Domingo Downtown",
@@ -940,7 +966,8 @@ SEED_LOCATIONS = [
         "country": "Dominican Republic",
         "lat": 18.4722,
         "lng": -69.8830,
-        "type": "both"
+        "type": "both",
+        "tax_rate": 18.0
     },
     {
         "name": "Las Americas Airport SDQ",
@@ -949,7 +976,8 @@ SEED_LOCATIONS = [
         "country": "Dominican Republic",
         "lat": 18.4297,
         "lng": -69.6689,
-        "type": "both"
+        "type": "both",
+        "tax_rate": 18.0
     },
     {
         "name": "Miami International Airport",
@@ -958,7 +986,8 @@ SEED_LOCATIONS = [
         "country": "USA",
         "lat": 25.7959,
         "lng": -80.2870,
-        "type": "both"
+        "type": "both",
+        "tax_rate": 7.0
     },
     {
         "name": "Miami Beach Rental Center",
@@ -967,7 +996,8 @@ SEED_LOCATIONS = [
         "country": "USA",
         "lat": 25.7826,
         "lng": -80.1341,
-        "type": "both"
+        "type": "both",
+        "tax_rate": 7.0
     },
     {
         "name": "JFK Airport New York",
@@ -976,7 +1006,8 @@ SEED_LOCATIONS = [
         "country": "USA",
         "lat": 40.6413,
         "lng": -73.7781,
-        "type": "both"
+        "type": "both",
+        "tax_rate": 8.875
     },
     {
         "name": "Manhattan Midtown Hub",
@@ -985,7 +1016,8 @@ SEED_LOCATIONS = [
         "country": "USA",
         "lat": 40.7580,
         "lng": -73.9941,
-        "type": "both"
+        "type": "both",
+        "tax_rate": 8.875
     }
 ]
 

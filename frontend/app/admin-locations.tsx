@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-const EMPTY_LOC = { name: '', address: '', city: '', country: '', lat: '', lng: '', type: 'both' };
+const EMPTY_LOC = { name: '', address: '', city: '', country: '', lat: '', lng: '', type: 'both', tax_rate: '' };
 
 export default function AdminLocationsScreen() {
   const [locations, setLocations] = useState<any[]>([]);
@@ -36,6 +36,7 @@ export default function AdminLocationsScreen() {
     setForm({
       name: loc.name || '', address: loc.address || '', city: loc.city || '', country: loc.country || '',
       lat: String(loc.lat ?? ''), lng: String(loc.lng ?? ''), type: loc.type || 'both',
+      tax_rate: String(loc.tax_rate ?? '0'),
     });
     setShowForm(true);
   };
@@ -49,7 +50,7 @@ export default function AdminLocationsScreen() {
     try {
       const token = await AsyncStorage.getItem('auth_token');
       const url = editLoc ? `${BACKEND_URL}/api/locations/${editLoc.id}` : `${BACKEND_URL}/api/locations`;
-      const body = { ...form, lat: parseFloat(form.lat), lng: parseFloat(form.lng) };
+      const body = { ...form, lat: parseFloat(form.lat), lng: parseFloat(form.lng), tax_rate: parseFloat(form.tax_rate) || 0 };
       const res = await fetch(url, {
         method: editLoc ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -114,6 +115,9 @@ export default function AdminLocationsScreen() {
                 <TextInput testID="loc-lng-input" style={styles.input} value={form.lng} onChangeText={v => setForm({...form, lng: v})} keyboardType="decimal-pad" placeholder="-68.3634" />
               </View>
             </View>
+
+            <Text style={styles.label}>Tax Rate (%)</Text>
+            <TextInput testID="loc-tax-input" style={styles.input} value={form.tax_rate} onChangeText={v => setForm({...form, tax_rate: v})} keyboardType="decimal-pad" placeholder="e.g. 18 for 18%" />
 
             <Text style={styles.label}>Type</Text>
             <View style={styles.typeRow}>
@@ -183,6 +187,7 @@ export default function AdminLocationsScreen() {
                 <View style={styles.locMeta}>
                   <View style={styles.locTag}><Text style={styles.locTagText}>{item.city}</Text></View>
                   <View style={styles.locTag}><Text style={styles.locTagText}>{item.country}</Text></View>
+                  {item.tax_rate > 0 && <View style={[styles.locTag, { backgroundColor: '#FFF0F0' }]}><Text style={[styles.locTagText, { color: '#FF3B30' }]}>Tax {item.tax_rate}%</Text></View>}
                 </View>
               </View>
               <View style={styles.locActions}>

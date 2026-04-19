@@ -241,7 +241,7 @@ async function showLocations() {
       </div>
       ${locs.map(l => `<div class="card">
         <div style="width:48px;height:48px;border-radius:14px;background:#fff0f0;display:flex;align-items:center;justify-content:center;font-size:20px">📍</div>
-        <div class="card-info"><h3>${l.name}</h3><p>${l.city}, ${l.country} · ${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}</p></div>
+        <div class="card-info"><h3>${l.name}</h3><p>${l.city}, ${l.country} · ${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}${l.tax_rate ? ' · <strong style="color:#ff3b30">Tax '+l.tax_rate+'%</strong>' : ''}</p></div>
         <div class="card-actions">
           <button class="btn btn-sm btn-blue" onclick='showLocForm("${l.id}")'>Edit</button>
           <button class="btn btn-sm btn-gray" onclick="deleteLoc('${l.id}','${l.name.replace(/'/g,"\\'")}')">Delete</button>
@@ -269,6 +269,7 @@ async function showLocForm(id) {
           <div class="form-group"><label>Latitude *</label><input class="input" id="l-lat" value="${loc.lat||''}"></div>
           <div class="form-group"><label>Longitude *</label><input class="input" id="l-lng" value="${loc.lng||''}"></div>
         </div>
+        <div class="form-group"><label>Tax Rate (%)</label><input class="input" id="l-tax" type="number" step="0.01" value="${loc.tax_rate||0}" placeholder="e.g. 18 for 18%"></div>
         <div style="display:flex;gap:10px;margin-top:24px">
           <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
           <button class="btn btn-red" style="flex:1" onclick="saveLoc('${id||''}')">Save</button>
@@ -278,7 +279,7 @@ async function showLocForm(id) {
 }
 
 async function saveLoc(id) {
-  const body = {name:document.getElementById('l-name').value, address:document.getElementById('l-addr').value, city:document.getElementById('l-city').value, country:document.getElementById('l-country').value, lat:parseFloat(document.getElementById('l-lat').value)||0, lng:parseFloat(document.getElementById('l-lng').value)||0, type:'both'};
+  const body = {name:document.getElementById('l-name').value, address:document.getElementById('l-addr').value, city:document.getElementById('l-city').value, country:document.getElementById('l-country').value, lat:parseFloat(document.getElementById('l-lat').value)||0, lng:parseFloat(document.getElementById('l-lng').value)||0, type:'both', tax_rate:parseFloat(document.getElementById('l-tax').value)||0};
   if (!body.name||!body.city) { alert('Name and city required'); return; }
   try { await api(id?'/locations/'+id:'/locations',{method:id?'PUT':'POST',body:JSON.stringify(body)}); closeModal(); showLocations(); } catch(e) { alert(e.message); }
 }

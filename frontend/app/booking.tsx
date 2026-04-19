@@ -14,6 +14,7 @@ export default function BookingScreen() {
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('cash');
+  const [taxRate, setTaxRate] = useState(0);
   const router = useRouter();
 
   // Default dates: tomorrow pickup, 3 days later dropoff
@@ -54,6 +55,15 @@ export default function BookingScreen() {
     return (days * car.price_per_day).toFixed(2);
   }, [days, car]);
 
+  const taxAmount = useMemo(() => {
+    if (!car || taxRate <= 0) return '0.00';
+    return ((days * car.price_per_day) * (taxRate / 100)).toFixed(2);
+  }, [days, car, taxRate]);
+
+  const grandTotal = useMemo(() => {
+    return (parseFloat(total) + parseFloat(taxAmount)).toFixed(2);
+  }, [total, taxAmount]);
+
   // When pickup changes, ensure dropoff is after pickup
   const handlePickupChange = (newDate: Date) => {
     setPickupDate(newDate);
@@ -76,7 +86,20 @@ export default function BookingScreen() {
     const fetchCar = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/cars/${carId}`);
-        if (res.ok) setCar(await res.json());
+        if (res.ok) {
+          const carData = await res.json();
+          setCar(carData);
+          // Fetch tax rate from pickup location
+          if (carData.pickup_location?.name) {
+            try {
+              const taxRes = await fetch(`${BACKEND_URL}/api/locations/tax-by-name?name=${encodeURIComponent(carData.pickup_location.name)}`);
+              if (taxRes.ok) {
+                const taxData = await taxRes.json();
+                setTaxRate(taxData.tax_rate || 0);
+              }
+            } catch (e) { console.log('Tax fetch error:', e); }
+          }
+        }
       } catch (e) { console.log(e); }
       setLoading(false);
     };
@@ -256,9 +279,19 @@ export default function BookingScreen() {
             <Text style={styles.summaryLabel}>Drop-off</Text>
             <Text style={styles.summaryValue}>{dropoffDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
           </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Subtotal</Text>
+            <Text style={styles.summaryValue}>${total}</Text>
+          </View>
+          {taxRate > 0 && (
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Tax ({taxRate}%)</Text>
+              <Text style={styles.summaryValue}>${taxAmount}</Text>
+            </View>
+          )}
           <View style={[styles.summaryRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>${total}</Text>
+            <Text style={styles.totalValue}>${grandTotal}</Text>
           </View>
         </View>
       </ScrollView>
@@ -275,7 +308,7 @@ export default function BookingScreen() {
             <ActivityIndicator color="#FFF" />
           ) : (
             <Text style={styles.confirmBtnText}>
-              {paymentMethod === 'stripe' ? `Pay $${total}` : `Confirm Booking`}
+              {paymentMethod === 'stripe' ? `Pay $${grandTotal}` : `Confirm Booking`}
             </Text>
           )}
         </TouchableOpacity>
