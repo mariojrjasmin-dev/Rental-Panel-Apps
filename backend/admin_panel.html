@@ -152,7 +152,22 @@ async function showCarForm(id) {
     <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
       <div class="modal">
         <h2>${id?'Edit':'Add'} Vehicle</h2>
-        <div class="form-group"><label>Image URL</label><input class="input" id="f-img" value="${car.image_url||''}"></div>
+        <div class="form-group"><label>Car Photo</label>
+        <div id="img-preview-wrap" style="${car.image_url ? '' : 'display:none'}">
+          <div style="position:relative;border-radius:16px;overflow:hidden;margin-bottom:8px">
+            <img id="img-preview" src="${car.image_url||''}" style="width:100%;height:160px;object-fit:cover;border-radius:16px;background:#f5f5f5" onerror="this.style.background='#f0f0f0'">
+            <span onclick="document.getElementById('f-img').value='';document.getElementById('img-preview-wrap').style.display='none'" style="position:absolute;top:8px;right:8px;background:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#ff3b30;font-size:18px;font-weight:bold">✕</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border-radius:14px;background:#fff0f0;cursor:pointer;font-weight:700;color:#ff3b30;font-size:14px">
+            📷 Upload Photo
+            <input type="file" id="f-file" accept="image/*" onchange="uploadImage(this)" style="display:none">
+          </label>
+        </div>
+        <div id="upload-status" style="margin-bottom:6px"></div>
+        <input class="input" id="f-img" value="${car.image_url||''}" placeholder="Or paste image URL" onchange="if(this.value){document.getElementById('img-preview').src=this.value;document.getElementById('img-preview-wrap').style.display='block'}">
+        </div>
         <div class="form-row">
           <div class="form-group"><label>Name *</label><input class="input" id="f-name" value="${car.name||''}"></div>
           <div class="form-group"><label>Brand *</label><input class="input" id="f-brand" value="${car.brand||''}"></div>
@@ -222,6 +237,32 @@ async function deleteCar(id,name) {
 }
 
 function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+
+async function uploadImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const status = document.getElementById('upload-status');
+  status.innerHTML = '<span style="color:#007aff;font-size:13px">⏳ Uploading...</span>';
+  try {
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      const base64 = e.target.result.split(',')[1];
+      const ext = file.name.split('.').pop() || 'jpg';
+      const res = await api('/upload/image', {
+        method: 'POST',
+        body: JSON.stringify({ image_data: base64, filename: 'car_' + Date.now() + '.' + ext })
+      });
+      document.getElementById('f-img').value = res.url;
+      document.getElementById('img-preview').src = res.url;
+      document.getElementById('img-preview-wrap').style.display = 'block';
+      status.innerHTML = '<span style="color:#34c759;font-size:13px">✅ Photo uploaded!</span>';
+      input.value = '';
+    };
+    reader.readAsDataURL(file);
+  } catch(e) {
+    status.innerHTML = '<span style="color:#ff3b30;font-size:13px">❌ Upload failed: ' + e.message + '</span>';
+  }
+}
 
 // LOCATIONS
 async function showLocations() {
