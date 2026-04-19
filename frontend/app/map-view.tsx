@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,33 +15,54 @@ export default function MapViewScreen() {
     dropoffName: string;
   }>();
   const router = useRouter();
+  const [mapCrashed, setMapCrashed] = useState(false);
 
-  const pickupLat = parseFloat(params.pickupLat || '40.7128');
-  const pickupLng = parseFloat(params.pickupLng || '-74.006');
-  const dropoffLat = parseFloat(params.dropoffLat || '40.6413');
-  const dropoffLng = parseFloat(params.dropoffLng || '-73.7781');
+  // Safe parse with fallbacks
+  const pickupLat = parseFloat(params.pickupLat ?? '') || 40.7128;
+  const pickupLng = parseFloat(params.pickupLng ?? '') || -74.006;
+  const dropoffLat = parseFloat(params.dropoffLat ?? '') || 40.6413;
+  const dropoffLng = parseFloat(params.dropoffLng ?? '') || -73.7781;
   const pickupName = params.pickupName || 'Pickup';
   const dropoffName = params.dropoffName || 'Drop-off';
 
   const openDirections = (lat: number, lng: number, label: string) => {
     const url = Platform.select({
-      ios: `maps:0,0?q=${label}&ll=${lat},${lng}`,
-      android: `geo:0,0?q=${lat},${lng}(${label})`,
+      ios: `maps:0,0?q=${encodeURIComponent(label)}&ll=${lat},${lng}`,
+      android: `geo:0,0?q=${lat},${lng}(${encodeURIComponent(label)})`,
       default: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
     });
-    if (url) Linking.openURL(url);
+    if (url) Linking.openURL(url).catch(() => {
+      // Fallback to Google Maps web
+      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+    });
+  };
+
+  const openFullDirections = () => {
+    const url = `https://www.google.com/maps/dir/${pickupLat},${pickupLng}/${dropoffLat},${dropoffLng}`;
+    Linking.openURL(url);
   };
 
   return (
     <View style={styles.container}>
-      <MapComponent
-        pickupLat={pickupLat}
-        pickupLng={pickupLng}
-        pickupName={pickupName}
-        dropoffLat={dropoffLat}
-        dropoffLng={dropoffLng}
-        dropoffName={dropoffName}
-      />
+      {mapCrashed ? (
+        <View style={styles.mapFallback}>
+          <Ionicons name="map" size={48} color="#FF3B30" />
+          <Text style={styles.fallbackTitle}>Map View</Text>
+          <TouchableOpacity style={styles.openMapBtn} onPress={openFullDirections}>
+            <Ionicons name="navigate" size={18} color="#FFF" />
+            <Text style={styles.openMapBtnText}>Open in Maps</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <MapComponent
+          pickupLat={pickupLat}
+          pickupLng={pickupLng}
+          pickupName={pickupName}
+          dropoffLat={dropoffLat}
+          dropoffLng={dropoffLng}
+          dropoffName={dropoffName}
+        />
+      )}
 
       <SafeAreaView style={styles.overlay} edges={['top']}>
         <TouchableOpacity testID="map-back-btn" style={styles.backBtn} onPress={() => router.back()}>
@@ -96,6 +118,10 @@ export default function MapViewScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF' },
+  mapFallback: { width: '100%', height: '50%', backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', gap: 12 },
+  fallbackTitle: { fontSize: 20, fontWeight: '800', color: '#0A0A0A' },
+  openMapBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#007AFF', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 50 },
+  openMapBtnText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
   overlay: { position: 'absolute', top: 0, left: 0, right: 0 },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', marginLeft: 16, marginTop: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
   bottomSheet: { flex: 1, backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 24, paddingTop: 12, marginTop: -24, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },

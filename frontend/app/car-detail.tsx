@@ -163,7 +163,7 @@ export default function CarDetailScreen() {
                 <Text style={styles.sectionTitle}>Locations</Text>
                 {car.pickup_location && (
                   <TouchableOpacity testID="pickup-location-btn" style={styles.locationRow}
-                    onPress={() => router.push({ pathname: '/map-view', params: { pickupLat: car.pickup_location.lat, pickupLng: car.pickup_location.lng, pickupName: car.pickup_location.name, dropoffLat: car.dropoff_location?.lat, dropoffLng: car.dropoff_location?.lng, dropoffName: car.dropoff_location?.name } })}>
+                    onPress={() => router.push({ pathname: '/map-view', params: { pickupLat: String(car.pickup_location?.lat || 0), pickupLng: String(car.pickup_location?.lng || 0), pickupName: String(car.pickup_location?.name || 'Pickup'), dropoffLat: String(car.dropoff_location?.lat || 0), dropoffLng: String(car.dropoff_location?.lng || 0), dropoffName: String(car.dropoff_location?.name || 'Drop-off') } })}>
                     <View style={styles.locationIcon}><Ionicons name="location" size={18} color="#34C759" /></View>
                     <View style={{ flex: 1 }}><Text style={styles.locationLabel}>Pickup</Text><Text style={styles.locationName}>{car.pickup_location.name}</Text></View>
                     <Ionicons name="map-outline" size={20} color="#007AFF" />
@@ -171,7 +171,7 @@ export default function CarDetailScreen() {
                 )}
                 {car.dropoff_location && (
                   <TouchableOpacity testID="dropoff-location-btn" style={styles.locationRow}
-                    onPress={() => router.push({ pathname: '/map-view', params: { pickupLat: car.pickup_location?.lat, pickupLng: car.pickup_location?.lng, pickupName: car.pickup_location?.name, dropoffLat: car.dropoff_location.lat, dropoffLng: car.dropoff_location.lng, dropoffName: car.dropoff_location.name } })}>
+                    onPress={() => router.push({ pathname: '/map-view', params: { pickupLat: String(car.pickup_location?.lat || 0), pickupLng: String(car.pickup_location?.lng || 0), pickupName: String(car.pickup_location?.name || 'Pickup'), dropoffLat: String(car.dropoff_location?.lat || 0), dropoffLng: String(car.dropoff_location?.lng || 0), dropoffName: String(car.dropoff_location?.name || 'Drop-off') } })}>
                     <View style={[styles.locationIcon, { backgroundColor: '#FFF0F0' }]}><Ionicons name="location" size={18} color="#FF3B30" /></View>
                     <View style={{ flex: 1 }}><Text style={styles.locationLabel}>Drop-off</Text><Text style={styles.locationName}>{car.dropoff_location.name}</Text></View>
                     <Ionicons name="map-outline" size={20} color="#007AFF" />

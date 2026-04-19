@@ -12,7 +12,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos of cars for listings",
-        "NSPhotoLibraryUsageDescription": "Select car photos from gallery"
+        "NSPhotoLibraryUsageDescription": "Select car photos from gallery",
+        "NSLocationWhenInUseUsageDescription": "Show your location on the map"
       }
     },
     "android": {
@@ -21,7 +22,7 @@
         "backgroundColor": "#000"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"]
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
     },
     "web": {
       "bundler": "metro",
