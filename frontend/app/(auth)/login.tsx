@@ -81,7 +81,7 @@ export default function LoginScreen() {
           <TouchableOpacity testID="google-login-button" style={styles.googleBtn} activeOpacity={0.7}
             onPress={() => {
               // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-              const redirectUrl = (typeof window !== 'undefined' ? window.location.origin : process.env.EXPO_PUBLIC_BACKEND_URL) + '/(tabs)/home';
+              const redirectUrl = window.location.origin + '/(tabs)/home';
               if (typeof window !== 'undefined') {
                 window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
               }
