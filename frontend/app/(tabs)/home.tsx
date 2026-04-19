@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image, ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
@@ -71,7 +71,13 @@ export default function HomeScreen() {
   }, [activeCategory, search, activeCity]);
 
   useEffect(() => { fetchLocations(); }, [fetchLocations]);
-  useEffect(() => { fetchCars(); }, [fetchCars]);
+
+  // Refetch cars every time the tab is focused (not just on mount)
+  useFocusEffect(
+    useCallback(() => {
+      fetchCars();
+    }, [fetchCars])
+  );
 
   const onRefresh = () => { setRefreshing(true); fetchCars(); };
 

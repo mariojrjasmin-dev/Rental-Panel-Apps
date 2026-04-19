@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, Image, ActivityIndicator, RefreshControl } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
@@ -52,7 +52,12 @@ export default function BookingsScreen() {
     setRefreshing(false);
   }, []);
 
-  useEffect(() => { fetchBookings(); }, [fetchBookings]);
+  // Refetch bookings every time the tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchBookings();
+    }, [fetchBookings])
+  );
 
   const onRefresh = () => { setRefreshing(true); fetchBookings(); };
 
