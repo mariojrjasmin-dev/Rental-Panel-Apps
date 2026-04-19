@@ -122,7 +122,11 @@ async function showDashboard() {
       </div>
       <div id="modal-root"></div>
     `);
-  } catch(e) { token=null; localStorage.removeItem('admin_token'); showLogin('Session expired'); }
+  } catch(e) { 
+    // Clear stale token and show actual error
+    token=null; localStorage.removeItem('admin_token'); 
+    showLogin(e.message || 'Session expired. Please login again.'); 
+  }
 }
 
 function carCard(c) {
