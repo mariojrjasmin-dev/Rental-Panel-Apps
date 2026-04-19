@@ -4,6 +4,7 @@ load_dotenv(_Path(__file__).parent / '.env')
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
@@ -1121,6 +1122,15 @@ async def shutdown():
 
 # Include router
 app.include_router(api_router)
+
+# Serve admin panel HTML
+ADMIN_HTML = _Path(__file__).parent / "admin_panel.html"
+
+@app.get("/api/admin-panel", response_class=HTMLResponse)
+async def serve_admin_panel():
+    if ADMIN_HTML.exists():
+        return HTMLResponse(content=ADMIN_HTML.read_text(), status_code=200)
+    return HTMLResponse(content="<h1>Admin panel not found</h1>", status_code=404)
 
 # Serve uploaded images
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")

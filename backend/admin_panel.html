@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dams Car Rental - Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;color:#0a0a0a}
+.header{background:#0a0a0a;color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:20px;font-weight:900;letter-spacing:-0.5px}
+.header span{color:#ff3b30;font-size:12px;font-weight:700;letter-spacing:4px}
+.btn{padding:10px 20px;border:none;border-radius:50px;cursor:pointer;font-weight:700;font-size:14px}
+.btn-red{background:#ff3b30;color:#fff}
+.btn-gray{background:#e5e5e5;color:#666}
+.btn-blue{background:#007aff;color:#fff}
+.btn-sm{padding:6px 14px;font-size:12px}
+.container{max-width:900px;margin:0 auto;padding:24px}
+.login-box{max-width:400px;margin:100px auto;background:#fff;border-radius:24px;padding:40px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
+.login-box h2{font-size:28px;font-weight:900;margin-bottom:8px}
+.login-box p{color:#666;margin-bottom:24px}
+.input{width:100%;padding:14px;border:1px solid #e5e5e5;border-radius:12px;font-size:15px;background:#f5f5f5;margin-bottom:12px}
+.tabs{display:flex;gap:8px;margin-bottom:20px}
+.tab{padding:8px 16px;border-radius:50px;border:1px solid #e5e5e5;background:#fff;cursor:pointer;font-weight:600;font-size:13px}
+.tab.active{background:#0a0a0a;color:#fff;border-color:#0a0a0a}
+.card{background:#fff;border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid #e5e5e5;display:flex;align-items:center;gap:14px}
+.card img{width:80px;height:56px;border-radius:10px;object-fit:cover;background:#f5f5f5}
+.card-info{flex:1}
+.card-info h3{font-size:15px;font-weight:700}
+.card-info p{font-size:12px;color:#666;margin-top:2px}
+.card-actions{display:flex;gap:6px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px}
+.stat{background:#fff;border-radius:14px;padding:16px;text-align:center;border:1px solid #e5e5e5}
+.stat .num{font-size:24px;font-weight:900}
+.stat .label{font-size:11px;color:#999;text-transform:uppercase;margin-top:4px}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:11px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px}
+.form-row{display:flex;gap:12px}
+.form-row .form-group{flex:1}
+.loc-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.loc-pill{padding:6px 12px;border-radius:50px;border:1px solid #d5f5e3;background:#f0fff4;cursor:pointer;font-size:11px;font-weight:600}
+.loc-pill.active-green{background:#34c759;color:#fff;border-color:#34c759}
+.loc-pill.active-red{background:#ff3b30;color:#fff;border-color:#ff3b30}
+.selected-loc{background:#f5f5f5;border-radius:10px;padding:8px 12px;margin-bottom:6px;font-size:13px;display:flex;align-items:center;gap:8px}
+.selected-loc .dot{width:10px;height:10px;border-radius:5px}
+.selected-loc .clear{cursor:pointer;color:#999;margin-left:auto}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);display:flex;justify-content:center;align-items:flex-start;padding-top:60px;z-index:100}
+.modal{background:#fff;border-radius:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;padding:28px}
+.modal h2{font-size:20px;font-weight:800;margin-bottom:20px}
+.hidden{display:none}
+.error{color:#ff3b30;font-size:13px;margin-bottom:12px;background:#fff0f0;padding:10px;border-radius:10px}
+.section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1px;margin:20px 0 8px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const API = window.location.origin + '/api';
+let token = localStorage.getItem('admin_token');
+let locations = [];
+
+async function api(path, opts = {}) {
+  const headers = {'Content-Type':'application/json', ...(opts.headers||{})};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API + path, {...opts, headers});
+  if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'Request failed'); }
+  return res.json();
+}
+
+function render(html) { document.getElementById('app').innerHTML = html; }
+
+// LOGIN
+function showLogin(err='') {
+  render(`
+    <div class="login-box">
+      <h1 style="font-size:40px;font-weight:900">DAMS</h1>
+      <span style="color:#ff3b30;font-weight:700;letter-spacing:4px;font-size:14px">CAR RENTAL</span>
+      <p style="margin-top:12px">Admin Panel Login</p>
+      ${err ? '<div class="error">'+err+'</div>' : ''}
+      <input class="input" id="email" placeholder="Email" value="admin@damscarrental.com">
+      <input class="input" id="pass" type="password" placeholder="Password">
+      <button class="btn btn-red" style="width:100%;padding:16px" onclick="doLogin()">Sign In</button>
+    </div>
+  `);
+}
+
+async function doLogin() {
+  try {
+    const r = await api('/auth/login', {method:'POST', body: JSON.stringify({email:document.getElementById('email').value, password:document.getElementById('pass').value})});
+    if (r.role !== 'admin') throw new Error('Admin access required');
+    token = r.token; localStorage.setItem('admin_token', token);
+    showDashboard();
+  } catch(e) { showLogin(e.message); }
+}
+
+// DASHBOARD
+async function showDashboard() {
+  try {
+    const [stats, cars, locs] = await Promise.all([api('/admin/stats'), api('/cars/all'), api('/locations')]);
+    locations = locs;
+    render(`
+      <div class="header">
+        <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-gray" onclick="showLocations()">Locations</button>
+          <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+        </div>
+      </div>
+      <div class="container">
+        <div class="stats">
+          <div class="stat"><div class="num">${stats.total_cars}</div><div class="label">Cars</div></div>
+          <div class="stat"><div class="num">${stats.total_bookings}</div><div class="label">Bookings</div></div>
+          <div class="stat"><div class="num">${stats.total_users}</div><div class="label">Users</div></div>
+          <div class="stat"><div class="num">${stats.active_bookings}</div><div class="label">Active</div></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h2 style="font-size:20px;font-weight:800">Vehicles</h2>
+          <button class="btn btn-red btn-sm" onclick="showCarForm()">+ Add Car</button>
+        </div>
+        <div id="car-list">${cars.map(c => carCard(c)).join('')}</div>
+      </div>
+      <div id="modal-root"></div>
+    `);
+  } catch(e) { token=null; localStorage.removeItem('admin_token'); showLogin('Session expired'); }
+}
+
+function carCard(c) {
+  return `<div class="card">
+    <img src="${c.image_url || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'}" onerror="this.style.background='#f0f0f0'">
+    <div class="card-info">
+      <h3>${c.name}</h3>
+      <p>${c.category} · $${c.price_per_day}/day · ${c.seats} seats</p>
+      ${c.pickup_location?.name ? '<p style="color:#007aff;font-size:11px">📍 '+c.pickup_location.name+'</p>' : ''}
+    </div>
+    <div class="card-actions">
+      <button class="btn btn-sm btn-blue" onclick="showCarForm('${c.id}')">Edit</button>
+      <button class="btn btn-sm btn-gray" onclick="deleteCar('${c.id}','${c.name.replace(/'/g,"\\'")}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function showCarForm(id) {
+  let car = {name:'',brand:'',model:'',year:2024,category:'Sedan',price_per_day:0,seats:5,transmission:'Automatic',fuel_type:'Gasoline',description:'',image_url:'',pickup_location:{name:'',lat:0,lng:0},dropoff_location:{name:'',lat:0,lng:0}};
+  if (id) { try { car = await api('/cars/'+id); } catch(e){} }
+  const cats = ['Sedan','SUV','Luxury','Electric','Sports','Compact'];
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h2>${id?'Edit':'Add'} Vehicle</h2>
+        <div class="form-group"><label>Image URL</label><input class="input" id="f-img" value="${car.image_url||''}"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Name *</label><input class="input" id="f-name" value="${car.name||''}"></div>
+          <div class="form-group"><label>Brand *</label><input class="input" id="f-brand" value="${car.brand||''}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Model</label><input class="input" id="f-model" value="${car.model||''}"></div>
+          <div class="form-group"><label>Year</label><input class="input" id="f-year" type="number" value="${car.year||2024}"></div>
+          <div class="form-group"><label>Seats</label><input class="input" id="f-seats" type="number" value="${car.seats||5}"></div>
+        </div>
+        <div class="form-group"><label>Category</label><div class="loc-pills">${cats.map(c=>`<span class="loc-pill ${car.category===c?'active-green':''}" onclick="this.parentNode.querySelectorAll('.loc-pill').forEach(p=>p.classList.remove('active-green'));this.classList.add('active-green');document.getElementById('f-cat').value='${c}'">${c}</span>`).join('')}</div><input type="hidden" id="f-cat" value="${car.category||'Sedan'}"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Price/Day ($) *</label><input class="input" id="f-price" type="number" step="0.01" value="${car.price_per_day||0}"></div>
+          <div class="form-group"><label>Transmission</label><input class="input" id="f-trans" value="${car.transmission||'Automatic'}"></div>
+          <div class="form-group"><label>Fuel</label><input class="input" id="f-fuel" value="${car.fuel_type||'Gasoline'}"></div>
+        </div>
+        <div class="form-group"><label>Description</label><textarea class="input" id="f-desc" rows="2">${car.description||''}</textarea></div>
+        <div class="section-title">Pickup Location</div>
+        ${car.pickup_location?.name ? `<div class="selected-loc"><span class="dot" style="background:#34c759"></span>${car.pickup_location.name}<span class="clear" onclick="document.getElementById('f-pickup').value='';this.parentNode.remove()">✕</span></div>` : ''}
+        <div class="loc-pills" id="pickup-pills">${locations.map(l=>`<span class="loc-pill ${car.pickup_location?.name===l.name?'active-green':''}" onclick="selectLoc('pickup','${l.id}','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
+        <input type="hidden" id="f-pickup" value='${JSON.stringify(car.pickup_location||{})}'>
+        <div class="section-title">Drop-off Location</div>
+        ${car.dropoff_location?.name ? `<div class="selected-loc"><span class="dot" style="background:#ff3b30"></span>${car.dropoff_location.name}<span class="clear" onclick="document.getElementById('f-dropoff').value='';this.parentNode.remove()">✕</span></div>` : ''}
+        <div class="loc-pills" id="dropoff-pills">${locations.map(l=>`<span class="loc-pill ${car.dropoff_location?.name===l.name?'active-red':''}" onclick="selectLoc('dropoff','${l.id}','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
+        <input type="hidden" id="f-dropoff" value='${JSON.stringify(car.dropoff_location||{})}'>
+        <div style="display:flex;gap:10px;margin-top:24px">
+          <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-red" style="flex:1" onclick="saveCar('${id||''}')">Save</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function selectLoc(type, id, name, lat, lng) {
+  const data = JSON.stringify({name,lat,lng});
+  document.getElementById('f-'+type).value = data;
+  const pills = document.getElementById(type+'-pills');
+  pills.querySelectorAll('.loc-pill').forEach(p => p.classList.remove('active-green','active-red'));
+  event.target.classList.add(type==='pickup'?'active-green':'active-red');
+}
+
+async function saveCar(id) {
+  const body = {
+    name: document.getElementById('f-name').value,
+    brand: document.getElementById('f-brand').value,
+    model: document.getElementById('f-model').value,
+    year: parseInt(document.getElementById('f-year').value)||2024,
+    category: document.getElementById('f-cat').value,
+    price_per_day: parseFloat(document.getElementById('f-price').value)||0,
+    seats: parseInt(document.getElementById('f-seats').value)||5,
+    transmission: document.getElementById('f-trans').value,
+    fuel_type: document.getElementById('f-fuel').value,
+    description: document.getElementById('f-desc').value,
+    image_url: document.getElementById('f-img').value,
+  };
+  try { body.pickup_location = JSON.parse(document.getElementById('f-pickup').value); } catch(e) { body.pickup_location = {name:'',lat:0,lng:0}; }
+  try { body.dropoff_location = JSON.parse(document.getElementById('f-dropoff').value); } catch(e) { body.dropoff_location = {name:'',lat:0,lng:0}; }
+  if (!body.name||!body.brand||!body.price_per_day) { alert('Name, brand and price required'); return; }
+  try {
+    await api(id?'/cars/'+id:'/cars', {method:id?'PUT':'POST', body:JSON.stringify(body)});
+    closeModal(); showDashboard();
+  } catch(e) { alert(e.message); }
+}
+
+async function deleteCar(id,name) {
+  if (!confirm('Delete '+name+'?')) return;
+  try { await api('/cars/'+id,{method:'DELETE'}); showDashboard(); } catch(e) { alert(e.message); }
+}
+
+function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+
+// LOCATIONS
+async function showLocations() {
+  const locs = await api('/locations');
+  render(`
+    <div class="header">
+      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+    <div class="container">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="font-size:20px;font-weight:800">Locations</h2>
+        <button class="btn btn-red btn-sm" onclick="showLocForm()">+ Add Location</button>
+      </div>
+      ${locs.map(l => `<div class="card">
+        <div style="width:48px;height:48px;border-radius:14px;background:#fff0f0;display:flex;align-items:center;justify-content:center;font-size:20px">📍</div>
+        <div class="card-info"><h3>${l.name}</h3><p>${l.city}, ${l.country} · ${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}</p></div>
+        <div class="card-actions">
+          <button class="btn btn-sm btn-blue" onclick='showLocForm("${l.id}")'>Edit</button>
+          <button class="btn btn-sm btn-gray" onclick="deleteLoc('${l.id}','${l.name.replace(/'/g,"\\'")}')">Delete</button>
+        </div>
+      </div>`).join('')}
+    </div>
+    <div id="modal-root"></div>
+  `);
+}
+
+async function showLocForm(id) {
+  let loc = {name:'',address:'',city:'',country:'',lat:'',lng:'',type:'both'};
+  if (id) { try { loc = await api('/locations/'+id); } catch(e){} }
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h2>${id?'Edit':'Add'} Location</h2>
+        <div class="form-group"><label>Name *</label><input class="input" id="l-name" value="${loc.name||''}"></div>
+        <div class="form-group"><label>Address</label><input class="input" id="l-addr" value="${loc.address||''}"></div>
+        <div class="form-row">
+          <div class="form-group"><label>City *</label><input class="input" id="l-city" value="${loc.city||''}"></div>
+          <div class="form-group"><label>Country</label><input class="input" id="l-country" value="${loc.country||''}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Latitude *</label><input class="input" id="l-lat" value="${loc.lat||''}"></div>
+          <div class="form-group"><label>Longitude *</label><input class="input" id="l-lng" value="${loc.lng||''}"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:24px">
+          <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-red" style="flex:1" onclick="saveLoc('${id||''}')">Save</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function saveLoc(id) {
+  const body = {name:document.getElementById('l-name').value, address:document.getElementById('l-addr').value, city:document.getElementById('l-city').value, country:document.getElementById('l-country').value, lat:parseFloat(document.getElementById('l-lat').value)||0, lng:parseFloat(document.getElementById('l-lng').value)||0, type:'both'};
+  if (!body.name||!body.city) { alert('Name and city required'); return; }
+  try { await api(id?'/locations/'+id:'/locations',{method:id?'PUT':'POST',body:JSON.stringify(body)}); closeModal(); showLocations(); } catch(e) { alert(e.message); }
+}
+
+async function deleteLoc(id,name) {
+  if (!confirm('Delete '+name+'?')) return;
+  try { await api('/locations/'+id,{method:'DELETE'}); showLocations(); } catch(e) { alert(e.message); }
+}
+
+function doLogout() { token=null; localStorage.removeItem('admin_token'); showLogin(); }
+
+// INIT
+if (token) { showDashboard(); } else { showLogin(); }
+</script>
+</body>
+</html>
