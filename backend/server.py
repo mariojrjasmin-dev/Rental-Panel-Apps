@@ -554,6 +554,70 @@ async def get_booking(booking_id: str, request: Request):
     return serialize_booking(booking)
 
 
+@api_router.post("/admin/backfill-booking-taxes")
+async def backfill_booking_taxes(request: Request):
+    """Recompute and persist subtotal / tax_rate / tax_amount for bookings
+    created before the tax feature was added. Existing total_price is preserved
+    and treated as the grand total — subtotal is derived from the pickup
+    location's current tax rate so that subtotal + tax = total_price.
+    """
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    updated = 0
+    already_ok = 0
+    no_total = 0
+
+    # Preload locations into a name -> tax_rate map
+    loc_rates = {}
+    for loc in await db.locations.find({}, {"name": 1, "tax_rate": 1}).to_list(500):
+        loc_rates[loc.get("name", "")] = float(loc.get("tax_rate") or 0.0)
+
+    async for b in db.bookings.find({}):
+        has_complete = (
+            b.get("subtotal") is not None
+            and b.get("tax_rate") is not None
+            and b.get("tax_amount") is not None
+        )
+        if has_complete:
+            already_ok += 1
+            continue
+
+        total = b.get("total_price")
+        if total is None:
+            no_total += 1
+            continue
+        total = float(total)
+
+        pickup_name = (b.get("pickup_location") or {}).get("name", "")
+        tax_rate = loc_rates.get(pickup_name, 0.0)
+
+        # total == subtotal * (1 + tax_rate/100) -> subtotal = total / (1 + r/100)
+        divisor = 1.0 + (tax_rate / 100.0)
+        subtotal = round(total / divisor, 2) if divisor > 0 else round(total, 2)
+        tax_amount = round(total - subtotal, 2)
+
+        # Guard against minor rounding causing subtotal+tax != total
+        if abs((subtotal + tax_amount) - total) > 0.02:
+            subtotal = round(total, 2)
+            tax_amount = 0.0
+            tax_rate = 0.0
+
+        await db.bookings.update_one(
+            {"_id": b["_id"]},
+            {"$set": {"subtotal": subtotal, "tax_rate": tax_rate, "tax_amount": tax_amount}},
+        )
+        updated += 1
+
+    return {
+        "message": f"Backfilled tax on {updated} booking(s). {already_ok} already had full tax data, {no_total} skipped (no total_price).",
+        "updated": updated,
+        "already_ok": already_ok,
+        "skipped_no_total": no_total,
+    }
+
+
 @api_router.get("/admin/bookings")
 async def admin_list_bookings(request: Request, status: Optional[str] = None, q: Optional[str] = None):
     """List all bookings for admin with optional status filter and customer search."""
@@ -716,14 +780,15 @@ def _generate_receipt_pdf(booking: dict) -> bytes:
     c.line(18 * mm, y, W - 18 * mm, y)
     y -= 7 * mm
 
-    days = booking.get("days", 1)
-    ppd = booking.get("price_per_day", 0)
-    subtotal = booking.get("subtotal", 0)
-    tax_rate = booking.get("tax_rate", 0)
-    tax_amount = booking.get("tax_amount", 0)
-    total = booking.get("total_price", 0)
+    days = booking.get("days", 1) or 1
+    subtotal = booking.get("subtotal", 0) or 0
+    tax_rate = booking.get("tax_rate", 0) or 0
+    tax_amount = booking.get("tax_amount", 0) or 0
+    total = booking.get("total_price", 0) or 0
+    # Effective daily rate = subtotal / days (handles any discounts/backfilled bookings)
+    eff_rate = round(subtotal / days, 2) if days else 0
 
-    row(f"Daily Rate × {days} day(s)", f"${ppd:,.2f} × {days}")
+    row(f"Daily Rate × {days} day(s)", f"${eff_rate:,.2f} × {days}")
     row("Subtotal", f"${subtotal:,.2f}")
     row(f"Tax ({tax_rate}%)", f"${tax_amount:,.2f}")
 

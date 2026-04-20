@@ -487,6 +487,13 @@ async function showMigration() {
       </div>
 
       <div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e5e5e5;margin-bottom:16px">
+        <h3 style="font-size:16px;font-weight:700;margin-bottom:8px">💰 Fix Booking Tax Calculations (Run on THIS environment)</h3>
+        <p style="color:#666;font-size:13px;margin-bottom:16px">If old bookings show "Tax 0%" or "$0.00 subtotal" on receipts, click below. This retroactively computes subtotal and tax amount for every booking using each booking's pickup-location tax rate. The grand total stays the same.</p>
+        <button class="btn btn-blue" onclick="backfillTaxes()">Recompute Booking Taxes</button>
+        <div id="backfill-result" style="margin-top:12px"></div>
+      </div>
+
+      <div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e5e5e5;margin-bottom:16px">
         <h3 style="font-size:16px;font-weight:700;margin-bottom:8px">🛠️ Fix Vehicle Images (Run on THIS environment)</h3>
         <p style="color:#666;font-size:13px;margin-bottom:16px">If vehicle photos are showing as broken, click below. This converts all uploaded file-based images into portable base64 images stored in the database. Run this once on Preview (before exporting) and once on Production (after importing).</p>
         <button class="btn btn-blue" onclick="migrateImages()">Convert Images to Portable Format</button>
@@ -548,6 +555,17 @@ async function migrateImages() {
   box.innerHTML = '<span style="color:#007aff;font-size:13px">⏳ Converting images...</span>';
   try {
     const r = await api('/admin/migrate-images', {method:'POST', body:'{}'});
+    box.innerHTML = '<div style="color:#34c759;font-weight:700;font-size:14px">✅ ' + r.message + '</div>';
+  } catch(e) {
+    box.innerHTML = '<div style="color:#ff3b30">Error: '+e.message+'</div>';
+  }
+}
+
+async function backfillTaxes() {
+  const box = document.getElementById('backfill-result');
+  box.innerHTML = '<span style="color:#007aff;font-size:13px">⏳ Recomputing taxes on all bookings...</span>';
+  try {
+    const r = await api('/admin/backfill-booking-taxes', {method:'POST', body:'{}'});
     box.innerHTML = '<div style="color:#34c759;font-weight:700;font-size:14px">✅ ' + r.message + '</div>';
   } catch(e) {
     box.innerHTML = '<div style="color:#ff3b30">Error: '+e.message+'</div>';

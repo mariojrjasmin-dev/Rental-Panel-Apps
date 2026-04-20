@@ -193,7 +193,10 @@ export default function ReceiptScreen() {
         {/* Cost breakdown */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>COST BREAKDOWN</Text>
-          <Row label={`Daily Rate × ${booking.days}`} value={`$${(booking.price_per_day || 0).toFixed(2)} × ${booking.days}`} />
+          <Row
+            label={`Daily Rate × ${booking.days}`}
+            value={`$${(booking.days ? (booking.subtotal || 0) / booking.days : 0).toFixed(2)} × ${booking.days}`}
+          />
           <Row label="Subtotal" value={`$${(booking.subtotal || 0).toFixed(2)}`} bold />
           <Row
             label={`Tax (${booking.tax_rate || 0}%)`}
