@@ -242,26 +242,55 @@ async function uploadImage(input) {
   const file = input.files[0];
   if (!file) return;
   const status = document.getElementById('upload-status');
-  status.innerHTML = '<span style="color:#007aff;font-size:13px">⏳ Uploading...</span>';
+  status.innerHTML = '<span style="color:#007aff;font-size:13px">⏳ Compressing & uploading...</span>';
   try {
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-      const base64 = e.target.result.split(',')[1];
-      const ext = file.name.split('.').pop() || 'jpg';
-      const res = await api('/upload/image', {
-        method: 'POST',
-        body: JSON.stringify({ image_data: base64, filename: 'car_' + Date.now() + '.' + ext })
-      });
-      document.getElementById('f-img').value = res.url;
-      document.getElementById('img-preview').src = res.url;
-      document.getElementById('img-preview-wrap').style.display = 'block';
-      status.innerHTML = '<span style="color:#34c759;font-size:13px">✅ Photo uploaded!</span>';
-      input.value = '';
-    };
-    reader.readAsDataURL(file);
+    // Compress the image client-side (max 1200px, JPEG 85%) to keep DB size small
+    const compressed = await compressImage(file, 1200, 0.85);
+    const base64 = compressed.dataUrl.split(',')[1];
+    const res = await api('/upload/image', {
+      method: 'POST',
+      body: JSON.stringify({ image_data: base64, filename: 'car_' + Date.now() + '.jpg' })
+    });
+    document.getElementById('f-img').value = res.url;
+    document.getElementById('img-preview').src = res.url;
+    document.getElementById('img-preview-wrap').style.display = 'block';
+    const sizeKb = Math.round(compressed.size / 1024);
+    status.innerHTML = '<span style="color:#34c759;font-size:13px">✅ Photo uploaded! (' + sizeKb + ' KB)</span>';
+    input.value = '';
   } catch(e) {
     status.innerHTML = '<span style="color:#ff3b30;font-size:13px">❌ Upload failed: ' + e.message + '</span>';
   }
+}
+
+// Canvas-based image compression – resizes large photos and converts to JPEG
+function compressImage(file, maxSize, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxSize || h > maxSize) {
+          if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+          else { w = Math.round(w * maxSize / h); h = maxSize; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        // Approximate byte size of the base64 string
+        const size = Math.round((dataUrl.length - 22) * 3 / 4);
+        resolve({ dataUrl, size });
+      };
+      img.onerror = () => reject(new Error('Could not read image'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
 }
 
 // LOCATIONS
@@ -351,6 +380,13 @@ async function showMigration() {
         <button class="btn btn-blue" onclick="exportData()">Export Data to Clipboard</button>
         <div id="export-result" style="margin-top:12px"></div>
       </div>
+
+      <div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e5e5e5;margin-bottom:16px">
+        <h3 style="font-size:16px;font-weight:700;margin-bottom:8px">🛠️ Fix Vehicle Images (Run on THIS environment)</h3>
+        <p style="color:#666;font-size:13px;margin-bottom:16px">If vehicle photos are showing as broken, click below. This converts all uploaded file-based images into portable base64 images stored in the database. Run this once on Preview (before exporting) and once on Production (after importing).</p>
+        <button class="btn btn-blue" onclick="migrateImages()">Convert Images to Portable Format</button>
+        <div id="migrate-result" style="margin-top:12px"></div>
+      </div>
       
       <div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e5e5e5;margin-bottom:16px">
         <h3 style="font-size:16px;font-weight:700;margin-bottom:8px">Step 2: Import to Production</h3>
@@ -363,10 +399,10 @@ async function showMigration() {
       <div style="background:#f0f8ff;border-radius:16px;padding:20px;border:1px solid #cce5ff">
         <h3 style="font-size:14px;font-weight:700;margin-bottom:6px">ℹ️ How it works</h3>
         <ul style="color:#666;font-size:13px;padding-left:20px;line-height:1.8">
-          <li>Go to <strong>Preview</strong> panel → Import/Export → Export → copies JSON to clipboard</li>
-          <li>Go to <strong>Production</strong> panel → Import/Export → Paste → Import</li>
-          <li>Existing cars/locations with same name won't be duplicated</li>
-          <li>Note: Uploaded images from preview won't transfer (use URL images for production)</li>
+          <li>On <strong>Preview</strong>: click <strong>Convert Images to Portable Format</strong> first, then <strong>Export</strong></li>
+          <li>On <strong>Production</strong>: <strong>Paste</strong> the JSON and click <strong>Import</strong></li>
+          <li>Existing cars/locations with the same name are skipped (no duplicates)</li>
+          <li>✅ Vehicle photos <strong>now transfer automatically</strong> (embedded as base64 inside the JSON)</li>
         </ul>
       </div>
     </div>
@@ -399,6 +435,17 @@ async function importData() {
     document.getElementById('import-result').innerHTML = '<div style="color:#34c759;font-weight:700;font-size:14px">✅ ' + result.message + '</div>';
   } catch(e) {
     document.getElementById('import-result').innerHTML = '<div style="color:#ff3b30">Error: '+e.message+'</div>';
+  }
+}
+
+async function migrateImages() {
+  const box = document.getElementById('migrate-result');
+  box.innerHTML = '<span style="color:#007aff;font-size:13px">⏳ Converting images...</span>';
+  try {
+    const r = await api('/admin/migrate-images', {method:'POST', body:'{}'});
+    box.innerHTML = '<div style="color:#34c759;font-weight:700;font-size:14px">✅ ' + r.message + '</div>';
+  } catch(e) {
+    box.innerHTML = '<div style="color:#ff3b30">Error: '+e.message+'</div>';
   }
 }
 

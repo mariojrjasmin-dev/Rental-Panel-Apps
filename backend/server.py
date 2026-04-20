@@ -796,35 +796,35 @@ async def upload_image(data: ImageUpload, request: Request):
         if "," in image_str:
             image_str = image_str.split(",", 1)[1]
         
+        # Validate base64
         image_bytes = base64.b64decode(image_str)
         
-        # Generate unique filename
-        ext = "jpg"
+        # Determine mime type from filename extension
+        ext = "jpeg"
         if data.filename:
-            ext = data.filename.rsplit(".", 1)[-1].lower() if "." in data.filename else "jpg"
-        if ext not in ["jpg", "jpeg", "png", "webp"]:
-            ext = "jpg"
+            raw_ext = data.filename.rsplit(".", 1)[-1].lower() if "." in data.filename else "jpg"
+            if raw_ext in ["jpg", "jpeg", "png", "webp", "gif"]:
+                ext = "jpeg" if raw_ext == "jpg" else raw_ext
         
-        fname = f"{uuid.uuid4().hex[:12]}.{ext}"
-        filepath = UPLOAD_DIR / fname
-        filepath.write_bytes(image_bytes)
+        # Enforce a reasonable size cap (3MB) to keep DB lean
+        if len(image_bytes) > 3 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Image too large (max 3MB after compression). Please use a smaller photo.")
         
-        # Return the URL - use public URL from env or construct from request headers
-        frontend_url = os.environ.get("FRONTEND_URL", "")
-        if frontend_url:
-            base_url = frontend_url.rstrip("/")
-        else:
-            # Try to get from X-Forwarded-Host header (set by ingress)
-            forwarded_host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host")
-            forwarded_proto = request.headers.get("X-Forwarded-Proto", "https")
-            if forwarded_host:
-                base_url = f"{forwarded_proto}://{forwarded_host}"
-            else:
-                base_url = str(request.base_url).rstrip("/")
+        # Return as a data URL embedded directly - stored in MongoDB so it survives deploys
+        # and works across preview/production environments seamlessly
+        data_url = f"data:image/{ext};base64,{image_str}"
         
-        image_url = f"{base_url}/api/uploads/{fname}"
+        # Also persist to disk as a backup (best-effort, non-fatal if it fails)
+        fname = f"{uuid.uuid4().hex[:12]}.{ext if ext != 'jpeg' else 'jpg'}"
+        try:
+            filepath = UPLOAD_DIR / fname
+            filepath.write_bytes(image_bytes)
+        except Exception as fe:
+            logger.warning(f"Disk backup failed (ok, data URL is primary): {fe}")
         
-        return {"url": image_url, "filename": fname}
+        return {"url": data_url, "filename": fname}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Image upload error: {e}")
         raise HTTPException(status_code=400, detail=f"Upload failed: {str(e)}")
@@ -893,9 +893,36 @@ async def delete_review(review_id: str, request: Request):
 
 # ==================== DATA MIGRATION ====================
 
+def _image_url_to_data_url(image_url: str) -> str:
+    """Convert a file-based image URL (/api/uploads/xxx.jpg) to a base64 data URL
+    by reading the file from disk. Returns the original URL if conversion fails
+    or if the URL is already a data URL / external URL we cannot fetch.
+    """
+    if not image_url or image_url.startswith("data:"):
+        return image_url
+    # Extract filename from any URL that ends with /api/uploads/<filename>
+    try:
+        if "/api/uploads/" in image_url:
+            fname = image_url.rsplit("/api/uploads/", 1)[1].split("?")[0].split("#")[0]
+            fpath = UPLOAD_DIR / fname
+            if fpath.exists() and fpath.is_file():
+                ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "jpeg"
+                if ext == "jpg":
+                    ext = "jpeg"
+                data = fpath.read_bytes()
+                b64 = base64.b64encode(data).decode("ascii")
+                return f"data:image/{ext};base64,{b64}"
+    except Exception as e:
+        logger.warning(f"Could not convert image to data URL: {e}")
+    return image_url
+
+
 @api_router.get("/admin/export")
 async def export_data(request: Request):
-    """Export all cars and locations for migration to another environment."""
+    """Export all cars and locations for migration to another environment.
+    Car images stored as file URLs are embedded as base64 data URLs so they
+    travel with the export and don't break on the destination environment.
+    """
     user = await get_authenticated_user(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
@@ -903,7 +930,53 @@ async def export_data(request: Request):
     cars = await db.cars.find({}, {"_id": 0, "created_at": 0}).to_list(500)
     locations_data = await db.locations.find({}, {"_id": 0, "created_at": 0}).to_list(500)
     
+    # Embed file-based images as data URLs so they survive migration
+    for car in cars:
+        if car.get("image_url"):
+            car["image_url"] = _image_url_to_data_url(car["image_url"])
+    
     return {"cars": cars, "locations": locations_data, "count": {"cars": len(cars), "locations": len(locations_data)}}
+
+
+@api_router.post("/admin/migrate-images")
+async def migrate_images(request: Request):
+    """Convert all cars whose image_url points to a local file
+    (/api/uploads/xxx.jpg) into embedded base64 data URLs stored in MongoDB.
+    This makes images deploy-safe and portable across environments.
+    """
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    converted = 0
+    failed = 0
+    already_ok = 0
+    cars = await db.cars.find({}).to_list(500)
+    for car in cars:
+        url = car.get("image_url") or ""
+        if not url or url.startswith("data:"):
+            already_ok += 1
+            continue
+        if "/api/uploads/" not in url:
+            # External URL (e.g. unsplash) – leave as-is, it's already portable
+            already_ok += 1
+            continue
+        new_url = _image_url_to_data_url(url)
+        if new_url.startswith("data:"):
+            car_id = car.get("id") or car.get("_id")
+            if car_id is not None:
+                await db.cars.update_one({"_id": car["_id"]}, {"$set": {"image_url": new_url}})
+                converted += 1
+            else:
+                failed += 1
+        else:
+            failed += 1
+    return {
+        "message": f"Converted {converted} car image(s) to embedded base64. {already_ok} already portable, {failed} could not be read from disk.",
+        "converted": converted,
+        "already_portable": already_ok,
+        "failed": failed,
+    }
 
 @api_router.post("/admin/import")
 async def import_data(request: Request):

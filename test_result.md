@@ -101,3 +101,81 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "User reported: We cannot preview the vehicles pictures on the panel (d: all of the above - list, edit dialog, upload preview; 2: Production environment)"
+
+backend:
+  - task: "Vehicle image upload - switch to base64 data URL storage"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Changed /api/upload/image to return a base64 data URL (data:image/jpeg;base64,...) instead of a file URL. Images are now embedded directly into MongoDB so they survive redeploys and work across preview/production environments."
+  - task: "Migrate existing file-based car images to base64"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Added /api/admin/migrate-images endpoint that reads /api/uploads/*.jpg files from disk and converts them to embedded base64 in the cars collection. Tested successfully: 26 cars converted, 1 already portable (external URL), 0 failed."
+  - task: "Export endpoint embeds images as base64"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "/api/admin/export now embeds file-based image_url values as base64 data URLs before exporting so images travel with the migration data."
+
+frontend:
+  - task: "Admin panel: client-side image compression before upload"
+    implemented: true
+    working: true
+    file: "backend/admin_panel.html"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Added canvas-based compression that resizes photos to max 1200px and converts to JPEG 85% quality. Tested: 373KB original JPG compressed to 35KB with full resolution preserved."
+  - task: "Admin panel: Fix Vehicle Images button on migration page"
+    implemented: true
+    working: true
+    file: "backend/admin_panel.html"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Added a new 'Fix Vehicle Images' section on the Import/Export page with a 'Convert Images to Portable Format' button that calls /api/admin/migrate-images."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 6
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "User verification of vehicle image preview on production after redeploy + Fix Images run"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "user_verification"
+
+agent_communication:
+    - agent: "main"
+      message: "Fixed the production image preview issue. Root cause: images were stored as files under /app/backend/uploads/ which is ephemeral storage on production (wiped on redeploy). Solution: embed images as base64 data URLs directly in MongoDB. Added /api/admin/migrate-images endpoint and a 'Fix Vehicle Images' button on the admin panel for one-click migration. User must: 1) Run Convert Images on Preview, 2) Export, 3) Redeploy production, 4) Import on Production, 5) Run Convert Images on Production to be safe."
