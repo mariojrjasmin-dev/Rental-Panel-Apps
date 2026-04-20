@@ -138,6 +138,39 @@ backend:
         - working: true
           agent: "main"
           comment: "/api/admin/export now embeds file-based image_url values as base64 data URLs before exporting so images travel with the migration data."
+  - task: "Admin list bookings - GET /api/admin/bookings"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "Tested GET /api/admin/bookings. Admin returns full booking list (200). Non-admin returns 403. Unauthenticated returns 401. ?status=confirmed correctly filters (all returned bookings have status=confirmed). ?q=<email fragment> correctly filters by user_email/user_name/car_name (case-insensitive regex). Combined ?status=confirmed&q=... works as AND filter. All assertions passed."
+  - task: "Admin update booking status - PUT /api/admin/bookings/{id}/status"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "Tested PUT /api/admin/bookings/{id}/status. Admin can update status to any valid value (confirmed/active/completed tested) and response returns updated booking doc. Invalid status 'foo' returns 400 with clear error listing valid values. Non-existent booking id (000000000000000000000000) returns 404. Non-admin user returns 403. Status change persists and is visible via subsequent GET /api/bookings/{id}. All assertions passed."
+  - task: "Booking receipt PDF - GET /api/bookings/{id}/receipt.pdf"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "Tested GET /api/bookings/{id}/receipt.pdf. Owner gets 200 with Content-Type application/pdf and body starting with b'%PDF-1.4' (~2.8KB). Admin can download any booking's receipt. Non-owner, non-admin user correctly gets 403. Unauthenticated gets 401. Non-existent booking id returns 404. Minor: a malformed (non-hex) booking id returns 500 instead of 400/404 because ObjectId() raises InvalidId uncaught; core functionality unaffected."
 
 frontend:
   - task: "Admin panel: client-side image compression before upload"
@@ -179,3 +212,7 @@ test_plan:
 agent_communication:
     - agent: "main"
       message: "Fixed the production image preview issue. Root cause: images were stored as files under /app/backend/uploads/ which is ephemeral storage on production (wiped on redeploy). Solution: embed images as base64 data URLs directly in MongoDB. Added /api/admin/migrate-images endpoint and a 'Fix Vehicle Images' button on the admin panel for one-click migration. User must: 1) Run Convert Images on Preview, 2) Export, 3) Redeploy production, 4) Import on Production, 5) Run Convert Images on Production to be safe."
+    - agent: "main"
+      message: "Added Booking Management (admin) + Customer Receipt (with tax). NEW ENDPOINTS TO TEST: (1) GET /api/admin/bookings [admin] with optional ?status=...&q=... query params - returns list of bookings. (2) PUT /api/admin/bookings/{id}/status [admin] body: {status: 'confirmed'} - valid statuses: pending_payment, confirmed, active, completed, cancelled. (3) GET /api/bookings/{id}/receipt.pdf [auth required; owner or admin] - returns application/pdf bytes. Test authorization (non-admin should 403 for admin endpoints, non-owner should 403 for receipt). Test validation (invalid status should 400). Admin credentials in /app/memory/test_credentials.md."
+    - agent: "testing"
+      message: "Completed backend testing of 3 new booking endpoints. 23/23 assertions passed in /app/backend_test.py. (1) GET /api/admin/bookings works with admin auth, returns 403 for non-admin, 401 unauthenticated; ?status=confirmed and ?q=<fragment> filters work individually and combined. (2) PUT /api/admin/bookings/{id}/status: admin updates persist (verified via follow-up GET), invalid status returns 400 with helpful message, missing booking id returns 404, non-admin returns 403. (3) GET /api/bookings/{id}/receipt.pdf returns real PDF bytes starting with %PDF-1.4 (~2.8KB) with application/pdf content type for both owner and admin; non-owner gets 403, unauthenticated gets 401, non-existent id returns 404. Minor (not blocking): malformed (non-hex) booking ids cause ObjectId to raise InvalidId and return 500 instead of 400/404 on /bookings/{id}/receipt.pdf - consider wrapping ObjectId() in a try/except for nicer errors, but all valid-format ids behave correctly."
