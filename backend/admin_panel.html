@@ -102,6 +102,7 @@ async function showDashboard() {
       <div class="header">
         <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
         <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
           <button class="btn btn-sm btn-gray" onclick="showLocations()">Locations</button>
           <button class="btn btn-sm btn-blue" onclick="showMigration()">Import/Export</button>
           <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
@@ -360,6 +361,110 @@ async function deleteLoc(id,name) {
 }
 
 function doLogout() { token=null; localStorage.removeItem('admin_token'); showLogin(); }
+
+// BOOKINGS MANAGEMENT
+let bookingsFilter = 'all';
+let bookingsSearch = '';
+
+async function showBookings() {
+  try {
+    const params = new URLSearchParams();
+    if (bookingsFilter !== 'all') params.set('status', bookingsFilter);
+    if (bookingsSearch) params.set('q', bookingsSearch);
+    const bookings = await api('/admin/bookings' + (params.toString() ? '?' + params : ''));
+    const statuses = [
+      {k:'all', label:'All', color:'#666'},
+      {k:'pending_payment', label:'Pending Pay', color:'#ff9500'},
+      {k:'confirmed', label:'Confirmed', color:'#007aff'},
+      {k:'active', label:'Active', color:'#34c759'},
+      {k:'completed', label:'Completed', color:'#5856d6'},
+      {k:'cancelled', label:'Cancelled', color:'#ff3b30'}
+    ];
+    render(`
+      <div class="header">
+        <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+          <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+        </div>
+      </div>
+      <div class="container">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <h2 style="font-size:20px;font-weight:800">Bookings (${bookings.length})</h2>
+          <input class="input" id="bk-search" placeholder="🔎 Search by customer / car..." value="${bookingsSearch||''}" style="max-width:280px;margin:0" onkeydown="if(event.key==='Enter'){bookingsSearch=this.value;showBookings()}">
+        </div>
+        <div class="tabs" style="flex-wrap:wrap">
+          ${statuses.map(s => `<span class="tab ${bookingsFilter===s.k?'active':''}" onclick="bookingsFilter='${s.k}';showBookings()">${s.label}</span>`).join('')}
+        </div>
+        ${bookings.length === 0 ? '<p style="color:#999;text-align:center;padding:40px">No bookings found.</p>' : bookings.map(b => bookingCard(b)).join('')}
+      </div>
+      <div id="modal-root"></div>
+    `);
+  } catch(e) { alert('Failed: '+e.message); }
+}
+
+function bookingCard(b) {
+  const statusColors = {
+    pending_payment:'#ff9500', pending:'#ff9500',
+    confirmed:'#007aff', active:'#34c759',
+    completed:'#5856d6', cancelled:'#ff3b30'
+  };
+  const color = statusColors[b.status] || '#666';
+  const statusLabel = (b.status||'').replace(/_/g,' ').toUpperCase();
+  const pickup = (b.pickup_date||'').substring(0,10);
+  const dropoff = (b.dropoff_date||'').substring(0,10);
+  const created = b.created_at ? new Date(b.created_at).toLocaleDateString() : '';
+  return `<div class="card" style="flex-direction:column;align-items:stretch;gap:0;padding:0;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:14px;padding:14px">
+      <img src="${b.car_image || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'}" style="width:80px;height:56px;border-radius:10px;object-fit:cover;background:#f5f5f5">
+      <div style="flex:1;min-width:0">
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:2px">${b.car_name||'Car'}</h3>
+        <p style="font-size:12px;color:#666">${b.user_name||'Customer'} · ${b.user_email||''}</p>
+        <p style="font-size:11px;color:#999;margin-top:2px">${pickup} → ${dropoff} · ${b.days||0} days · ${created}</p>
+      </div>
+      <span style="background:${color}1a;color:${color};padding:5px 10px;border-radius:50px;font-size:10px;font-weight:800;white-space:nowrap">${statusLabel}</span>
+    </div>
+    <div style="display:flex;border-top:1px solid #f0f0f0;background:#fafafa;padding:10px 14px;align-items:center;gap:8px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px;font-size:12px;color:#666">
+        Subtotal <strong style="color:#0a0a0a">$${(b.subtotal||0).toFixed(2)}</strong>
+        · Tax ${b.tax_rate||0}% <strong style="color:#0a0a0a">$${(b.tax_amount||0).toFixed(2)}</strong>
+        · <span style="color:#ff3b30;font-weight:800">Total $${(b.total_price||0).toFixed(2)}</span>
+        · ${(b.payment_method||'cash').toUpperCase()}
+      </div>
+      <button class="btn btn-sm btn-blue" onclick="downloadReceipt('${b.id}')">📄 Receipt</button>
+      <select class="input" style="width:auto;padding:6px 10px;margin:0;font-size:12px" onchange="updateBookingStatus('${b.id}', this.value)">
+        <option value="">Change status...</option>
+        <option value="pending_payment">Pending Payment</option>
+        <option value="confirmed">Confirmed</option>
+        <option value="active">Active</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+    </div>
+  </div>`;
+}
+
+async function updateBookingStatus(id, status) {
+  if (!status) return;
+  if (!confirm('Change booking status to "' + status.replace(/_/g,' ') + '"?')) return;
+  try {
+    await api('/admin/bookings/'+id+'/status', {method:'PUT', body: JSON.stringify({status})});
+    showBookings();
+  } catch(e) { alert('Failed: '+e.message); }
+}
+
+async function downloadReceipt(id) {
+  try {
+    const res = await fetch(API + '/bookings/' + id + '/receipt.pdf', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) throw new Error('Could not fetch receipt');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch(e) { alert('Failed to open receipt: ' + e.message); }
+}
 
 // MIGRATION
 async function showMigration() {

@@ -67,7 +67,12 @@ export default function BookingsScreen() {
   };
 
   const renderBooking = ({ item }: { item: Booking }) => (
-    <TouchableOpacity testID={`booking-card-${item.id}`} style={styles.card} activeOpacity={0.7}>
+    <TouchableOpacity
+      testID={`booking-card-${item.id}`}
+      style={styles.card}
+      activeOpacity={0.7}
+      onPress={() => router.push({ pathname: '/receipt', params: { bookingId: item.id } })}
+    >
       <Image source={{ uri: item.car_image }} style={styles.carImage} resizeMode="cover" />
       <View style={styles.cardContent}>
         <View style={styles.cardHeader}>
@@ -86,6 +91,8 @@ export default function BookingsScreen() {
           <View style={styles.paymentInfo}>
             <Ionicons name={item.payment_method === 'stripe' ? 'card-outline' : 'cash-outline'} size={14} color="#666" />
             <Text style={styles.paymentText}>{item.payment_method === 'stripe' ? 'Card' : 'Cash'}</Text>
+            <Ionicons name="receipt-outline" size={14} color="#FF3B30" style={{ marginLeft: 8 }} />
+            <Text style={[styles.paymentText, { color: '#FF3B30', fontWeight: '700' }]}>Receipt</Text>
           </View>
           <Text style={styles.totalPrice}>${item.total_price}</Text>
         </View>

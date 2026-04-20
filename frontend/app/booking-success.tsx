@@ -89,8 +89,13 @@ export default function BookingSuccessScreen() {
         )}
 
         <View style={styles.actions}>
-          <TouchableOpacity testID="view-bookings-btn" style={styles.primaryBtn} onPress={() => router.replace('/(tabs)/bookings')} activeOpacity={0.7}>
-            <Text style={styles.primaryBtnText}>View My Bookings</Text>
+          {status === 'success' && booking?.id && (
+            <TouchableOpacity testID="view-receipt-btn" style={styles.primaryBtn} onPress={() => router.replace({ pathname: '/receipt', params: { bookingId: booking.id } })} activeOpacity={0.7}>
+              <Text style={styles.primaryBtnText}>View Receipt</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity testID="view-bookings-btn" style={booking?.id ? styles.secondaryBtn : styles.primaryBtn} onPress={() => router.replace('/(tabs)/bookings')} activeOpacity={0.7}>
+            <Text style={booking?.id ? styles.secondaryBtnText : styles.primaryBtnText}>View My Bookings</Text>
           </TouchableOpacity>
           <TouchableOpacity testID="browse-more-btn" style={styles.secondaryBtn} onPress={() => router.replace('/(tabs)/home')} activeOpacity={0.7}>
             <Text style={styles.secondaryBtnText}>Browse More Cars</Text>

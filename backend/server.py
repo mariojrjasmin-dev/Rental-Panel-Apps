@@ -553,6 +553,203 @@ async def get_booking(booking_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Booking not found")
     return serialize_booking(booking)
 
+
+@api_router.get("/admin/bookings")
+async def admin_list_bookings(request: Request, status: Optional[str] = None, q: Optional[str] = None):
+    """List all bookings for admin with optional status filter and customer search."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    query = {}
+    if status and status != "all":
+        query["status"] = status
+    if q:
+        query["$or"] = [
+            {"user_email": {"$regex": q, "$options": "i"}},
+            {"user_name": {"$regex": q, "$options": "i"}},
+            {"car_name": {"$regex": q, "$options": "i"}},
+        ]
+    bookings = await db.bookings.find(query).sort("created_at", -1).to_list(500)
+    return [serialize_booking(b) for b in bookings]
+
+
+class BookingStatusUpdate(BaseModel):
+    status: str
+
+
+@api_router.put("/admin/bookings/{booking_id}/status")
+async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate, request: Request):
+    """Admin changes a booking's status (pending/confirmed/active/completed/cancelled)."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    valid = {"pending", "pending_payment", "confirmed", "active", "completed", "cancelled"}
+    if body.status not in valid:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(sorted(valid))}")
+    res = await db.bookings.update_one({"_id": ObjectId(booking_id)}, {"$set": {"status": body.status}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+    return serialize_booking(booking)
+
+
+@api_router.get("/bookings/{booking_id}/receipt.pdf")
+async def get_booking_receipt(booking_id: str, request: Request):
+    """Returns a PDF receipt for the booking. Accessible by the booking owner or an admin."""
+    user = await get_authenticated_user(request)
+    booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    user_id = str(user.get("_id") or user.get("id") or user.get("user_id"))
+    if user.get("role") != "admin" and booking.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this receipt")
+
+    pdf_bytes = _generate_receipt_pdf(booking)
+    from fastapi.responses import Response as FResponse
+    return FResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=dams-receipt-{booking_id[:8]}.pdf"},
+    )
+
+
+def _generate_receipt_pdf(booking: dict) -> bytes:
+    """Generate a branded PDF receipt for a booking with full tax breakdown."""
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.pdfgen import canvas as rl_canvas
+
+    buf = BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    RED = colors.HexColor("#ff3b30")
+    DARK = colors.HexColor("#0a0a0a")
+    MUTED = colors.HexColor("#6b7280")
+    LINE = colors.HexColor("#e5e7eb")
+
+    # Header
+    c.setFillColor(DARK)
+    c.rect(0, H - 28 * mm, W, 28 * mm, fill=1, stroke=0)
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 26)
+    c.drawString(18 * mm, H - 15 * mm, "DAMS")
+    c.setFillColor(RED)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(42 * mm, H - 15 * mm, "CAR  RENTAL")
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica", 9)
+    c.drawString(18 * mm, H - 22 * mm, "Official Rental Receipt")
+    c.setFont("Helvetica-Bold", 14)
+    c.drawRightString(W - 18 * mm, H - 15 * mm, "RECEIPT")
+    c.setFont("Helvetica", 9)
+    booking_id = str(booking.get("_id") or booking.get("id") or "")
+    c.drawRightString(W - 18 * mm, H - 22 * mm, f"# {booking_id[-10:].upper()}")
+
+    y = H - 40 * mm
+
+    # Customer block
+    c.setFillColor(DARK)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(18 * mm, y, "BILLED TO")
+    c.setFont("Helvetica", 10)
+    c.setFillColor(MUTED)
+    y -= 6 * mm
+    c.drawString(18 * mm, y, booking.get("user_name") or "Customer")
+    y -= 5 * mm
+    c.drawString(18 * mm, y, booking.get("user_email") or "")
+
+    # Issue date (top right)
+    created = booking.get("created_at")
+    try:
+        if isinstance(created, datetime):
+            issue_date = created.strftime("%B %d, %Y")
+        else:
+            issue_date = str(created)[:10]
+    except Exception:
+        issue_date = ""
+    c.setFillColor(DARK)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawRightString(W - 18 * mm, H - 40 * mm, "ISSUE DATE")
+    c.setFillColor(MUTED)
+    c.setFont("Helvetica", 10)
+    c.drawRightString(W - 18 * mm, H - 46 * mm, issue_date or "—")
+
+    # Rental details
+    y -= 14 * mm
+    c.setFillColor(DARK)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(18 * mm, y, "RENTAL DETAILS")
+    y -= 2 * mm
+    c.setStrokeColor(LINE)
+    c.line(18 * mm, y, W - 18 * mm, y)
+    y -= 7 * mm
+
+    def row(label, value):
+        nonlocal y
+        c.setFillColor(MUTED)
+        c.setFont("Helvetica", 9)
+        c.drawString(18 * mm, y, label.upper())
+        c.setFillColor(DARK)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawRightString(W - 18 * mm, y, str(value))
+        y -= 6 * mm
+
+    row("Vehicle", booking.get("car_name") or "—")
+    pickup_date = (booking.get("pickup_date") or "")[:10]
+    dropoff_date = (booking.get("dropoff_date") or "")[:10]
+    row("Pickup Date", pickup_date or "—")
+    row("Drop-off Date", dropoff_date or "—")
+    row("Pickup Location", (booking.get("pickup_location") or {}).get("name") or "—")
+    row("Drop-off Location", (booking.get("dropoff_location") or {}).get("name") or "—")
+    row("Days", booking.get("days") or 0)
+    row("Payment Method", (booking.get("payment_method") or "cash").upper())
+    row("Status", (booking.get("status") or "").replace("_", " ").title())
+
+    # Cost breakdown
+    y -= 6 * mm
+    c.setFillColor(DARK)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(18 * mm, y, "COST BREAKDOWN")
+    y -= 2 * mm
+    c.line(18 * mm, y, W - 18 * mm, y)
+    y -= 7 * mm
+
+    days = booking.get("days", 1)
+    ppd = booking.get("price_per_day", 0)
+    subtotal = booking.get("subtotal", 0)
+    tax_rate = booking.get("tax_rate", 0)
+    tax_amount = booking.get("tax_amount", 0)
+    total = booking.get("total_price", 0)
+
+    row(f"Daily Rate × {days} day(s)", f"${ppd:,.2f} × {days}")
+    row("Subtotal", f"${subtotal:,.2f}")
+    row(f"Tax ({tax_rate}%)", f"${tax_amount:,.2f}")
+
+    # Grand total (highlighted)
+    y -= 4 * mm
+    c.setFillColor(RED)
+    c.rect(18 * mm, y - 4 * mm, W - 36 * mm, 12 * mm, fill=1, stroke=0)
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(22 * mm, y + 1 * mm, "GRAND TOTAL")
+    c.setFont("Helvetica-Bold", 14)
+    c.drawRightString(W - 22 * mm, y + 0.5 * mm, f"${total:,.2f} USD")
+    y -= 18 * mm
+
+    # Footer
+    c.setFillColor(MUTED)
+    c.setFont("Helvetica", 8)
+    c.drawString(18 * mm, 18 * mm, "Thank you for choosing DAMS Car Rental. Drive safe!")
+    c.drawString(18 * mm, 14 * mm, "For questions, contact support@damscarrental.com")
+    c.setFont("Helvetica-Oblique", 7)
+    c.drawRightString(W - 18 * mm, 14 * mm, "This is an electronically generated receipt.")
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
 # ==================== STRIPE PAYMENT ROUTES ====================
 
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutSessionRequest, CheckoutStatusResponse
