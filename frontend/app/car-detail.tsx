@@ -140,6 +140,11 @@ export default function CarDetailScreen() {
                 <Text style={styles.specLabel}>Seats</Text>
               </View>
               <View style={styles.specCard}>
+                <Ionicons name="bag-handle-outline" size={24} color="#FF3B30" />
+                <Text style={styles.specValue}>{car.bags ?? 2}</Text>
+                <Text style={styles.specLabel}>Bags</Text>
+              </View>
+              <View style={styles.specCard}>
                 <Ionicons name="cog-outline" size={24} color="#FF3B30" />
                 <Text style={styles.specValue}>{car.transmission}</Text>
                 <Text style={styles.specLabel}>Transmission</Text>

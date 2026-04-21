@@ -119,6 +119,10 @@ export default function HomeScreen() {
             <Text style={styles.specText}>{item.seats} seats</Text>
           </View>
           <View style={styles.specItem}>
+            <Ionicons name="bag-handle-outline" size={14} color="#666" />
+            <Text style={styles.specText}>{item.bags ?? 2} bags</Text>
+          </View>
+          <View style={styles.specItem}>
             <Ionicons name="cog-outline" size={14} color="#666" />
             <Text style={styles.specText}>{item.transmission}</Text>
           </View>

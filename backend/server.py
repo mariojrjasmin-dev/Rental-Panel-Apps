@@ -141,6 +141,7 @@ class CarCreate(BaseModel):
     category: str
     price_per_day: float
     seats: int
+    bags: int = 2
     transmission: str = "Automatic"
     fuel_type: str = "Gasoline"
     description: str = ""
@@ -167,6 +168,7 @@ class CarUpdate(BaseModel):
     category: Optional[str] = None
     price_per_day: Optional[float] = None
     seats: Optional[int] = None
+    bags: Optional[int] = None
     transmission: Optional[str] = None
     fuel_type: Optional[str] = None
     description: Optional[str] = None
