@@ -121,15 +121,15 @@ export default function CarDetailScreen() {
             <View style={styles.titleRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.carName}>{car.name}</Text>
+                <View style={styles.categoryTag}>
+                  <Text style={styles.categoryTagText}>Or Similar | {car.category}</Text>
+                </View>
                 <Text style={styles.carYear}>{car.year} {car.brand}</Text>
                 {car.avg_rating > 0 && (
                   <View style={styles.ratingRow}>
                     <StarRating rating={car.avg_rating} size={16} showValue count={car.review_count} />
                   </View>
                 )}
-              </View>
-              <View style={styles.categoryTag}>
-                <Text style={styles.categoryTagText}>Or Similar | {car.category}</Text>
               </View>
             </View>
 
@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
   carName: { fontSize: 28, fontWeight: '900', color: '#0A0A0A', letterSpacing: -0.5 },
   carYear: { fontSize: 15, color: '#666', marginTop: 2 },
   ratingRow: { marginTop: 6 },
-  categoryTag: { backgroundColor: '#0A0A0A', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 50 },
+  categoryTag: { backgroundColor: '#0A0A0A', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 50, alignSelf: 'flex-start', marginTop: 6, marginBottom: 4 },
   categoryTagText: { color: '#FFF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
   specsGrid: { flexDirection: 'row', gap: 12, marginBottom: 24 },
   specCard: { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, alignItems: 'center', gap: 6 },

@@ -98,11 +98,9 @@ export default function HomeScreen() {
     >
       <Image source={{ uri: item.image_url }} style={styles.carImage} resizeMode="cover" />
       <View style={styles.carInfo}>
-        <View style={styles.carHeader}>
-          <Text style={styles.carName} numberOfLines={1}>{item.name}</Text>
-          <View style={styles.categoryBadge}>
-            <Text style={styles.categoryText}>Or Similar | {item.category}</Text>
-          </View>
+        <Text style={styles.carName} numberOfLines={1}>{item.name}</Text>
+        <View style={styles.categoryBadgeSolo}>
+          <Text style={styles.categoryText}>Or Similar | {item.category}</Text>
         </View>
         {item.pickup_location && (
           <View style={styles.locationRow}>
@@ -288,6 +286,7 @@ const styles = StyleSheet.create({
   carHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   carName: { fontSize: 18, fontWeight: '800', color: '#0A0A0A', flex: 1 },
   categoryBadge: { backgroundColor: '#F5F5F5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  categoryBadgeSolo: { backgroundColor: '#F5F5F5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start', marginTop: 4 },
   categoryText: { fontSize: 11, fontWeight: '700', color: '#666', textTransform: 'uppercase', letterSpacing: 1 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   locationText: { fontSize: 12, color: '#007AFF', fontWeight: '600' },
