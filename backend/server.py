@@ -151,6 +151,7 @@ class CarCreate(BaseModel):
     # Mileage & premium features
     unlimited_mileage: bool = True
     mileage_limit: Optional[int] = None  # km/day cap when unlimited_mileage = False
+    min_driver_age: int = 21
     android_auto: bool = False
     apple_carplay: bool = False
     blind_spot_warning: bool = False
@@ -175,6 +176,7 @@ class CarUpdate(BaseModel):
     available: Optional[bool] = None
     unlimited_mileage: Optional[bool] = None
     mileage_limit: Optional[int] = None
+    min_driver_age: Optional[int] = None
     android_auto: Optional[bool] = None
     apple_carplay: Optional[bool] = None
     blind_spot_warning: Optional[bool] = None

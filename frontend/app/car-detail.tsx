@@ -168,6 +168,15 @@ export default function CarDetailScreen() {
               </View>
             </View>
 
+            {/* Driver requirements banner */}
+            <View style={styles.ageBanner}>
+              <Ionicons name="id-card-outline" size={22} color="#0A0A0A" />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.mileageTitle}>Minimum driver age: {car.min_driver_age || 21} years</Text>
+                <Text style={styles.mileageSub}>Valid driver's license required at pickup</Text>
+              </View>
+            </View>
+
             {/* Vehicle Features */}
             {(() => {
               const features = [
@@ -334,7 +343,8 @@ const styles = StyleSheet.create({
   specCard: { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, alignItems: 'center', gap: 6 },
   specValue: { fontSize: 15, fontWeight: '700', color: '#0A0A0A' },
   specLabel: { fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
-  mileageBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF5F5', borderRadius: 14, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#FFE5E5' },
+  mileageBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF5F5', borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#FFE5E5' },
+  ageBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 14, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#E5E5E5' },
   mileageTitle: { fontSize: 15, fontWeight: '800', color: '#0A0A0A' },
   mileageSub: { fontSize: 12, color: '#666', marginTop: 2 },
   featuresGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },

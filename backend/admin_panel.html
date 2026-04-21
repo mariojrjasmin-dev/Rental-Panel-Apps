@@ -198,6 +198,12 @@ async function showCarForm(id) {
         </div>
         <p style="color:#999;font-size:12px;margin-bottom:10px">Tick "Unlimited" OR enter a daily km cap (e.g., 200 km/day).</p>
 
+        <div class="section-title">Driver Requirements</div>
+        <div class="form-group" style="max-width:260px">
+          <label>Minimum Driver Age (years)</label>
+          <input class="input" id="f-minage" type="number" min="18" max="99" value="${car.min_driver_age || 21}">
+        </div>
+
         <div class="section-title">Vehicle Features</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:8px">
           <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fafafa;border-radius:10px;cursor:pointer;font-size:14px">
@@ -261,6 +267,7 @@ async function saveCar(id) {
     image_url: document.getElementById('f-img').value,
     unlimited_mileage: unlim,
     mileage_limit: unlim ? null : (isNaN(mileageVal) ? null : mileageVal),
+    min_driver_age: parseInt(document.getElementById('f-minage').value) || 21,
     android_auto: document.getElementById('f-android').checked,
     apple_carplay: document.getElementById('f-carplay').checked,
     blind_spot_warning: document.getElementById('f-bsw').checked,
