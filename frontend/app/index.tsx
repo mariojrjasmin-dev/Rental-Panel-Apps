@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { useAuth } from './_layout';
 
 export default function Index() {
@@ -8,6 +8,16 @@ export default function Index() {
   const router = useRouter();
 
   useEffect(() => {
+    // Host-based redirect for the admin subdomain.
+    // If visitors land on adminpanel.<anything>, send them straight to the HTML admin panel
+    // instead of the customer-facing mobile/web app.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const host = window.location.hostname || '';
+      if (host.startsWith('adminpanel.')) {
+        window.location.replace('/api/admin-panel');
+        return;
+      }
+    }
     if (!loading) {
       if (user) {
         router.replace('/(tabs)/home');
