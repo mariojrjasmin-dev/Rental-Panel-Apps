@@ -129,10 +129,9 @@ export default function CarDetailScreen() {
                 )}
               </View>
               <View style={styles.categoryTag}>
-                <Text style={styles.categoryTagText}>{car.category}</Text>
+                <Text style={styles.categoryTagText}>Or Similar | {car.category}</Text>
               </View>
             </View>
-            <Text style={styles.orSimilarDetail}>✴️ or similar vehicle — exact model may vary based on availability</Text>
 
             <View style={styles.specsGrid}>
               <View style={styles.specCard}>
@@ -288,7 +287,6 @@ const styles = StyleSheet.create({
   ratingRow: { marginTop: 6 },
   categoryTag: { backgroundColor: '#0A0A0A', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 50 },
   categoryTagText: { color: '#FFF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
-  orSimilarDetail: { fontSize: 12, color: '#FF9500', fontStyle: 'italic', marginTop: 10, marginBottom: 4, fontWeight: '600' },
   specsGrid: { flexDirection: 'row', gap: 12, marginBottom: 24 },
   specCard: { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, alignItems: 'center', gap: 6 },
   specValue: { fontSize: 15, fontWeight: '700', color: '#0A0A0A' },
