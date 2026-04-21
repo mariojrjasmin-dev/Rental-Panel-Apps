@@ -148,6 +148,15 @@ class CarCreate(BaseModel):
     pickup_location: Optional[Dict] = None
     dropoff_location: Optional[Dict] = None
     available: bool = True
+    # Mileage & premium features
+    unlimited_mileage: bool = True
+    mileage_limit: Optional[int] = None  # km/day cap when unlimited_mileage = False
+    android_auto: bool = False
+    apple_carplay: bool = False
+    blind_spot_warning: bool = False
+    gps: bool = False
+    keyless_entry: bool = False
+    sunroof: bool = False
 
 class CarUpdate(BaseModel):
     name: Optional[str] = None
@@ -164,6 +173,14 @@ class CarUpdate(BaseModel):
     pickup_location: Optional[Dict] = None
     dropoff_location: Optional[Dict] = None
     available: Optional[bool] = None
+    unlimited_mileage: Optional[bool] = None
+    mileage_limit: Optional[int] = None
+    android_auto: Optional[bool] = None
+    apple_carplay: Optional[bool] = None
+    blind_spot_warning: Optional[bool] = None
+    gps: Optional[bool] = None
+    keyless_entry: Optional[bool] = None
+    sunroof: Optional[bool] = None
 
 class BookingCreate(BaseModel):
     car_id: str

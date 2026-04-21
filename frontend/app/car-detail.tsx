@@ -151,6 +151,49 @@ export default function CarDetailScreen() {
               </View>
             </View>
 
+            {/* Mileage policy banner */}
+            <View style={styles.mileageBanner}>
+              <Ionicons name="speedometer-outline" size={22} color="#FF3B30" />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.mileageTitle}>
+                  {car.unlimited_mileage === false && car.mileage_limit
+                    ? `${car.mileage_limit} km/day included`
+                    : 'Unlimited mileage'}
+                </Text>
+                <Text style={styles.mileageSub}>
+                  {car.unlimited_mileage === false && car.mileage_limit
+                    ? 'Extra kilometers may incur additional charges'
+                    : 'Drive as far as you want — no limits'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Vehicle Features */}
+            {(() => {
+              const features = [
+                { key: 'android_auto', label: 'Android Auto', icon: 'logo-android' },
+                { key: 'apple_carplay', label: 'Apple CarPlay', icon: 'logo-apple' },
+                { key: 'blind_spot_warning', label: 'Blind Spot Warning', icon: 'warning-outline' },
+                { key: 'gps', label: 'GPS Navigation', icon: 'navigate-outline' },
+                { key: 'keyless_entry', label: 'Keyless Entry', icon: 'key-outline' },
+                { key: 'sunroof', label: 'Sunroof', icon: 'sunny-outline' },
+              ].filter((f) => !!car[f.key]);
+              if (features.length === 0) return null;
+              return (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Features</Text>
+                  <View style={styles.featuresGrid}>
+                    {features.map((f) => (
+                      <View key={f.key} style={styles.featureChip}>
+                        <Ionicons name={f.icon as any} size={16} color="#FF3B30" />
+                        <Text style={styles.featureLabel}>{f.label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              );
+            })()}
+
             {car.description ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>About</Text>
@@ -291,6 +334,12 @@ const styles = StyleSheet.create({
   specCard: { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, alignItems: 'center', gap: 6 },
   specValue: { fontSize: 15, fontWeight: '700', color: '#0A0A0A' },
   specLabel: { fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
+  mileageBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF5F5', borderRadius: 14, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#FFE5E5' },
+  mileageTitle: { fontSize: 15, fontWeight: '800', color: '#0A0A0A' },
+  mileageSub: { fontSize: 12, color: '#666', marginTop: 2 },
+  featuresGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  featureChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F5F5F5', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 50 },
+  featureLabel: { fontSize: 13, fontWeight: '600', color: '#0A0A0A' },
   section: { marginBottom: 24 },
   sectionTitle: { fontSize: 18, fontWeight: '800', color: '#0A0A0A', marginBottom: 12 },
   description: { fontSize: 15, color: '#666', lineHeight: 24 },

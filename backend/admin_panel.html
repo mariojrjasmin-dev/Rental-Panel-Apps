@@ -185,6 +185,41 @@ async function showCarForm(id) {
           <div class="form-group"><label>Fuel</label><input class="input" id="f-fuel" value="${car.fuel_type||'Gasoline'}"></div>
         </div>
         <div class="form-group"><label>Description</label><textarea class="input" id="f-desc" rows="2">${car.description||''}</textarea></div>
+
+        <div class="section-title">Mileage Policy</div>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:6px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px">
+            <input type="checkbox" id="f-unlimited" ${car.unlimited_mileage !== false ? 'checked' : ''} onchange="document.getElementById('f-mileage').disabled = this.checked; if(this.checked) document.getElementById('f-mileage').value = '';">
+            <strong>Unlimited mileage</strong>
+          </label>
+          <div style="flex:1">
+            <input class="input" id="f-mileage" type="number" min="0" placeholder="Daily mileage cap (km/day)" value="${car.mileage_limit || ''}" ${car.unlimited_mileage !== false ? 'disabled' : ''} style="margin:0">
+          </div>
+        </div>
+        <p style="color:#999;font-size:12px;margin-bottom:10px">Tick "Unlimited" OR enter a daily km cap (e.g., 200 km/day).</p>
+
+        <div class="section-title">Vehicle Features</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fafafa;border-radius:10px;cursor:pointer;font-size:14px">
+            <input type="checkbox" id="f-android" ${car.android_auto?'checked':''}> Android Auto
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fafafa;border-radius:10px;cursor:pointer;font-size:14px">
+            <input type="checkbox" id="f-carplay" ${car.apple_carplay?'checked':''}> Apple CarPlay
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fafafa;border-radius:10px;cursor:pointer;font-size:14px">
+            <input type="checkbox" id="f-bsw" ${car.blind_spot_warning?'checked':''}> Blind spot warning
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fafafa;border-radius:10px;cursor:pointer;font-size:14px">
+            <input type="checkbox" id="f-gps" ${car.gps?'checked':''}> GPS
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fafafa;border-radius:10px;cursor:pointer;font-size:14px">
+            <input type="checkbox" id="f-keyless" ${car.keyless_entry?'checked':''}> Keyless entry
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fafafa;border-radius:10px;cursor:pointer;font-size:14px">
+            <input type="checkbox" id="f-sunroof" ${car.sunroof?'checked':''}> Sunroof
+          </label>
+        </div>
+
         <div class="section-title">Pickup Location</div>
         ${car.pickup_location?.name ? `<div class="selected-loc"><span class="dot" style="background:#34c759"></span>${car.pickup_location.name}<span class="clear" onclick="document.getElementById('f-pickup').value='';this.parentNode.remove()">✕</span></div>` : ''}
         <div class="loc-pills" id="pickup-pills">${locations.map(l=>`<span class="loc-pill ${car.pickup_location?.name===l.name?'active-green':''}" onclick="selectLoc('pickup','${l.id}','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
@@ -210,6 +245,8 @@ function selectLoc(type, id, name, lat, lng) {
 }
 
 async function saveCar(id) {
+  const unlim = document.getElementById('f-unlimited').checked;
+  const mileageVal = parseInt(document.getElementById('f-mileage').value);
   const body = {
     name: document.getElementById('f-name').value,
     brand: document.getElementById('f-brand').value,
@@ -222,6 +259,14 @@ async function saveCar(id) {
     fuel_type: document.getElementById('f-fuel').value,
     description: document.getElementById('f-desc').value,
     image_url: document.getElementById('f-img').value,
+    unlimited_mileage: unlim,
+    mileage_limit: unlim ? null : (isNaN(mileageVal) ? null : mileageVal),
+    android_auto: document.getElementById('f-android').checked,
+    apple_carplay: document.getElementById('f-carplay').checked,
+    blind_spot_warning: document.getElementById('f-bsw').checked,
+    gps: document.getElementById('f-gps').checked,
+    keyless_entry: document.getElementById('f-keyless').checked,
+    sunroof: document.getElementById('f-sunroof').checked,
   };
   try { body.pickup_location = JSON.parse(document.getElementById('f-pickup').value); } catch(e) { body.pickup_location = {name:'',lat:0,lng:0}; }
   try { body.dropoff_location = JSON.parse(document.getElementById('f-dropoff').value); } catch(e) { body.dropoff_location = {name:'',lat:0,lng:0}; }
