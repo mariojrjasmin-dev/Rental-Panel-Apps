@@ -27,6 +27,7 @@ export default function CarDetailScreen() {
   const [reviewComment, setReviewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showReviewForm, setShowReviewForm] = useState(false);
+  const [heroIndex, setHeroIndex] = useState(0);
   const { user } = useAuth();
   const router = useRouter();
 
@@ -109,7 +110,44 @@ export default function CarDetailScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           <View style={styles.heroContainer}>
-            <Image source={{ uri: car.image_url }} style={styles.heroImage} resizeMode="cover" />
+            {(() => {
+              const gallery: string[] = [
+                ...(car.image_url ? [car.image_url] : []),
+                ...((car.images as string[]) || []),
+              ].filter((v, i, a) => v && a.indexOf(v) === i);
+              if (gallery.length === 0) {
+                return <View style={[styles.heroImage, { backgroundColor: '#F0F0F0' }]} />;
+              }
+              if (gallery.length === 1) {
+                return <Image source={{ uri: gallery[0] }} style={styles.heroImage} resizeMode="cover" />;
+              }
+              return (
+                <>
+                  <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onMomentumScrollEnd={(e) => {
+                      const idx = Math.round(e.nativeEvent.contentOffset.x / width);
+                      setHeroIndex(idx);
+                    }}
+                  >
+                    {gallery.map((src, i) => (
+                      <Image key={i} source={{ uri: src }} style={styles.heroImage} resizeMode="cover" />
+                    ))}
+                  </ScrollView>
+                  <View style={styles.dotsRow} pointerEvents="none">
+                    {gallery.map((_, i) => (
+                      <View key={i} style={[styles.dot, i === heroIndex && styles.dotActive]} />
+                    ))}
+                  </View>
+                  <View style={styles.photoCounter} pointerEvents="none">
+                    <Ionicons name="images" size={14} color="#FFF" />
+                    <Text style={styles.photoCounterText}>{heroIndex + 1}/{gallery.length}</Text>
+                  </View>
+                </>
+              );
+            })()}
             <SafeAreaView style={styles.heroOverlay} edges={['top']}>
               <TouchableOpacity testID="back-button" style={styles.backBtn} onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#0A0A0A" />
@@ -334,8 +372,13 @@ const styles = StyleSheet.create({
   backLink: { fontSize: 16, color: '#FF3B30', marginTop: 8 },
   scrollContent: { paddingBottom: 110 },
   heroContainer: { width, height: 280, backgroundColor: '#F5F5F5' },
-  heroImage: { width: '100%', height: '100%' },
+  heroImage: { width, height: 280 },
   heroOverlay: { position: 'absolute', top: 0, left: 0, right: 0 },
+  dotsRow: { position: 'absolute', bottom: 14, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.5)' },
+  dotActive: { backgroundColor: '#FFF', width: 22 },
+  photoCounter: { position: 'absolute', top: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 50 },
+  photoCounterText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', marginLeft: 16, marginTop: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
   content: { paddingHorizontal: 24, paddingTop: 20 },
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },

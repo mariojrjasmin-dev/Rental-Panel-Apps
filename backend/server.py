@@ -146,6 +146,7 @@ class CarCreate(BaseModel):
     fuel_type: str = "Gasoline"
     description: str = ""
     image_url: str = ""
+    images: List[str] = []  # Additional photos beyond the primary image_url
     pickup_location: Optional[Dict] = None
     dropoff_location: Optional[Dict] = None
     available: bool = True
@@ -173,6 +174,7 @@ class CarUpdate(BaseModel):
     fuel_type: Optional[str] = None
     description: Optional[str] = None
     image_url: Optional[str] = None
+    images: Optional[List[str]] = None
     pickup_location: Optional[Dict] = None
     dropoff_location: Optional[Dict] = None
     available: Optional[bool] = None

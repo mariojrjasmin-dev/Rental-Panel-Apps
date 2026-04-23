@@ -14,6 +14,9 @@ type Booking = {
   car_image: string;
   pickup_date: string;
   dropoff_date: string;
+  subtotal?: number;
+  tax_rate?: number;
+  tax_amount?: number;
   total_price: number;
   status: string;
   payment_method: string;
@@ -96,6 +99,13 @@ export default function BookingsScreen() {
           </View>
           <Text style={styles.totalPrice}>${item.total_price}</Text>
         </View>
+        {(item.subtotal != null || (item.tax_amount ?? 0) > 0) && (
+          <View style={styles.taxRow}>
+            <Text style={styles.taxText}>
+              Subtotal ${(item.subtotal ?? 0).toFixed(2)} · Tax {item.tax_rate ?? 0}% ${(item.tax_amount ?? 0).toFixed(2)}
+            </Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -146,6 +156,8 @@ const styles = StyleSheet.create({
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dateText: { fontSize: 13, color: '#666' },
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  taxRow: { marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  taxText: { fontSize: 11, color: '#999', fontWeight: '600' },
   paymentInfo: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   paymentText: { fontSize: 13, color: '#666' },
   totalPrice: { fontSize: 20, fontWeight: '900', color: '#FF3B30' },

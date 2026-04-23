@@ -74,7 +74,22 @@ export default function BookingSuccessScreen() {
               <View style={styles.detailCard}>
                 <Text style={styles.detailName}>{booking.car_name}</Text>
                 <Text style={styles.detailDate}>{booking.pickup_date} - {booking.dropoff_date}</Text>
-                <Text style={styles.detailTotal}>${booking.total_price}</Text>
+                {(booking.subtotal != null || (booking.tax_amount ?? 0) > 0) && (
+                  <View style={styles.breakdown}>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownLabel}>Subtotal</Text>
+                      <Text style={styles.breakdownValue}>${(booking.subtotal ?? 0).toFixed(2)}</Text>
+                    </View>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownLabel}>Tax ({booking.tax_rate ?? 0}%)</Text>
+                      <Text style={styles.breakdownValue}>${(booking.tax_amount ?? 0).toFixed(2)}</Text>
+                    </View>
+                  </View>
+                )}
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Total</Text>
+                  <Text style={styles.detailTotal}>${booking.total_price}</Text>
+                </View>
               </View>
             )}
           </>
@@ -113,10 +128,16 @@ const styles = StyleSheet.create({
   successCircle: { width: 96, height: 96, borderRadius: 48, backgroundColor: '#34C759', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
   title: { fontSize: 28, fontWeight: '900', color: '#0A0A0A', textAlign: 'center' },
   subtitle: { fontSize: 16, color: '#666', marginTop: 8, textAlign: 'center' },
-  detailCard: { backgroundColor: '#F5F5F5', borderRadius: 20, padding: 24, marginTop: 24, width: '100%', alignItems: 'center', gap: 4 },
-  detailName: { fontSize: 18, fontWeight: '800', color: '#0A0A0A' },
-  detailDate: { fontSize: 14, color: '#666' },
-  detailTotal: { fontSize: 28, fontWeight: '900', color: '#FF3B30', marginTop: 8 },
+  detailCard: { backgroundColor: '#F5F5F5', borderRadius: 20, padding: 20, marginTop: 24, width: '100%', gap: 4 },
+  detailName: { fontSize: 18, fontWeight: '800', color: '#0A0A0A', textAlign: 'center' },
+  detailDate: { fontSize: 14, color: '#666', textAlign: 'center' },
+  detailTotal: { fontSize: 22, fontWeight: '900', color: '#FF3B30' },
+  breakdown: { marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E5E5', gap: 4 },
+  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  breakdownLabel: { fontSize: 13, color: '#666' },
+  breakdownValue: { fontSize: 14, color: '#0A0A0A', fontWeight: '700' },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#E5E5E5' },
+  totalLabel: { fontSize: 14, color: '#0A0A0A', fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
   actions: { width: '100%', marginTop: 32, gap: 12 },
   primaryBtn: { backgroundColor: '#FF3B30', borderRadius: 50, paddingVertical: 18, alignItems: 'center' },
   primaryBtnText: { color: '#FFF', fontSize: 17, fontWeight: '700' },
