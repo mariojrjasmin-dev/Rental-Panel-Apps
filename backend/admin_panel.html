@@ -240,6 +240,8 @@ async function showCarForm(id) {
   // Render existing photo gallery for the edit view
   setTimeout(renderGallery, 0);
 }
+
+function selectLoc(type, name, lat, lng) {
   const data = JSON.stringify({name,lat,lng});
   document.getElementById('f-'+type).value = data;
   const pills = document.getElementById(type+'-pills');
