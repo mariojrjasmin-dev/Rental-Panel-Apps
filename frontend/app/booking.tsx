@@ -137,7 +137,7 @@ export default function BookingScreen() {
       const bookingData = await res.json();
 
       if (paymentMethod === 'stripe') {
-        const originUrl = typeof window !== 'undefined' ? window.location.origin : BACKEND_URL;
+        const originUrl = typeof window !== 'undefined' ? window.location.origin : '';
         const checkoutRes = await fetch(`${BACKEND_URL}/api/payments/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
