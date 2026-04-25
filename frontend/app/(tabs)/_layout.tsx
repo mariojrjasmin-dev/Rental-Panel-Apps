@@ -1,7 +1,10 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../_layout';
+import { t } from '../../src/i18n';
 
 export default function TabsLayout() {
+  const { locale } = useAuth(); // re-render tab labels when locale changes
   return (
     <Tabs screenOptions={{
       headerShown: false,
@@ -18,15 +21,15 @@ export default function TabsLayout() {
       tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
     }}>
       <Tabs.Screen name="home" options={{
-        title: 'Home',
+        title: t('tabHome'),
         tabBarIcon: ({ color, size }) => <Ionicons name="car-sport" size={size} color={color} />,
       }} />
       <Tabs.Screen name="bookings" options={{
-        title: 'Bookings',
+        title: t('tabBookings'),
         tabBarIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
       }} />
       <Tabs.Screen name="profile" options={{
-        title: 'Profile',
+        title: t('tabProfile'),
         tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
       }} />
     </Tabs>

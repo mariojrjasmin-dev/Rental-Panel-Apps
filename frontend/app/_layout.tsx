@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState, createContext, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { loadSavedLocale, setLocale as persistLocale, AppLocale } from '../src/i18n';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -23,6 +24,8 @@ type AuthContextType = {
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (u: User | null) => void;
+  locale: AppLocale;
+  changeLocale: (l: AppLocale) => Promise<void>;
 };
 
 export const AuthContext = createContext<AuthContextType>({
@@ -32,6 +35,8 @@ export const AuthContext = createContext<AuthContextType>({
   register: async () => {},
   logout: async () => {},
   setUser: () => {},
+  locale: 'en',
+  changeLocale: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -39,10 +44,20 @@ export const useAuth = () => useContext(AuthContext);
 export default function RootLayout() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [locale, setLocaleState] = useState<AppLocale>('en');
 
   useEffect(() => {
-    checkAuth();
+    (async () => {
+      const lang = await loadSavedLocale();
+      setLocaleState(lang);
+      checkAuth();
+    })();
   }, []);
+
+  const changeLocale = async (l: AppLocale) => {
+    await persistLocale(l);
+    setLocaleState(l);
+  };
 
   const checkAuth = async () => {
     try {
@@ -106,7 +121,7 @@ export default function RootLayout() {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, setUser, locale, changeLocale }}>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />

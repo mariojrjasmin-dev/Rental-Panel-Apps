@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
 import StarRating from '../../components/StarRating';
+import { t as tr } from '../../src/i18n';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -143,7 +144,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.greeting}>Hello, {user?.name || 'there'}</Text>
+          <Text style={styles.greeting}>{tr('welcomeNew')}{user?.name ? `, ${user.name}` : ''}</Text>
           <Text style={styles.title}>DAMS CAR RENTAL</Text>
         </View>
         <TouchableOpacity testID="profile-avatar" style={styles.avatar} onPress={() => router.push('/(tabs)/profile')}>
@@ -156,7 +157,7 @@ export default function HomeScreen() {
         <TextInput
           testID="car-search-input"
           style={styles.searchInput}
-          placeholder="Find a vehicle..."
+          placeholder={tr('findCar')}
           placeholderTextColor="#999"
           value={search}
           onChangeText={setSearch}

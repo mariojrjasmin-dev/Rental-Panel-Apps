@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../_layout';
+import { t } from '../../src/i18n';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -10,18 +11,18 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const { login } = useAuth();
+  const { login, locale } = useAuth();
   const router = useRouter();
 
   const handleLogin = async () => {
-    if (!email || !password) { setError('Please fill all fields'); return; }
+    if (!email || !password) { setError(t('fillAllFields')); return; }
     setLoading(true);
     setError('');
     try {
       await login(email, password);
       router.replace('/(tabs)/home');
     } catch (e: any) {
-      setError(e.message || 'Login failed');
+      setError(e.message || t('invalidLogin'));
     }
     setLoading(false);
   };
@@ -32,7 +33,7 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <Text style={styles.brand}>DAMS</Text>
           <Text style={styles.brandSub}>CAR RENTAL</Text>
-          <Text style={styles.subtitle}>Sign in to continue</Text>
+          <Text style={styles.subtitle}>{t('signInSub')}</Text>
         </View>
 
         <View style={styles.form}>
@@ -43,7 +44,7 @@ export default function LoginScreen() {
             <TextInput
               testID="login-email-input"
               style={styles.input}
-              placeholder="Email"
+              placeholder={t('email')}
               placeholderTextColor="#999"
               value={email}
               onChangeText={setEmail}
@@ -57,7 +58,7 @@ export default function LoginScreen() {
             <TextInput
               testID="login-password-input"
               style={styles.input}
-              placeholder="Password"
+              placeholder={t('password')}
               placeholderTextColor="#999"
               value={password}
               onChangeText={setPassword}
@@ -69,12 +70,12 @@ export default function LoginScreen() {
           </View>
 
           <TouchableOpacity testID="login-submit-button" style={styles.primaryBtn} onPress={handleLogin} disabled={loading} activeOpacity={0.7}>
-            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>Sign In</Text>}
+            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{t('signIn')}</Text>}
           </TouchableOpacity>
 
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
+            <Text style={styles.dividerText}>{t('or').toLowerCase()}</Text>
             <View style={styles.dividerLine} />
           </View>
 
@@ -88,11 +89,11 @@ export default function LoginScreen() {
             }}
           >
             <Ionicons name="logo-google" size={20} color="#0A0A0A" />
-            <Text style={styles.googleBtnText}>Continue with Google</Text>
+            <Text style={styles.googleBtnText}>{t('continueWithGoogle')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity testID="go-to-register" onPress={() => router.push('/(auth)/register')} style={styles.linkBtn}>
-            <Text style={styles.linkText}>Don't have an account? <Text style={styles.linkBold}>Sign Up</Text></Text>
+            <Text style={styles.linkText}>{t('noAccountYet')} <Text style={styles.linkBold}>{t('signUp')}</Text></Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

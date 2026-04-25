@@ -4,9 +4,10 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
+import { t } from '../../src/i18n';
 
 export default function ProfileScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, locale, changeLocale } = useAuth();
   const router = useRouter();
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -33,13 +34,13 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.content}>
-        <Text style={styles.title}>Profile</Text>
+        <Text style={styles.title}>{t('profile')}</Text>
 
         <View style={styles.profileCard}>
           <View style={styles.avatarCircle}>
             <Ionicons name="person" size={40} color="#FFF" />
           </View>
-          <Text style={styles.userName}>{user?.name || 'User'}</Text>
+          <Text style={styles.userName}>{user?.name || t('member')}</Text>
           <Text style={styles.userEmail}>{user?.email || ''}</Text>
           {user?.role === 'admin' && (
             <View style={styles.adminBadge}>
@@ -49,10 +50,29 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {/* Language toggle */}
+        <View style={styles.langCard}>
+          <Text style={styles.langLabel}>{t('language')}</Text>
+          <View style={styles.langRow}>
+            <Pressable
+              style={[styles.langBtn, locale === 'en' && styles.langBtnActive]}
+              onPress={() => changeLocale('en')}
+            >
+              <Text style={[styles.langBtnText, locale === 'en' && styles.langBtnTextActive]}>🇺🇸  English</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.langBtn, locale === 'es' && styles.langBtnActive]}
+              onPress={() => changeLocale('es')}
+            >
+              <Text style={[styles.langBtnText, locale === 'es' && styles.langBtnTextActive]}>🇩🇴  Español</Text>
+            </Pressable>
+          </View>
+        </View>
+
         <View style={styles.menuSection}>
           <Pressable testID="my-bookings-btn" style={styles.menuItem} onPress={() => router.push('/(tabs)/bookings')}>
             <View style={styles.menuIcon}><Ionicons name="calendar-outline" size={22} color="#0A0A0A" /></View>
-            <Text style={styles.menuText}>My Bookings</Text>
+            <Text style={styles.menuText}>{t('myBookings')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#999" />
           </Pressable>
 
@@ -67,7 +87,7 @@ export default function ProfileScreen() {
           {user?.role === 'admin' && (
             <Pressable testID="admin-locations-btn" style={styles.menuItem} onPress={() => router.push('/admin-locations')}>
               <View style={[styles.menuIcon, { backgroundColor: '#F0F8FF' }]}><Ionicons name="location-outline" size={22} color="#007AFF" /></View>
-              <Text style={styles.menuText}>Manage Locations</Text>
+              <Text style={styles.menuText}>{t('manageLocations')}</Text>
               <Ionicons name="chevron-forward" size={20} color="#999" />
             </Pressable>
           )}
@@ -84,21 +104,21 @@ export default function ProfileScreen() {
               accessibilityRole="button"
             >
               <Ionicons name="log-out-outline" size={22} color="#FF3B30" />
-              <Text style={styles.logoutText}>Logout</Text>
+              <Text style={styles.logoutText}>{t('logout')}</Text>
             </Pressable>
           ) : (
             <View testID="logout-confirm-section" style={styles.confirmSection}>
-              <Text style={styles.confirmText}>Are you sure you want to logout?</Text>
+              <Text style={styles.confirmText}>{locale === 'es' ? '¿Estás seguro de cerrar sesión?' : 'Are you sure you want to logout?'}</Text>
               <View style={styles.confirmActions}>
                 <Pressable testID="logout-cancel-btn" style={styles.cancelBtn} onPress={hideConfirm} disabled={loggingOut} accessibilityRole="button"
                   // @ts-ignore
                   onClick={hideConfirm}>
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                  <Text style={styles.cancelBtnText}>{t('cancel')}</Text>
                 </Pressable>
                 <Pressable testID="logout-confirm-btn" style={styles.confirmBtn} onPress={doLogout} disabled={loggingOut} accessibilityRole="button"
                   // @ts-ignore
                   onClick={loggingOut ? undefined : doLogout}>
-                  {loggingOut ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.confirmBtnText}>Yes, Logout</Text>}
+                  {loggingOut ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.confirmBtnText}>{t('logout')}</Text>}
                 </Pressable>
               </View>
             </View>
@@ -120,6 +140,13 @@ const styles = StyleSheet.create({
   adminBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, backgroundColor: '#FFF0F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 50 },
   adminText: { fontSize: 13, fontWeight: '700', color: '#FF3B30' },
   menuSection: { gap: 4, marginBottom: 24 },
+  langCard: { backgroundColor: '#FAFAFA', borderRadius: 16, padding: 14, marginBottom: 16 },
+  langLabel: { fontSize: 11, fontWeight: '700', color: '#999', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' },
+  langRow: { flexDirection: 'row', gap: 8 },
+  langBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#FFF', alignItems: 'center', borderWidth: 1, borderColor: '#E5E5E5' },
+  langBtnActive: { backgroundColor: '#0A0A0A', borderColor: '#0A0A0A' },
+  langBtnText: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
+  langBtnTextActive: { color: '#FFF' },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', cursor: 'pointer' as any },
   menuIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   menuText: { flex: 1, fontSize: 16, fontWeight: '600', color: '#0A0A0A' },

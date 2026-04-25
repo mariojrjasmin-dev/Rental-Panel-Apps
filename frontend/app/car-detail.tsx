@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import StarRating from '../components/StarRating';
 import { useAuth } from './_layout';
+import { t as tr } from '../src/i18n';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const { width } = Dimensions.get('window');
@@ -357,7 +358,7 @@ export default function CarDetailScreen() {
         </View>
         <TouchableOpacity testID="book-now-button" style={styles.bookBtn} activeOpacity={0.7}
           onPress={() => router.push({ pathname: '/booking', params: { carId: car.id } })}>
-          <Text style={styles.bookBtnText}>Book Now</Text>
+          <Text style={styles.bookBtnText}>{tr('bookNow')}</Text>
           <Ionicons name="arrow-forward" size={20} color="#FFF" />
         </TouchableOpacity>
       </View>
