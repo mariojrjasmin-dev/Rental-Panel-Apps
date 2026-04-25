@@ -74,11 +74,11 @@ export default function BookingSuccessScreen() {
               <View style={styles.detailCard}>
                 <Text style={styles.detailName}>{booking.car_name}</Text>
                 <Text style={styles.detailDate}>{booking.pickup_date} - {booking.dropoff_date}</Text>
-                {(booking.subtotal != null || (booking.tax_amount ?? 0) > 0) && (
+                {(booking.total_price != null) && (
                   <View style={styles.breakdown}>
                     <View style={styles.breakdownRow}>
                       <Text style={styles.breakdownLabel}>Subtotal</Text>
-                      <Text style={styles.breakdownValue}>${(booking.subtotal ?? 0).toFixed(2)}</Text>
+                      <Text style={styles.breakdownValue}>${(booking.subtotal ?? booking.total_price).toFixed(2)}</Text>
                     </View>
                     <View style={styles.breakdownRow}>
                       <Text style={styles.breakdownLabel}>Tax ({booking.tax_rate ?? 0}%)</Text>

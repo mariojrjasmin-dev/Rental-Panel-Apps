@@ -110,22 +110,36 @@ export default function BookingScreen() {
         if (res.ok) {
           const carData = await res.json();
           setCar(carData);
-          // Fetch tax rate from pickup location
-          if (carData.pickup_location?.name) {
-            try {
-              const taxRes = await fetch(`${BACKEND_URL}/api/locations/tax-by-name?name=${encodeURIComponent(carData.pickup_location.name)}`);
-              if (taxRes.ok) {
-                const taxData = await taxRes.json();
-                setTaxRate(taxData.tax_rate || 0);
-              }
-            } catch (e) { console.log('Tax fetch error:', e); }
-          }
         }
       } catch (e) { console.log(e); }
       setLoading(false);
     };
     if (carId) fetchCar();
   }, [carId]);
+
+  // Tax rate refreshes whenever the car's pickup location changes
+  useEffect(() => {
+    const locName = car?.pickup_location?.name;
+    if (!locName) return;
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const taxRes = await fetch(
+          `${BACKEND_URL}/api/locations/tax-by-name?name=${encodeURIComponent(locName)}`,
+          { signal: ctrl.signal }
+        );
+        if (taxRes.ok) {
+          const taxData = await taxRes.json();
+          setTaxRate(Number(taxData.tax_rate) || 0);
+        } else {
+          setTaxRate(0);
+        }
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') console.log('Tax fetch error:', e);
+      }
+    })();
+    return () => ctrl.abort();
+  }, [car?.pickup_location?.name]);
 
   const handleBooking = async () => {
     if (!car) return;
@@ -314,10 +328,15 @@ export default function BookingScreen() {
             <Text style={styles.summaryLabel}>{tr('subtotal')}</Text>
             <Text style={styles.summaryValue}>${total}</Text>
           </View>
-          {taxRate > 0 && (
+          {taxRate > 0 ? (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>{tr('tax')} ({taxRate}%)</Text>
               <Text style={styles.summaryValue}>${taxAmount}</Text>
+            </View>
+          ) : (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: '#999' }]}>{tr('tax')} (0%)</Text>
+              <Text style={[styles.summaryValue, { color: '#999' }]}>$0.00</Text>
             </View>
           )}
           <View style={[styles.summaryRow, styles.totalRow]}>

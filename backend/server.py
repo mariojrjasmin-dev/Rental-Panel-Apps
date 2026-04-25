@@ -533,13 +533,22 @@ async def create_booking(booking: BookingCreate, request: Request):
     
     subtotal = round(days * car["price_per_day"], 2)
     
-    # Look up tax rate from pickup location
+    # Look up tax rate from pickup location.
+    # Use case-insensitive exact match (anchored regex) + trim whitespace
+    # so admin-entered name variations don't silently fall back to 0% tax.
     tax_rate = 0.0
-    pickup_loc_name = booking.pickup_location.get("name", "")
+    pickup_loc_name = (booking.pickup_location.get("name", "") or "").strip()
     if pickup_loc_name:
-        loc = await db.locations.find_one({"name": pickup_loc_name}, {"_id": 0})
+        import re
+        escaped = re.escape(pickup_loc_name)
+        loc = await db.locations.find_one(
+            {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
+            {"_id": 0, "tax_rate": 1, "name": 1},
+        )
         if loc:
-            tax_rate = loc.get("tax_rate", 0.0)
+            tax_rate = float(loc.get("tax_rate") or 0)
+        else:
+            logger.warning(f"No location matched name={pickup_loc_name!r} for tax lookup")
     
     tax_amount = round(subtotal * (tax_rate / 100), 2)
     total = round(subtotal + tax_amount, 2)
