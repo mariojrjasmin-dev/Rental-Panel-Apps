@@ -1,9 +1,16 @@
-import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../_layout';
 import { t } from '../../src/i18n';
+import {
+  isBiometricAvailable,
+  isBiometricEnabled,
+  authenticateWithBiometrics,
+  enableBiometricLogin,
+  type BiometricCheck,
+} from '../../src/biometric';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -11,8 +18,40 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [bioState, setBioState] = useState<BiometricCheck>({ available: false, enrolled: false, type: 'none' });
+  const [bioReady, setBioReady] = useState(false); // user has previously enabled biometric
   const { login, locale } = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    (async () => {
+      const check = await isBiometricAvailable();
+      setBioState(check);
+      const enabled = await isBiometricEnabled();
+      setBioReady(enabled);
+    })();
+  }, []);
+
+  const offerBiometricEnable = (mail: string, pass: string) => {
+    if (!bioState.available || !bioState.enrolled || Platform.OS === 'web') return;
+    if (bioReady) return; // already enabled
+    Alert.alert(
+      t('enableBiometric'),
+      t('enableBiometricSub'),
+      [
+        { text: t('notNow'), style: 'cancel' },
+        {
+          text: t('yes'),
+          onPress: async () => {
+            try {
+              await enableBiometricLogin(mail, pass);
+              setBioReady(true);
+            } catch {}
+          },
+        },
+      ]
+    );
+  };
 
   const handleLogin = async () => {
     if (!email || !password) { setError(t('fillAllFields')); return; }
@@ -20,7 +59,25 @@ export default function LoginScreen() {
     setError('');
     try {
       await login(email, password);
+      offerBiometricEnable(email, password);
       router.replace('/(tabs)/home');
+    } catch (e: any) {
+      setError(e.message || t('invalidLogin'));
+    }
+    setLoading(false);
+  };
+
+  const handleBiometricLogin = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const r = await authenticateWithBiometrics(t('biometricPrompt'));
+      if (r.success && r.email && r.password) {
+        await login(r.email, r.password);
+        router.replace('/(tabs)/home');
+      } else if (r.error && r.error !== 'cancelled') {
+        setError(t('invalidLogin'));
+      }
     } catch (e: any) {
       setError(e.message || t('invalidLogin'));
     }
@@ -73,6 +130,17 @@ export default function LoginScreen() {
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{t('signIn')}</Text>}
           </TouchableOpacity>
 
+          {bioReady && bioState.available && bioState.enrolled && Platform.OS !== 'web' && (
+            <TouchableOpacity testID="biometric-login-btn" style={styles.bioBtn} onPress={handleBiometricLogin} disabled={loading} activeOpacity={0.7}>
+              <Ionicons
+                name={bioState.type === 'face' ? 'scan-outline' : 'finger-print'}
+                size={22}
+                color="#0A0A0A"
+              />
+              <Text style={styles.bioBtnText}>{t('signInWithBiometric')}</Text>
+            </TouchableOpacity>
+          )}
+
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
             <Text style={styles.dividerText}>{t('or').toLowerCase()}</Text>
@@ -115,6 +183,8 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontSize: 16, color: '#0A0A0A', paddingVertical: 16 },
   eyeBtn: { padding: 4 },
   primaryBtn: { backgroundColor: '#FF3B30', borderRadius: 50, paddingVertical: 18, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  bioBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF', borderRadius: 50, paddingVertical: 14, borderWidth: 2, borderColor: '#0A0A0A', gap: 10, marginTop: 12 },
+  bioBtnText: { color: '#0A0A0A', fontWeight: '700', fontSize: 15 },
   primaryBtnText: { color: '#FFF', fontSize: 17, fontWeight: '700' },
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 8 },
   dividerLine: { flex: 1, height: 1, backgroundColor: '#E5E5E5' },

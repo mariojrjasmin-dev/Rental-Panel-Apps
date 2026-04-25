@@ -1,16 +1,34 @@
-import { useState, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { useState, useCallback, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Switch } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
 import { t } from '../../src/i18n';
+import { isBiometricAvailable, isBiometricEnabled, disableBiometricLogin, type BiometricCheck } from '../../src/biometric';
 
 export default function ProfileScreen() {
   const { user, logout, locale, changeLocale } = useAuth();
   const router = useRouter();
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [bioState, setBioState] = useState<BiometricCheck>({ available: false, enrolled: false, type: 'none' });
+  const [bioEnabled, setBioEnabled] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setBioState(await isBiometricAvailable());
+      setBioEnabled(await isBiometricEnabled());
+    })();
+  }, []);
+
+  const toggleBiometric = useCallback(async (val: boolean) => {
+    if (!val) {
+      await disableBiometricLogin();
+      setBioEnabled(false);
+    }
+    // Enabling requires the user to login normally first (in login screen).
+  }, []);
 
   const doLogout = useCallback(async () => {
     setLoggingOut(true);
@@ -68,6 +86,23 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
         </View>
+
+        {/* Biometric login (mobile only, when supported) */}
+        {bioState.available && bioState.enrolled && Platform.OS !== 'web' && (
+          <View style={styles.bioCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bioTitle}>{t('biometricLogin')}</Text>
+              <Text style={styles.bioSub}>{bioEnabled ? t('biometricEnabled') : t('enableBiometricSub')}</Text>
+            </View>
+            <Switch
+              value={bioEnabled}
+              onValueChange={toggleBiometric}
+              trackColor={{ false: '#E5E5E5', true: '#34C759' }}
+              thumbColor="#FFF"
+              disabled={!bioEnabled /* enabling happens during login */}
+            />
+          </View>
+        )}
 
         <View style={styles.menuSection}>
           <Pressable testID="my-bookings-btn" style={styles.menuItem} onPress={() => router.push('/(tabs)/bookings')}>
@@ -147,6 +182,9 @@ const styles = StyleSheet.create({
   langBtnActive: { backgroundColor: '#0A0A0A', borderColor: '#0A0A0A' },
   langBtnText: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
   langBtnTextActive: { color: '#FFF' },
+  bioCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FAFAFA', borderRadius: 16, padding: 14, marginBottom: 16 },
+  bioTitle: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
+  bioSub: { fontSize: 12, color: '#666', marginTop: 2 },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', cursor: 'pointer' as any },
   menuIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   menuText: { flex: 1, fontSize: 16, fontWeight: '600', color: '#0A0A0A' },

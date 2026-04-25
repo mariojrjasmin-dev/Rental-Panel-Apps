@@ -102,6 +102,18 @@ const translations = {
     unpaidStatus: 'UNPAID',
     refundedStatus: 'REFUNDED',
 
+    // ---- Biometric ----
+    biometricLogin: 'Use Biometric Login',
+    enableBiometric: 'Enable Biometric Login',
+    biometricPrompt: 'Sign in with biometrics',
+    biometricUnavailable: 'Biometric authentication is not available on this device',
+    biometricEnabled: 'Biometric login enabled',
+    biometricDisabled: 'Biometric login disabled',
+    enableBiometricSub: 'Sign in faster next time using Face ID, Touch ID, or your fingerprint.',
+    yes: 'Yes, enable',
+    notNow: 'Not now',
+    signInWithBiometric: 'Sign in with Face ID / Touch ID',
+
     // ---- Receipt ----
     rentalReceipt: 'Rental Receipt',
     receiptNumber: 'Receipt #',
@@ -239,6 +251,18 @@ const translations = {
     paidStatus: 'PAGADO',
     unpaidStatus: 'POR PAGAR',
     refundedStatus: 'REEMBOLSADO',
+
+    // ---- Biometric ----
+    biometricLogin: 'Acceso biométrico',
+    enableBiometric: 'Activar acceso biométrico',
+    biometricPrompt: 'Inicia sesión con biometría',
+    biometricUnavailable: 'La autenticación biométrica no está disponible en este dispositivo',
+    biometricEnabled: 'Acceso biométrico activado',
+    biometricDisabled: 'Acceso biométrico desactivado',
+    enableBiometricSub: 'Inicia sesión más rápido la próxima vez con Face ID, Touch ID o tu huella.',
+    yes: 'Sí, activar',
+    notNow: 'Ahora no',
+    signInWithBiometric: 'Iniciar sesión con Face ID / Huella',
 
     // ---- Receipt ----
     rentalReceipt: 'Recibo de renta',
