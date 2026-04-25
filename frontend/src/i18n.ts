@@ -98,6 +98,9 @@ const translations = {
     statusActive: 'active',
     statusCompleted: 'completed',
     statusCancelled: 'cancelled',
+    paidStatus: 'PAID',
+    unpaidStatus: 'UNPAID',
+    refundedStatus: 'REFUNDED',
 
     // ---- Receipt ----
     rentalReceipt: 'Rental Receipt',
@@ -233,6 +236,9 @@ const translations = {
     statusActive: 'activa',
     statusCompleted: 'completada',
     statusCancelled: 'cancelada',
+    paidStatus: 'PAGADO',
+    unpaidStatus: 'POR PAGAR',
+    refundedStatus: 'REEMBOLSADO',
 
     // ---- Receipt ----
     rentalReceipt: 'Recibo de renta',

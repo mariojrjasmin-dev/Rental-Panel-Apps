@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { t as tr } from '../../src/i18n';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -22,6 +23,16 @@ type Booking = {
   payment_method: string;
   payment_status: string;
   days: number;
+};
+
+const PAYMENT_BADGE: Record<string, { color: string; key: string }> = {
+  paid: { color: '#34C759', key: 'paidStatus' },
+  succeeded: { color: '#34C759', key: 'paidStatus' },
+  cash_paid: { color: '#34C759', key: 'paidStatus' },
+  pending: { color: '#FF9500', key: 'unpaidStatus' },
+  unpaid: { color: '#FF9500', key: 'unpaidStatus' },
+  refunded: { color: '#8E8E93', key: 'refundedStatus' },
+  failed: { color: '#FF3B30', key: 'unpaidStatus' },
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -82,10 +93,29 @@ export default function BookingsScreen() {
           <Text style={styles.carName} numberOfLines={1}>{item.car_name}</Text>
           <View style={[styles.statusBadge, { backgroundColor: (STATUS_COLORS[item.status] || '#999') + '20' }]}>
             <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] || '#999' }]}>
-              {item.status.replace('_', ' ')}
+              {tr('status' + (item.status === 'pending_payment' ? 'Pending' : item.status.charAt(0).toUpperCase() + item.status.slice(1)))}
             </Text>
           </View>
         </View>
+        {(() => {
+          const pay = PAYMENT_BADGE[item.payment_status || 'pending'] || PAYMENT_BADGE.pending;
+          // For cash bookings without explicit status, show "Cash" pill instead
+          const isCashOnly = item.payment_method === 'cash' && (!item.payment_status || item.payment_status === 'pending');
+          if (isCashOnly) {
+            return (
+              <View style={[styles.payBadge, { backgroundColor: '#F5F5F5' }]}>
+                <Ionicons name="cash-outline" size={11} color="#666" />
+                <Text style={[styles.payBadgeText, { color: '#666' }]}>{tr('cash')}</Text>
+              </View>
+            );
+          }
+          return (
+            <View style={[styles.payBadge, { backgroundColor: pay.color + '18' }]}>
+              <Ionicons name={pay.key === 'paidStatus' ? 'checkmark-circle' : pay.key === 'refundedStatus' ? 'arrow-undo-circle' : 'time-outline'} size={11} color={pay.color} />
+              <Text style={[styles.payBadgeText, { color: pay.color }]}>{tr(pay.key)}</Text>
+            </View>
+          );
+        })()}
         <View style={styles.dateRow}>
           <Ionicons name="calendar-outline" size={14} color="#666" />
           <Text style={styles.dateText}>{formatDate(item.pickup_date)} - {formatDate(item.dropoff_date)}</Text>
@@ -93,9 +123,9 @@ export default function BookingsScreen() {
         <View style={styles.cardFooter}>
           <View style={styles.paymentInfo}>
             <Ionicons name={item.payment_method === 'stripe' ? 'card-outline' : 'cash-outline'} size={14} color="#666" />
-            <Text style={styles.paymentText}>{item.payment_method === 'stripe' ? 'Card' : 'Cash'}</Text>
+            <Text style={styles.paymentText}>{item.payment_method === 'stripe' ? tr('card') : tr('cash')}</Text>
             <Ionicons name="receipt-outline" size={14} color="#FF3B30" style={{ marginLeft: 8 }} />
-            <Text style={[styles.paymentText, { color: '#FF3B30', fontWeight: '700' }]}>Receipt</Text>
+            <Text style={[styles.paymentText, { color: '#FF3B30', fontWeight: '700' }]}>{tr('receipt')}</Text>
           </View>
           <Text style={styles.totalPrice}>${item.total_price}</Text>
         </View>
@@ -113,7 +143,7 @@ export default function BookingsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>My Bookings</Text>
+        <Text style={styles.title}>{tr('myBookings')}</Text>
       </View>
 
       {loading ? (
@@ -121,7 +151,7 @@ export default function BookingsScreen() {
       ) : bookings.length === 0 ? (
         <View style={styles.center}>
           <Ionicons name="calendar-outline" size={64} color="#E5E5E5" />
-          <Text style={styles.emptyText}>No bookings yet</Text>
+          <Text style={styles.emptyText}>{tr('noBookings')}</Text>
           <TouchableOpacity testID="browse-cars-btn" style={styles.browseBtn} onPress={() => router.push('/(tabs)/home')}>
             <Text style={styles.browseBtnText}>Browse Cars</Text>
           </TouchableOpacity>
@@ -150,6 +180,8 @@ const styles = StyleSheet.create({
   carImage: { width: '100%', height: 140, backgroundColor: '#F5F5F5' },
   cardContent: { padding: 16, gap: 8 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  payBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 50, alignSelf: 'flex-start' },
+  payBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
   carName: { fontSize: 17, fontWeight: '800', color: '#0A0A0A', flex: 1, marginRight: 8 },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   statusText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },

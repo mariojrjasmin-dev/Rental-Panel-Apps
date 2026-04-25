@@ -506,8 +506,20 @@ function bookingCard(b) {
     confirmed:'#007aff', active:'#34c759',
     completed:'#5856d6', cancelled:'#ff3b30'
   };
+  const payColors = {
+    paid:'#34c759', succeeded:'#34c759', cash_paid:'#34c759',
+    pending:'#ff9500', unpaid:'#ff9500',
+    refunded:'#8e8e93', failed:'#ff3b30'
+  };
+  const payLabels = {
+    paid:'PAID', succeeded:'PAID', cash_paid:'PAID',
+    pending:'UNPAID', unpaid:'UNPAID',
+    refunded:'REFUNDED', failed:'FAILED'
+  };
   const color = statusColors[b.status] || '#666';
   const statusLabel = (b.status||'').replace(/_/g,' ').toUpperCase();
+  const payCol = payColors[b.payment_status] || '#999';
+  const payLab = payLabels[b.payment_status] || (b.payment_method === 'cash' ? 'CASH PENDING' : 'UNKNOWN');
   const pickup = (b.pickup_date||'').substring(0,10);
   const dropoff = (b.dropoff_date||'').substring(0,10);
   const created = b.created_at ? new Date(b.created_at).toLocaleDateString() : '';
@@ -519,7 +531,10 @@ function bookingCard(b) {
         <p style="font-size:12px;color:#666">${b.user_name||'Customer'} · ${b.user_email||''}</p>
         <p style="font-size:11px;color:#999;margin-top:2px">${pickup} → ${dropoff} · ${b.days||0} days · ${created}</p>
       </div>
-      <span style="background:${color}1a;color:${color};padding:5px 10px;border-radius:50px;font-size:10px;font-weight:800;white-space:nowrap">${statusLabel}</span>
+      <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+        <span style="background:${color}1a;color:${color};padding:4px 10px;border-radius:50px;font-size:10px;font-weight:800;white-space:nowrap">${statusLabel}</span>
+        <span style="background:${payCol}1a;color:${payCol};padding:4px 10px;border-radius:50px;font-size:10px;font-weight:800;white-space:nowrap">💳 ${payLab}</span>
+      </div>
     </div>
     <div style="display:flex;border-top:1px solid #f0f0f0;background:#fafafa;padding:10px 14px;align-items:center;gap:8px;flex-wrap:wrap">
       <div style="flex:1;min-width:200px;font-size:12px;color:#666">

@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatePickerField from '../components/DatePickerField';
+import { t as tr } from '../src/i18n';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -175,7 +176,7 @@ export default function BookingScreen() {
         <TouchableOpacity testID="booking-back-btn" onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#0A0A0A" />
         </TouchableOpacity>
-        <Text style={styles.topTitle}>Book Vehicle</Text>
+        <Text style={styles.topTitle}>{tr('confirmBooking')}</Text>
         <View style={{ width: 44 }} />
       </View>
 
@@ -185,28 +186,28 @@ export default function BookingScreen() {
             <Text style={styles.carName}>{car.name}</Text>
             <Text style={styles.carSub}>{car.year} {car.brand}</Text>
           </View>
-          <Text style={styles.priceTag}>${car.price_per_day}<Text style={styles.priceUnit}>/day</Text></Text>
+          <Text style={styles.priceTag}>${car.price_per_day}<Text style={styles.priceUnit}>{tr('perDay')}</Text></Text>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Rental Period</Text>
+          <Text style={styles.sectionTitle}>{tr('rentalDetails')}</Text>
           <View style={styles.datePickerGroup}>
             <DatePickerField
               date={pickupDate}
               onDateChange={handlePickupChange}
               minimumDate={minPickup}
-              label="Pick Up"
+              label={tr('pickup')}
               accentColor="#34C759"
             />
             <View style={styles.dateArrow}>
               <Ionicons name="arrow-down" size={20} color="#999" />
-              <Text style={styles.daysLabel}>{days} day{days !== 1 ? 's' : ''}</Text>
+              <Text style={styles.daysLabel}>{days} {days !== 1 ? tr('days') : tr('day')}</Text>
             </View>
             <DatePickerField
               date={dropoffDate}
               onDateChange={handleDropoffChange}
               minimumDate={minDropoff}
-              label="Drop Off"
+              label={tr('dropoff')}
               accentColor="#FF3B30"
             />
           </View>
@@ -232,7 +233,7 @@ export default function BookingScreen() {
                 })}
               >
                 <Ionicons name="navigate-outline" size={20} color="#007AFF" />
-                <Text style={styles.locationText}>View Map & Directions</Text>
+                <Text style={styles.locationText}>{tr('pickupLocation')} & GPS</Text>
                 <Ionicons name="chevron-forward" size={16} color="#007AFF" />
               </TouchableOpacity>
             )}
@@ -240,7 +241,7 @@ export default function BookingScreen() {
         )}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Payment Method</Text>
+          <Text style={styles.sectionTitle}>{tr('paymentMethod')}</Text>
           <View style={styles.paymentOptions}>
             <TouchableOpacity
               testID="payment-cash-btn"
@@ -248,7 +249,7 @@ export default function BookingScreen() {
               onPress={() => setPaymentMethod('cash')}
             >
               <Ionicons name="cash-outline" size={24} color={paymentMethod === 'cash' ? '#FF3B30' : '#666'} />
-              <Text style={[styles.paymentLabel, paymentMethod === 'cash' && styles.paymentLabelActive]}>Cash</Text>
+              <Text style={[styles.paymentLabel, paymentMethod === 'cash' && styles.paymentLabelActive]}>{tr('cash')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               testID="payment-stripe-btn"
@@ -256,41 +257,41 @@ export default function BookingScreen() {
               onPress={() => setPaymentMethod('stripe')}
             >
               <Ionicons name="card-outline" size={24} color={paymentMethod === 'stripe' ? '#FF3B30' : '#666'} />
-              <Text style={[styles.paymentLabel, paymentMethod === 'stripe' && styles.paymentLabelActive]}>Card</Text>
+              <Text style={[styles.paymentLabel, paymentMethod === 'stripe' && styles.paymentLabelActive]}>{tr('card')}</Text>
             </TouchableOpacity>
           </View>
         </View>
 
         <View style={styles.summary}>
-          <Text style={styles.summaryTitle}>Order Summary</Text>
+          <Text style={styles.summaryTitle}>{tr('costBreakdown')}</Text>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>{car.name}</Text>
-            <Text style={styles.summaryValue}>${car.price_per_day}/day</Text>
+            <Text style={styles.summaryValue}>${car.price_per_day}{tr('perDay')}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Duration</Text>
-            <Text style={styles.summaryValue}>{days} day{days !== 1 ? 's' : ''}</Text>
+            <Text style={styles.summaryLabel}>{tr('duration')}</Text>
+            <Text style={styles.summaryValue}>{days} {days !== 1 ? tr('days') : tr('day')}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Pickup</Text>
+            <Text style={styles.summaryLabel}>{tr('pickup')}</Text>
             <Text style={styles.summaryValue}>{pickupDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Drop-off</Text>
+            <Text style={styles.summaryLabel}>{tr('dropoff')}</Text>
             <Text style={styles.summaryValue}>{dropoffDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Subtotal</Text>
+            <Text style={styles.summaryLabel}>{tr('subtotal')}</Text>
             <Text style={styles.summaryValue}>${total}</Text>
           </View>
           {taxRate > 0 && (
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Tax ({taxRate}%)</Text>
+              <Text style={styles.summaryLabel}>{tr('tax')} ({taxRate}%)</Text>
               <Text style={styles.summaryValue}>${taxAmount}</Text>
             </View>
           )}
           <View style={[styles.summaryRow, styles.totalRow]}>
-            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalLabel}>{tr('total')}</Text>
             <Text style={styles.totalValue}>${grandTotal}</Text>
           </View>
         </View>
@@ -308,7 +309,7 @@ export default function BookingScreen() {
             <ActivityIndicator color="#FFF" />
           ) : (
             <Text style={styles.confirmBtnText}>
-              {paymentMethod === 'stripe' ? `Pay $${grandTotal}` : `Confirm Booking`}
+              {paymentMethod === 'stripe' ? `${tr('pay')} $${grandTotal}` : tr('confirmBooking')}
             </Text>
           )}
         </TouchableOpacity>
