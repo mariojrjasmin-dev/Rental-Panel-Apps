@@ -18,7 +18,7 @@ export default function BookingScreen() {
   const [taxRate, setTaxRate] = useState(0);
   const router = useRouter();
 
-  // Default dates: tomorrow pickup, 3 days later dropoff
+  // Default dates: tomorrow pickup, dropoff respects min_booking_days when known
   const [pickupDate, setPickupDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
@@ -32,6 +32,19 @@ export default function BookingScreen() {
     return d;
   });
 
+  const minDays = (car?.min_booking_days && car.min_booking_days > 0) ? car.min_booking_days : 1;
+
+  // When the car loads, auto-extend dropoff to satisfy min_booking_days if needed
+  useEffect(() => {
+    if (!car) return;
+    const cur = Math.max(1, Math.ceil((dropoffDate.getTime() - pickupDate.getTime()) / 86400000));
+    if (cur < minDays) {
+      const d = new Date(pickupDate);
+      d.setDate(d.getDate() + minDays);
+      setDropoffDate(d);
+    }
+  }, [car?.id, minDays]);
+
   // Minimum dates
   const minPickup = useMemo(() => {
     const d = new Date();
@@ -41,9 +54,9 @@ export default function BookingScreen() {
 
   const minDropoff = useMemo(() => {
     const d = new Date(pickupDate);
-    d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + minDays);
     return d;
-  }, [pickupDate]);
+  }, [pickupDate, minDays]);
 
   // Calculate days and total dynamically
   const days = useMemo(() => {
@@ -65,19 +78,26 @@ export default function BookingScreen() {
     return (parseFloat(total) + parseFloat(taxAmount)).toFixed(2);
   }, [total, taxAmount]);
 
-  // When pickup changes, ensure dropoff is after pickup
+  // When pickup changes, ensure dropoff respects min_booking_days
   const handlePickupChange = (newDate: Date) => {
     setPickupDate(newDate);
-    const nextDay = new Date(newDate);
-    nextDay.setDate(nextDay.getDate() + 1);
-    if (dropoffDate <= newDate) {
-      setDropoffDate(nextDay);
+    const minDrop = new Date(newDate);
+    minDrop.setDate(minDrop.getDate() + minDays);
+    if (dropoffDate < minDrop) {
+      setDropoffDate(minDrop);
     }
   };
 
   const handleDropoffChange = (newDate: Date) => {
-    if (newDate <= pickupDate) {
-      Alert.alert('Invalid Date', 'Drop-off date must be after pickup date');
+    const minDrop = new Date(pickupDate);
+    minDrop.setDate(minDrop.getDate() + minDays);
+    if (newDate < minDrop) {
+      Alert.alert(
+        tr('error'),
+        minDays > 1
+          ? `${tr('error')}: minimum ${minDays} ${minDays === 1 ? tr('day') : tr('days')}`
+          : 'Drop-off date must be after pickup date'
+      );
       return;
     }
     setDropoffDate(newDate);
@@ -191,6 +211,16 @@ export default function BookingScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{tr('rentalDetails')}</Text>
+          {minDays > 1 && (
+            <View style={styles.minDaysBanner}>
+              <Ionicons name="information-circle-outline" size={16} color="#FF9500" />
+              <Text style={styles.minDaysText}>
+                {tr('language') === 'Idioma'
+                  ? `Reserva mínima: ${minDays} días`
+                  : `Minimum rental: ${minDays} days`}
+              </Text>
+            </View>
+          )}
           <View style={styles.datePickerGroup}>
             <DatePickerField
               date={pickupDate}
@@ -332,6 +362,8 @@ const styles = StyleSheet.create({
   priceUnit: { fontSize: 13, fontWeight: '400', color: '#999' },
   section: { marginBottom: 24 },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: '#0A0A0A', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
+  minDaysBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFF8E5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
+  minDaysText: { fontSize: 13, color: '#8a6500', fontWeight: '600' },
   datePickerGroup: { gap: 8 },
   dateArrow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 4 },
   daysLabel: { fontSize: 13, fontWeight: '700', color: '#999' },

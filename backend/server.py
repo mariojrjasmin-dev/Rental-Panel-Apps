@@ -142,6 +142,7 @@ class CarCreate(BaseModel):
     price_per_day: float
     seats: int
     bags: int = 2
+    min_booking_days: int = 1
     transmission: str = "Automatic"
     fuel_type: str = "Gasoline"
     description: str = ""
@@ -170,6 +171,7 @@ class CarUpdate(BaseModel):
     price_per_day: Optional[float] = None
     seats: Optional[int] = None
     bags: Optional[int] = None
+    min_booking_days: Optional[int] = None
     transmission: Optional[str] = None
     fuel_type: Optional[str] = None
     description: Optional[str] = None
@@ -520,6 +522,15 @@ async def create_booking(booking: BookingCreate, request: Request):
     pickup = datetime.fromisoformat(booking.pickup_date)
     dropoff = datetime.fromisoformat(booking.dropoff_date)
     days = max(1, (dropoff - pickup).days)
+    
+    # Enforce per-vehicle minimum booking days
+    min_days = int(car.get("min_booking_days") or 1)
+    if days < min_days:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This vehicle requires a minimum rental of {min_days} day(s). Please extend your drop-off date.",
+        )
+    
     subtotal = round(days * car["price_per_day"], 2)
     
     # Look up tax rate from pickup location
