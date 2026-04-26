@@ -1033,19 +1033,59 @@ async def get_location_cities():
 
 @api_router.get("/locations/tax-by-name")
 async def get_tax_by_location_name(name: str):
-    """Get tax rate AND minimum booking days for a location by name."""
+    """Get tax rate AND minimum booking days for a location.
+
+    Lookup strategy (each step is case-insensitive):
+      1) Exact name match
+      2) Substring match (DB name contains query OR query contains DB name)
+      3) City match (treat the query as a city)
+    Falls back to {tax_rate: 0, min_booking_days: 1} if nothing matches.
+    """
+    import re as _re
+    q = (name or "").strip()
+    if not q:
+        return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1}
+
+    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "min_booking_days": 1}
+    safe_q = _re.escape(q)
+
+    # 1) Exact (case-insensitive)
     loc = await db.locations.find_one(
-        {"name": {"$regex": f"^{name.strip()}$", "$options": "i"}},
-        {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "min_booking_days": 1},
+        {"name": {"$regex": f"^{safe_q}$", "$options": "i"}}, proj
     )
+    # 2) Substring (DB.name contains q)
+    if not loc:
+        loc = await db.locations.find_one(
+            {"name": {"$regex": safe_q, "$options": "i"}}, proj
+        )
+    # 3) Reverse substring (q contains DB.name) - fetch all and check in Python
+    if not loc:
+        all_locs = await db.locations.find({}, proj).to_list(500)
+        q_lower = q.lower()
+        for l in all_locs:
+            ln = (l.get("name") or "").strip()
+            if ln and ln.lower() in q_lower:
+                loc = l
+                break
+    # 4) City match (case-insensitive exact)
+    if not loc:
+        loc = await db.locations.find_one(
+            {"city": {"$regex": f"^{safe_q}$", "$options": "i"}}, proj
+        )
+    # 5) City substring (DB.city contains q OR q contains DB.city)
+    if not loc:
+        loc = await db.locations.find_one(
+            {"city": {"$regex": safe_q, "$options": "i"}}, proj
+        )
+
     if loc:
         return {
-            "tax_rate": loc.get("tax_rate", 0.0),
+            "tax_rate": float(loc.get("tax_rate") or 0.0),
             "name": loc.get("name", ""),
             "city": loc.get("city", ""),
             "min_booking_days": int(loc.get("min_booking_days") or 1),
         }
-    return {"tax_rate": 0.0, "name": name, "city": "", "min_booking_days": 1}
+    return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1}
 
 @api_router.get("/locations/{location_id}")
 async def get_location(location_id: str):
