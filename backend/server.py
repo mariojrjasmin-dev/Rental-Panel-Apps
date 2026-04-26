@@ -211,6 +211,7 @@ class LocationCreate(BaseModel):
     lng: float
     type: str = "both"  # pickup, dropoff, both
     tax_rate: float = 0.0  # percentage e.g. 18.0 for 18%
+    min_booking_days: int = 1
 
 class LocationUpdate(BaseModel):
     name: Optional[str] = None
@@ -221,6 +222,7 @@ class LocationUpdate(BaseModel):
     lng: Optional[float] = None
     type: Optional[str] = None
     tax_rate: Optional[float] = None
+    min_booking_days: Optional[int] = None
 
 class ReviewCreate(BaseModel):
     car_id: str
@@ -523,15 +525,35 @@ async def create_booking(booking: BookingCreate, request: Request):
     dropoff = datetime.fromisoformat(booking.dropoff_date)
     days = max(1, (dropoff - pickup).days)
     
-    # Enforce per-vehicle minimum booking days
-    min_days = int(car.get("min_booking_days") or 1)
+    # Look up tax rate AND minimum booking days from pickup location.
+    # Use case-insensitive exact match (anchored regex) + trim whitespace
+    # so admin-entered name variations don't silently fall back to defaults.
+    tax_rate = 0.0
+    min_days = 1
+    pickup_loc_name = (booking.pickup_location.get("name", "") or "").strip()
+    if pickup_loc_name:
+        import re
+        escaped = re.escape(pickup_loc_name)
+        loc = await db.locations.find_one(
+            {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
+            {"_id": 0, "tax_rate": 1, "name": 1, "min_booking_days": 1},
+        )
+        if loc:
+            tax_rate = float(loc.get("tax_rate") or 0)
+            min_days = int(loc.get("min_booking_days") or 1)
+        else:
+            logger.warning(f"No location matched name={pickup_loc_name!r} for tax/min-days lookup")
+    
+    # Enforce per-location minimum booking days
     if days < min_days:
         raise HTTPException(
             status_code=400,
-            detail=f"This vehicle requires a minimum rental of {min_days} day(s). Please extend your drop-off date.",
+            detail=f"This pickup location requires a minimum rental of {min_days} day(s). Please extend your drop-off date.",
         )
     
     subtotal = round(days * car["price_per_day"], 2)
+    tax_amount = round(subtotal * (tax_rate / 100), 2)
+    total = round(subtotal + tax_amount, 2)
     
     # Look up tax rate from pickup location.
     # Use case-insensitive exact match (anchored regex) + trim whitespace
@@ -1011,11 +1033,19 @@ async def get_location_cities():
 
 @api_router.get("/locations/tax-by-name")
 async def get_tax_by_location_name(name: str):
-    """Get tax rate for a location by name."""
-    loc = await db.locations.find_one({"name": {"$regex": name, "$options": "i"}}, {"_id": 0, "tax_rate": 1, "name": 1, "city": 1})
+    """Get tax rate AND minimum booking days for a location by name."""
+    loc = await db.locations.find_one(
+        {"name": {"$regex": f"^{name.strip()}$", "$options": "i"}},
+        {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "min_booking_days": 1},
+    )
     if loc:
-        return {"tax_rate": loc.get("tax_rate", 0.0), "name": loc.get("name", ""), "city": loc.get("city", "")}
-    return {"tax_rate": 0.0, "name": name, "city": ""}
+        return {
+            "tax_rate": loc.get("tax_rate", 0.0),
+            "name": loc.get("name", ""),
+            "city": loc.get("city", ""),
+            "min_booking_days": int(loc.get("min_booking_days") or 1),
+        }
+    return {"tax_rate": 0.0, "name": name, "city": "", "min_booking_days": 1}
 
 @api_router.get("/locations/{location_id}")
 async def get_location(location_id: str):

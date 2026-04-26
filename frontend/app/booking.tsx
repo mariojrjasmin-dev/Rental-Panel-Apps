@@ -16,6 +16,7 @@ export default function BookingScreen() {
   const [booking, setBooking] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('cash');
   const [taxRate, setTaxRate] = useState(0);
+  const [locMinDays, setLocMinDays] = useState(1);
   const router = useRouter();
 
   // Default dates: tomorrow pickup, dropoff respects min_booking_days when known
