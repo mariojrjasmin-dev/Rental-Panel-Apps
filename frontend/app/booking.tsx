@@ -33,7 +33,11 @@ export default function BookingScreen() {
     return d;
   });
 
-  const minDays = (car?.min_booking_days && car.min_booking_days > 0) ? car.min_booking_days : 1;
+  // Min booking days now comes from the LOCATION (set in admin panel),
+  // with a fallback to car's legacy field, then 1.
+  const minDays = (locMinDays && locMinDays > 0)
+    ? locMinDays
+    : ((car?.min_booking_days && car.min_booking_days > 0) ? car.min_booking_days : 1);
 
   // When the car loads, auto-extend dropoff to satisfy min_booking_days if needed
   useEffect(() => {
@@ -132,8 +136,10 @@ export default function BookingScreen() {
         if (taxRes.ok) {
           const taxData = await taxRes.json();
           setTaxRate(Number(taxData.tax_rate) || 0);
+          setLocMinDays(Number(taxData.min_booking_days) || 1);
         } else {
           setTaxRate(0);
+          setLocMinDays(1);
         }
       } catch (e: any) {
         if (e?.name !== 'AbortError') console.log('Tax fetch error:', e);

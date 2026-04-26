@@ -102,9 +102,23 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "User reported: We cannot preview the vehicles pictures on the panel (d: all of the above - list, edit dialog, upload preview; 2: Production environment)"
+user_problem_statement: "Set minimum booking days per LOCATION instead of per vehicle. Admin sets a min_booking_days on each location; the booking flow should enforce that minimum based on the selected pickup location."
 
 backend:
+  - task: "Location model has min_booking_days; tax-by-name returns it; CRUD persists it"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added min_booking_days to LocationCreate (default 1) and LocationUpdate (Optional). GET /api/locations/tax-by-name?name=... now returns {tax_rate, name, city, min_booking_days} (defaults to 1 when missing). POST/PUT /api/locations should accept and persist min_booking_days. Need to verify: (1) creating a location with min_booking_days saves and returns correct value; (2) updating only min_booking_days works; (3) tax-by-name returns the saved value; (4) tax-by-name returns default 1 when location missing or field missing."
+        - working: true
+          agent: "testing"
+          comment: "All 19 assertions passed in /app/backend_test.py. (1) POST /api/locations with min_booking_days=5 persists and returns 5 in response. (2) PUT /api/locations/{id} with only {min_booking_days:3} returns 200 and the change is reflected on subsequent GET /api/locations/{id}. (3) GET /api/locations/tax-by-name returns object with all 4 keys {tax_rate, name, city, min_booking_days}; returns 5 when set, returns 1 (default) for a location inserted directly into Mongo without the field, returns {tax_rate:0.0, name:<input>, city:'', min_booking_days:1} for a non-existent name, and lookup is case-insensitive (lowercase name resolves to same record). (4) Authorization: GET tax-by-name works without auth (200), POST /api/locations as a non-admin user returns 403, PUT /api/locations/{id} as a non-admin returns 403. Test location and temp user cleaned up."
   - task: "Vehicle image upload - switch to base64 data URL storage"
     implemented: true
     working: true
@@ -203,11 +217,10 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "User verification of vehicle image preview on production after redeploy + Fix Images run"
+  current_focus: []
   stuck_tasks: []
   test_all: false
-  test_priority: "user_verification"
+  test_priority: "high_first"
 
 agent_communication:
     - agent: "main"
@@ -218,3 +231,6 @@ agent_communication:
       message: "All 23 assertions passed across the 3 new booking endpoints. Admin-listing with filter/search works, status update validates + persists, receipt PDF returns real %PDF bytes with proper owner/admin authorization. Non-blocking: malformed ObjectId returns 500 instead of 400 on receipt endpoint (shared issue across the codebase - not fixing as part of this feature)."
     - agent: "testing"
       message: "Completed backend testing of 3 new booking endpoints. 23/23 assertions passed in /app/backend_test.py. (1) GET /api/admin/bookings works with admin auth, returns 403 for non-admin, 401 unauthenticated; ?status=confirmed and ?q=<fragment> filters work individually and combined. (2) PUT /api/admin/bookings/{id}/status: admin updates persist (verified via follow-up GET), invalid status returns 400 with helpful message, missing booking id returns 404, non-admin returns 403. (3) GET /api/bookings/{id}/receipt.pdf returns real PDF bytes starting with %PDF-1.4 (~2.8KB) with application/pdf content type for both owner and admin; non-owner gets 403, unauthenticated gets 401, non-existent id returns 404. Minor (not blocking): malformed (non-hex) booking ids cause ObjectId to raise InvalidId and return 500 instead of 400/404 on /bookings/{id}/receipt.pdf - consider wrapping ObjectId() in a try/except for nicer errors, but all valid-format ids behave correctly."
+
+    - agent: "testing"
+      message: "Tested 'Location model has min_booking_days; tax-by-name returns it; CRUD persists it'. 19/19 assertions passed in /app/backend_test.py. Verified: POST /api/locations with min_booking_days=5 persists & returns the value; PUT /api/locations/{id} updating only min_booking_days=3 returns updated doc and is reflected on GET; GET /api/locations/tax-by-name returns {tax_rate, name, city, min_booking_days} with 5 when set, 1 when field absent in DB, and {tax_rate:0.0, name:<input>, city:'', min_booking_days:1} when name has no match; lookup is case-insensitive (lowercased name resolves correctly). Authorization: tax-by-name is public (200 without auth), POST/PUT /api/locations as non-admin both return 403. Test location and temp customer user cleaned up. Feature is working end-to-end."
