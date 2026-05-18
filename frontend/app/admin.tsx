@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from './_layout';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { BACKEND_URL } from '../src/config';
 
 const EMPTY_CAR = {
   name: '', brand: '', model: '', year: 2024, category: 'Sedan', price_per_day: 0,

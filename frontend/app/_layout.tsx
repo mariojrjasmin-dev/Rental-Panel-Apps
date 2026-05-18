@@ -4,7 +4,7 @@ import { useEffect, useState, createContext, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadSavedLocale, setLocale as persistLocale, AppLocale } from '../src/i18n';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { BACKEND_URL } from '../src/config';
 
 export type User = {
   id?: string;

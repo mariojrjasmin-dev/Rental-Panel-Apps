@@ -8,7 +8,7 @@ import StarRating from '../components/StarRating';
 import { useAuth } from './_layout';
 import { t as tr } from '../src/i18n';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { BACKEND_URL } from '../src/config';
 const { width } = Dimensions.get('window');
 
 type Review = {

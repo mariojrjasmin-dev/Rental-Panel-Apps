@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { BACKEND_URL } from '../src/config';
 
 export default function BookingSuccessScreen() {
   const { bookingId, session_id } = useLocalSearchParams<{ bookingId?: string; session_id?: string }>();

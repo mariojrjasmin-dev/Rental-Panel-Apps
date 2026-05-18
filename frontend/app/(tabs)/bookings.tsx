@@ -7,7 +7,7 @@ import { useAuth } from '../_layout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { t as tr } from '../../src/i18n';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { BACKEND_URL } from '../../src/config';
 
 type Booking = {
   id: string;
