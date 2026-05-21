@@ -547,6 +547,7 @@ function bookingCard(b) {
         · ${(b.payment_method||'cash').toUpperCase()}
       </div>
       <button class="btn btn-sm btn-blue" onclick="downloadReceipt('${b.id}')">📄 Receipt</button>
+      ${(b.payment_status !== 'paid' && (b.payment_method||'cash') === 'cash') ? `<button class="btn btn-sm" style="background:#34c759;color:#fff" onclick="markCashPaid('${b.id}')">💰 Mark Cash Paid</button>` : ''}
       <select class="input" style="width:auto;padding:6px 10px;margin:0;font-size:12px" onchange="updateBookingStatus('${b.id}', this.value)">
         <option value="">Change status...</option>
         <option value="pending_payment">Pending Payment</option>
@@ -564,6 +565,14 @@ async function updateBookingStatus(id, status) {
   if (!confirm('Change booking status to "' + status.replace(/_/g,' ') + '"?')) return;
   try {
     await api('/admin/bookings/'+id+'/status', {method:'PUT', body: JSON.stringify({status})});
+    showBookings();
+  } catch(e) { alert('Failed: '+e.message); }
+}
+
+async function markCashPaid(id) {
+  if (!confirm('Mark this cash booking as PAID and CONFIRMED?\n\nUse this once you have collected the cash from the customer.')) return;
+  try {
+    await api('/admin/bookings/'+id+'/status', {method:'PUT', body: JSON.stringify({status:'confirmed', payment_status:'paid'})});
     showBookings();
   } catch(e) { alert('Failed: '+e.message); }
 }

@@ -102,9 +102,24 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Set minimum booking days per LOCATION instead of per vehicle. Admin sets a min_booking_days on each location; the booking flow should enforce that minimum based on the selected pickup location."
+user_problem_statement: "When creating a cash booking from the web or mobile apps, the booking should have a pending status in the panel and wait for the money to be collected. Admin needs to be able to mark it paid once cash is collected."
 
 backend:
+  - task: "Cash bookings start as pending; admin can mark them paid"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Changes: (1) POST /api/bookings now ALWAYS creates booking with status='pending_payment' and payment_status='pending' regardless of payment_method (cash or stripe). Previously, cash bookings were auto-marked as confirmed/paid. (2) PUT /api/admin/bookings/{id}/status now accepts an OPTIONAL payment_status field (in addition to status). Valid payment_status values: pending/paid/refunded/failed. Both fields are optional but at least one must be provided. (3) Existing logic for status validation preserved. Need to verify: cash booking creation returns status=pending_payment and payment_status=pending; admin can update payment_status alone; admin can update both status and payment_status in one call; invalid payment_status returns 400; empty body returns 400."
+        - working: true
+          agent: "testing"
+          comment: "All 27 assertions passed in /app/backend_test_cash_booking.py. (1) POST /api/bookings with payment_method='cash' returns status='pending_payment' & payment_status='pending' both in response and persisted (verified via GET /api/bookings/{id}). (2) POST /api/bookings with payment_method='stripe' also returns status='pending_payment' & payment_status='pending' (unchanged - webhook flips it later). (3) PUT /api/admin/bookings/{id}/status: backward-compat call with only {status:'confirmed'} returns 200, sets status to 'confirmed', leaves payment_status='pending' unchanged; call with only {payment_status:'paid'} returns 200, updates payment_status only; call with both fields returns 200 and updates both. (4) Validation: {payment_status:'invalid_value'} returns 400 with detail listing valid values 'failed, paid, pending, refunded'; empty body {} returns 400 'No fields to update'. (5) Authorization: non-admin user gets 403; non-existent booking id (000000000000000000000000) gets 404. (6) End-to-end cash flow verified: customer creates cash booking (pending_payment/pending) -> admin PUT with {status:'confirmed', payment_status:'paid'} returns 200 -> GET /api/bookings/{id} reflects status='confirmed' and payment_status='paid'."
+
   - task: "Location model has min_booking_days; tax-by-name returns it; CRUD persists it"
     implemented: true
     working: true
@@ -231,8 +246,7 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Booking screen enforces min_booking_days from selected location"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -249,5 +263,7 @@ agent_communication:
 
     - agent: "testing"
       message: "Tested 'Location model has min_booking_days; tax-by-name returns it; CRUD persists it'. 19/19 assertions passed in /app/backend_test.py. Verified: POST /api/locations with min_booking_days=5 persists & returns the value; PUT /api/locations/{id} updating only min_booking_days=3 returns updated doc and is reflected on GET; GET /api/locations/tax-by-name returns {tax_rate, name, city, min_booking_days} with 5 when set, 1 when field absent in DB, and {tax_rate:0.0, name:<input>, city:'', min_booking_days:1} when name has no match; lookup is case-insensitive (lowercased name resolves correctly). Authorization: tax-by-name is public (200 without auth), POST/PUT /api/locations as non-admin both return 403. Test location and temp customer user cleaned up. Feature is working end-to-end."
+    - agent: "testing"
+      message: "Tested 'Cash bookings start as pending; admin can mark them paid'. 27/27 assertions passed in /app/backend_test_cash_booking.py. Verified: (1) POST /api/bookings with payment_method='cash' creates booking with status='pending_payment' and payment_status='pending' (both in response and persisted via GET /api/bookings/{id}). (2) POST /api/bookings with payment_method='stripe' also creates with status='pending_payment' and payment_status='pending' (unchanged - webhook continues to flip these later). (3) PUT /api/admin/bookings/{id}/status: backward-compat with only {status:'confirmed'} works (payment_status untouched); only {payment_status:'paid'} works (status untouched); both fields work; invalid payment_status returns 400 with detail listing valid values 'failed, paid, pending, refunded'; empty body returns 400 'No fields to update'; non-admin returns 403; non-existent booking id returns 404. (4) End-to-end cash flow verified: customer cash booking (pending_payment/pending) -> admin PUT both fields -> GET reflects confirmed/paid. Feature is working as specified."
     - agent: "testing"
       message: "✅ MINIMUM BOOKING DAYS FRONTEND FEATURE TESTED: Successfully verified the complete implementation of minimum booking days per location feature. Backend API working correctly - set Punta Cana Airport to min_booking_days=5 and updated Mercedes Benz car to use this location. Frontend code in booking.tsx shows full implementation: (1) Fetches min_booking_days from GET /api/locations/tax-by-name API, (2) Auto-extends dropoff date if duration < minDays, (3) Shows yellow banner 'Minimum rental: X days' when min > 1, (4) Restricts date picker minimumDate, (5) Alerts user if dropoff too close to pickup. Feature is fully functional and ready for production use."

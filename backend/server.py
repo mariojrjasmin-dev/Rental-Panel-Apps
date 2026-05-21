@@ -593,8 +593,10 @@ async def create_booking(booking: BookingCreate, request: Request):
         "tax_amount": tax_amount,
         "total_price": total,
         "payment_method": booking.payment_method,
-        "payment_status": "pending" if booking.payment_method == "stripe" else "paid",
-        "status": "confirmed" if booking.payment_method == "cash" else "pending_payment",
+        # Cash: stays pending until admin collects money on pickup and marks it paid/confirmed
+        # Stripe: pending until the Stripe webhook confirms payment
+        "payment_status": "pending",
+        "status": "pending_payment",
         "created_at": datetime.now(timezone.utc)
     }
     
@@ -703,19 +705,38 @@ async def admin_list_bookings(request: Request, status: Optional[str] = None, q:
 
 
 class BookingStatusUpdate(BaseModel):
-    status: str
+    status: Optional[str] = None
+    payment_status: Optional[str] = None
 
 
 @api_router.put("/admin/bookings/{booking_id}/status")
 async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate, request: Request):
-    """Admin changes a booking's status (pending/confirmed/active/completed/cancelled)."""
+    """Admin changes a booking's status and/or payment_status.
+
+    - status: pending / pending_payment / confirmed / active / completed / cancelled
+    - payment_status: pending / paid / refunded / failed
+    Used by the admin to confirm cash collection: set status=confirmed AND payment_status=paid.
+    """
     user = await get_authenticated_user(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-    valid = {"pending", "pending_payment", "confirmed", "active", "completed", "cancelled"}
-    if body.status not in valid:
-        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(sorted(valid))}")
-    res = await db.bookings.update_one({"_id": ObjectId(booking_id)}, {"$set": {"status": body.status}})
+
+    update_data = {}
+    if body.status is not None:
+        valid_status = {"pending", "pending_payment", "confirmed", "active", "completed", "cancelled"}
+        if body.status not in valid_status:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(sorted(valid_status))}")
+        update_data["status"] = body.status
+    if body.payment_status is not None:
+        valid_pay = {"pending", "paid", "refunded", "failed"}
+        if body.payment_status not in valid_pay:
+            raise HTTPException(status_code=400, detail=f"Invalid payment_status. Must be one of: {', '.join(sorted(valid_pay))}")
+        update_data["payment_status"] = body.payment_status
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    res = await db.bookings.update_one({"_id": ObjectId(booking_id)}, {"$set": update_data})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found")
     booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
