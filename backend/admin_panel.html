@@ -909,6 +909,15 @@ async function showLocForm(id) {
           <div class="form-group" style="flex:1"><label>Tax Rate (%)</label><input class="input" id="l-tax" type="number" step="0.01" value="${loc.tax_rate||0}" placeholder="e.g. 18 for 18%"></div>
           <div class="form-group" style="flex:1"><label>Min Booking Days</label><input class="input" id="l-mindays" type="number" min="1" max="365" value="${loc.min_booking_days||1}" placeholder="1"></div>
         </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px;background:#fafafa;border-radius:10px;border:1px solid #e5e5e5">
+            <input type="checkbox" id="l-insurance" ${loc.insurance_included?'checked':''} style="width:18px;height:18px;cursor:pointer"/>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:14px;color:#0a0a0a">🛡️ Insurance included</div>
+              <div style="font-size:12px;color:#666;margin-top:2px">If checked, customers will see "Insurance included" at this location. Otherwise they'll see "Insurance NOT included".</div>
+            </div>
+          </label>
+        </div>
         <div style="display:flex;gap:10px;margin-top:24px">
           <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
           <button class="btn btn-red" style="flex:1" onclick="saveLoc('${id||''}')">Save</button>
@@ -918,7 +927,7 @@ async function showLocForm(id) {
 }
 
 async function saveLoc(id) {
-  const body = {name:document.getElementById('l-name').value, address:document.getElementById('l-addr').value, city:document.getElementById('l-city').value, country:document.getElementById('l-country').value, lat:parseFloat(document.getElementById('l-lat').value)||0, lng:parseFloat(document.getElementById('l-lng').value)||0, type:'both', tax_rate:parseFloat(document.getElementById('l-tax').value)||0, min_booking_days:parseInt(document.getElementById('l-mindays').value)||1};
+  const body = {name:document.getElementById('l-name').value, address:document.getElementById('l-addr').value, city:document.getElementById('l-city').value, country:document.getElementById('l-country').value, lat:parseFloat(document.getElementById('l-lat').value)||0, lng:parseFloat(document.getElementById('l-lng').value)||0, type:'both', tax_rate:parseFloat(document.getElementById('l-tax').value)||0, min_booking_days:parseInt(document.getElementById('l-mindays').value)||1, insurance_included:document.getElementById('l-insurance').checked};
   if (!body.name||!body.city) { alert('Name and city required'); return; }
   try { await api(id?'/locations/'+id:'/locations',{method:id?'PUT':'POST',body:JSON.stringify(body)}); closeModal(); showLocations(); } catch(e) { alert(e.message); }
 }

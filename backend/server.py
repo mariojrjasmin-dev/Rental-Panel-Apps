@@ -536,6 +536,7 @@ class LocationCreate(BaseModel):
     type: str = "both"  # pickup, dropoff, both
     tax_rate: float = 0.0  # percentage e.g. 18.0 for 18%
     min_booking_days: int = 1
+    insurance_included: bool = False
 
 class LocationUpdate(BaseModel):
     name: Optional[str] = None
@@ -547,6 +548,7 @@ class LocationUpdate(BaseModel):
     type: Optional[str] = None
     tax_rate: Optional[float] = None
     min_booking_days: Optional[int] = None
+    insurance_included: Optional[bool] = None
 
 class ReviewCreate(BaseModel):
     car_id: str
@@ -1822,9 +1824,9 @@ async def get_tax_by_location_name(name: str):
     import re as _re
     q = (name or "").strip()
     if not q:
-        return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1}
+        return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False}
 
-    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "min_booking_days": 1}
+    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "min_booking_days": 1, "insurance_included": 1}
     safe_q = _re.escape(q)
 
     # 1) Exact (case-insensitive)
@@ -1862,8 +1864,9 @@ async def get_tax_by_location_name(name: str):
             "name": loc.get("name", ""),
             "city": loc.get("city", ""),
             "min_booking_days": int(loc.get("min_booking_days") or 1),
+            "insurance_included": bool(loc.get("insurance_included") or False),
         }
-    return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1}
+    return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False}
 
 @api_router.get("/locations/{location_id}")
 async def get_location(location_id: str):

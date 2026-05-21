@@ -17,6 +17,7 @@ export default function BookingScreen() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('cash');
   const [taxRate, setTaxRate] = useState(0);
   const [locMinDays, setLocMinDays] = useState(1);
+  const [insuranceIncluded, setInsuranceIncluded] = useState(false);
   // Promo code state
   const [promoInput, setPromoInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number; type: string; value: number } | null>(null);
@@ -186,9 +187,11 @@ export default function BookingScreen() {
           const taxData = await taxRes.json();
           setTaxRate(Number(taxData.tax_rate) || 0);
           setLocMinDays(Number(taxData.min_booking_days) || 1);
+          setInsuranceIncluded(Boolean(taxData.insurance_included));
         } else {
           setTaxRate(0);
           setLocMinDays(1);
+          setInsuranceIncluded(false);
         }
       } catch (e: any) {
         if (e?.name !== 'AbortError') console.log('Tax fetch error:', e);
@@ -364,6 +367,27 @@ export default function BookingScreen() {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🛡️ Insurance</Text>
+          <View style={insuranceIncluded ? styles.insuranceIncluded : styles.insuranceNotIncluded}>
+            <Ionicons
+              name={insuranceIncluded ? 'shield-checkmark' : 'shield-outline'}
+              size={22}
+              color={insuranceIncluded ? '#34c759' : '#ff9500'}
+            />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={[styles.insuranceTitle, { color: insuranceIncluded ? '#0a5d2b' : '#a05a00' }]}>
+                {insuranceIncluded ? 'Insurance included' : 'Insurance NOT included'}
+              </Text>
+              <Text style={[styles.insuranceSub, { color: insuranceIncluded ? '#1e7a3e' : '#b87600' }]}>
+                {insuranceIncluded
+                  ? 'Basic insurance is included with this rental at no extra cost.'
+                  : 'This rental does not include insurance. You are responsible for any damage.'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>🎟️ Promo Code</Text>
           {appliedPromo ? (
             <View style={styles.promoApplied}>
@@ -498,6 +522,10 @@ const styles = StyleSheet.create({
   paymentLabel: { fontSize: 15, fontWeight: '700', color: '#666' },
   paymentLabelActive: { color: '#FF3B30' },
   summary: { backgroundColor: '#F5F5F5', borderRadius: 20, padding: 20, gap: 12 },
+  insuranceIncluded: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#e6f9ed', borderWidth: 1, borderColor: '#34c759', borderRadius: 12, padding: 14 },
+  insuranceNotIncluded: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#fff5e6', borderWidth: 1, borderColor: '#ff9500', borderRadius: 12, padding: 14 },
+  insuranceTitle: { fontSize: 14, fontWeight: '800' },
+  insuranceSub: { fontSize: 12, marginTop: 4, lineHeight: 16 },
   promoRow: { flexDirection: 'row', gap: 10 },
   promoInput: { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontWeight: '600', color: '#0A0A0A', letterSpacing: 1 },
   promoApplyBtn: { backgroundColor: '#ff2d92', paddingHorizontal: 20, justifyContent: 'center', borderRadius: 12, minWidth: 80, alignItems: 'center' },
