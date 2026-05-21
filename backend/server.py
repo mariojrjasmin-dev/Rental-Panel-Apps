@@ -1030,6 +1030,178 @@ async def get_admin_stats(request: Request):
         "total_locations": total_locations
     }
 
+
+@api_router.get("/admin/analytics")
+async def get_admin_analytics(request: Request):
+    """Aggregated fleet analytics for the admin dashboard.
+
+    Returns:
+      - kpis: total_revenue (paid), revenue_this_month, total_bookings, paid_bookings,
+              active_bookings, avg_revenue_per_booking
+      - monthly_revenue: last 6 months [{month, revenue, count}]
+      - top_cars: top 10 most-booked cars [{car_id, car_name, count, revenue}]
+      - top_locations: top pickup locations [{name, count}]
+      - status_breakdown: {status: count}
+      - payment_breakdown: {payment_status: count}
+    """
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    now = datetime.now(timezone.utc)
+    # First day of the current month (UTC)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    # 6 months ago (start of that month)
+    six_start_year = now.year
+    six_start_month = now.month - 5
+    while six_start_month <= 0:
+        six_start_month += 12
+        six_start_year -= 1
+    six_months_ago = datetime(six_start_year, six_start_month, 1, tzinfo=timezone.utc)
+
+    # ---- KPIs ----
+    total_bookings = await db.bookings.count_documents({})
+    paid_bookings = await db.bookings.count_documents({"payment_status": "paid"})
+    active_bookings = await db.bookings.count_documents(
+        {"status": {"$in": ["confirmed", "active"]}}
+    )
+
+    # Total collected revenue (sum total_price across paid bookings)
+    paid_revenue_pipeline = [
+        {"$match": {"payment_status": "paid"}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_price"}}},
+    ]
+    paid_rev_doc = await db.bookings.aggregate(paid_revenue_pipeline).to_list(1)
+    total_revenue = float(paid_rev_doc[0]["total"]) if paid_rev_doc else 0.0
+
+    # Revenue this month (paid only, by created_at)
+    month_pipeline = [
+        {"$match": {"payment_status": "paid", "created_at": {"$gte": month_start}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_price"}}},
+    ]
+    month_doc = await db.bookings.aggregate(month_pipeline).to_list(1)
+    revenue_this_month = float(month_doc[0]["total"]) if month_doc else 0.0
+
+    avg_rev = (total_revenue / paid_bookings) if paid_bookings > 0 else 0.0
+
+    # ---- Monthly revenue (last 6 months, including current) ----
+    monthly_pipeline = [
+        {"$match": {"created_at": {"$gte": six_months_ago}}},
+        {
+            "$group": {
+                "_id": {"y": {"$year": "$created_at"}, "m": {"$month": "$created_at"}},
+                "revenue": {
+                    "$sum": {
+                        "$cond": [
+                            {"$eq": ["$payment_status", "paid"]},
+                            "$total_price",
+                            0,
+                        ]
+                    }
+                },
+                "count": {"$sum": 1},
+            }
+        },
+        {"$sort": {"_id.y": 1, "_id.m": 1}},
+    ]
+    monthly_raw = await db.bookings.aggregate(monthly_pipeline).to_list(50)
+    monthly_map = {(r["_id"]["y"], r["_id"]["m"]): r for r in monthly_raw}
+    # Build a 6-slot array even when months have no data
+    monthly_revenue = []
+    y, m = six_start_year, six_start_month
+    for _ in range(6):
+        bucket = monthly_map.get((y, m))
+        monthly_revenue.append({
+            "month": f"{y:04d}-{m:02d}",
+            "revenue": float(bucket["revenue"]) if bucket else 0.0,
+            "count": int(bucket["count"]) if bucket else 0,
+        })
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
+    # ---- Top 10 most-booked cars ----
+    cars_pipeline = [
+        {
+            "$group": {
+                "_id": {"car_id": "$car_id", "car_name": "$car_name"},
+                "count": {"$sum": 1},
+                "revenue": {
+                    "$sum": {
+                        "$cond": [
+                            {"$eq": ["$payment_status", "paid"]},
+                            "$total_price",
+                            0,
+                        ]
+                    }
+                },
+            }
+        },
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    cars_raw = await db.bookings.aggregate(cars_pipeline).to_list(10)
+    top_cars = [
+        {
+            "car_id": r["_id"].get("car_id", ""),
+            "car_name": r["_id"].get("car_name") or "Unknown",
+            "count": int(r["count"]),
+            "revenue": float(r["revenue"] or 0),
+        }
+        for r in cars_raw
+    ]
+
+    # ---- Top pickup locations ----
+    loc_pipeline = [
+        {
+            "$group": {
+                "_id": "$pickup_location.name",
+                "count": {"$sum": 1},
+            }
+        },
+        {"$match": {"_id": {"$ne": None}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    loc_raw = await db.bookings.aggregate(loc_pipeline).to_list(10)
+    top_locations = [
+        {"name": r["_id"] or "Unknown", "count": int(r["count"])} for r in loc_raw
+    ]
+
+    # ---- Status + payment breakdowns ----
+    status_pipeline = [
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+    ]
+    status_raw = await db.bookings.aggregate(status_pipeline).to_list(20)
+    status_breakdown = {
+        (r["_id"] or "unknown"): int(r["count"]) for r in status_raw
+    }
+
+    payment_pipeline = [
+        {"$group": {"_id": "$payment_status", "count": {"$sum": 1}}},
+    ]
+    payment_raw = await db.bookings.aggregate(payment_pipeline).to_list(20)
+    payment_breakdown = {
+        (r["_id"] or "unknown"): int(r["count"]) for r in payment_raw
+    }
+
+    return {
+        "kpis": {
+            "total_revenue": round(total_revenue, 2),
+            "revenue_this_month": round(revenue_this_month, 2),
+            "total_bookings": total_bookings,
+            "paid_bookings": paid_bookings,
+            "active_bookings": active_bookings,
+            "avg_revenue_per_booking": round(avg_rev, 2),
+        },
+        "monthly_revenue": monthly_revenue,
+        "top_cars": top_cars,
+        "top_locations": top_locations,
+        "status_breakdown": status_breakdown,
+        "payment_breakdown": payment_breakdown,
+    }
+
 # ==================== LOCATION ROUTES ====================
 
 def serialize_location(loc):

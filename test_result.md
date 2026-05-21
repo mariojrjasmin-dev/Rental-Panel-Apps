@@ -102,9 +102,24 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "When creating a cash booking from the web or mobile apps, the booking should have a pending status in the panel and wait for the money to be collected. Admin needs to be able to mark it paid once cash is collected."
+user_problem_statement: "Add a Fleet Analytics dashboard to the admin panel: KPI cards (revenue/bookings), monthly revenue chart, booking trend, top 10 cars, top pickup locations, status breakdown."
 
 backend:
+  - task: "Admin Fleet Analytics endpoint GET /api/admin/analytics"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "New GET /api/admin/analytics endpoint (admin-only). Returns: kpis (total_revenue, revenue_this_month, total_bookings, paid_bookings, active_bookings, avg_revenue_per_booking), monthly_revenue (last 6 months, gap-filled with 0s), top_cars (top 10 by booking count with revenue), top_locations (top 10 pickup locations by booking count), status_breakdown (dict), payment_breakdown (dict). Uses MongoDB aggregation pipelines. Revenue figures count payment_status='paid' bookings only. Need to verify: admin gets 200 with all 6 keys; non-admin gets 403; unauthenticated gets 401; monthly_revenue always has exactly 6 entries with month YYYY-MM format."
+        - working: true
+          agent: "testing"
+          comment: "All 137 assertions passed in /app/backend_test_analytics.py. (1) GET /api/admin/analytics as admin returns 200 with all 6 top-level keys (kpis, monthly_revenue, top_cars, top_locations, status_breakdown, payment_breakdown). (2) kpis contains all 6 required numeric fields (total_revenue, revenue_this_month, total_bookings, paid_bookings, active_bookings, avg_revenue_per_booking) – all >= 0. (3) monthly_revenue is a list of EXACTLY 6 items, each with month (YYYY-MM string), revenue (numeric, >=0) and count (int, >=0); items are sorted chronologically (oldest first) and last item is the current UTC month (2026-05). (4) top_cars is a list of <=10 (got 3) sorted by count desc, each item has car_id/car_name/count/revenue with correct types; top_locations is a list of <=10 (got 4) each with {name, count}. (5) status_breakdown and payment_breakdown are dicts of {string: non-negative int} – e.g. {confirmed:12, pending_payment:3, completed:1} and {paid:13, pending:3}. (6) Cross-checked against GET /api/admin/bookings: kpis.total_revenue (15816.52) == sum(total_price for paid bookings); kpis.paid_bookings (13) == count of paid bookings; kpis.total_bookings (16) == admin bookings length. (7) avg_revenue_per_booking (1216.66) == total_revenue/paid_bookings. (8) Authorization: unauthenticated request returns 401; non-admin registered user returns 403 with detail 'Admin only'. Feature is fully working."
+
   - task: "Cash bookings start as pending; admin can mark them paid"
     implemented: true
     working: true
@@ -246,7 +261,8 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Admin Fleet Analytics endpoint GET /api/admin/analytics"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -267,3 +283,5 @@ agent_communication:
       message: "Tested 'Cash bookings start as pending; admin can mark them paid'. 27/27 assertions passed in /app/backend_test_cash_booking.py. Verified: (1) POST /api/bookings with payment_method='cash' creates booking with status='pending_payment' and payment_status='pending' (both in response and persisted via GET /api/bookings/{id}). (2) POST /api/bookings with payment_method='stripe' also creates with status='pending_payment' and payment_status='pending' (unchanged - webhook continues to flip these later). (3) PUT /api/admin/bookings/{id}/status: backward-compat with only {status:'confirmed'} works (payment_status untouched); only {payment_status:'paid'} works (status untouched); both fields work; invalid payment_status returns 400 with detail listing valid values 'failed, paid, pending, refunded'; empty body returns 400 'No fields to update'; non-admin returns 403; non-existent booking id returns 404. (4) End-to-end cash flow verified: customer cash booking (pending_payment/pending) -> admin PUT both fields -> GET reflects confirmed/paid. Feature is working as specified."
     - agent: "testing"
       message: "✅ MINIMUM BOOKING DAYS FRONTEND FEATURE TESTED: Successfully verified the complete implementation of minimum booking days per location feature. Backend API working correctly - set Punta Cana Airport to min_booking_days=5 and updated Mercedes Benz car to use this location. Frontend code in booking.tsx shows full implementation: (1) Fetches min_booking_days from GET /api/locations/tax-by-name API, (2) Auto-extends dropoff date if duration < minDays, (3) Shows yellow banner 'Minimum rental: X days' when min > 1, (4) Restricts date picker minimumDate, (5) Alerts user if dropoff too close to pickup. Feature is fully functional and ready for production use."
+    - agent: "testing"
+      message: "Tested 'Admin Fleet Analytics endpoint GET /api/admin/analytics'. 137/137 assertions passed in /app/backend_test_analytics.py against the live preview backend. Verified: (1) Admin GET returns 200 with all top-level keys kpis/monthly_revenue/top_cars/top_locations/status_breakdown/payment_breakdown. (2) kpis fields are all numeric & >= 0 (total_revenue=15816.52, revenue_this_month, total_bookings=16, paid_bookings=13, active_bookings, avg_revenue_per_booking=1216.66). (3) monthly_revenue is EXACTLY 6 items with month YYYY-MM strings sorted chronologically ['2025-12'..'2026-05']; last item is current UTC month; each has numeric revenue (>=0) and int count (>=0). (4) top_cars list <=10 (got 3) sorted by count desc, each item has car_id/car_name/count/revenue. (5) top_locations list <=10 (got 4), items have {name(str), count(int)}. (6) status_breakdown & payment_breakdown are dicts of {str: non-negative int}. (7) Cross-checked via /api/admin/bookings: total_revenue == sum(total_price) for payment_status='paid'; paid_bookings == count of paid; total_bookings matches admin bookings length. (8) avg_revenue_per_booking == total_revenue/paid_bookings (with proper 0-handling). (9) Auth: unauthenticated → 401; non-admin → 403 with detail 'Admin only'. Feature is fully working end-to-end."

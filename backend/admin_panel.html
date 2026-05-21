@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dams Car Rental - Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;color:#0a0a0a}
@@ -101,9 +102,10 @@ async function showDashboard() {
     render(`
       <div class="header">
         <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
           <button class="btn btn-sm btn-gray" onclick="showLocations()">Locations</button>
+          <button class="btn btn-sm" style="background:#5856d6;color:#fff" onclick="showAnalytics()">📊 Analytics</button>
           <button class="btn btn-sm btn-blue" onclick="showMigration()">Import/Export</button>
           <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
         </div>
@@ -129,6 +131,163 @@ async function showDashboard() {
     showLogin(e.message || 'Session expired. Please login again.'); 
   }
 }
+
+// ==================== ANALYTICS ====================
+async function showAnalytics() {
+  try {
+    const data = await api('/admin/analytics');
+    const k = data.kpis || {};
+    const fmt = n => '$' + (Number(n)||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    const monthLabels = (data.monthly_revenue||[]).map(r => {
+      const [y,m] = r.month.split('-');
+      const dt = new Date(Number(y), Number(m)-1, 1);
+      return dt.toLocaleString('en-US', {month:'short', year:'2-digit'});
+    });
+    const monthRevenue = (data.monthly_revenue||[]).map(r => Number(r.revenue)||0);
+    const monthCounts = (data.monthly_revenue||[]).map(r => Number(r.count)||0);
+
+    const statusColors = {
+      pending_payment:'#ff9500', pending:'#ff9500',
+      confirmed:'#007aff', active:'#34c759',
+      completed:'#5856d6', cancelled:'#ff3b30', unknown:'#8e8e93'
+    };
+    const sb = data.status_breakdown || {};
+    const statusKeys = Object.keys(sb);
+    const statusVals = statusKeys.map(k=>sb[k]);
+    const statusBg = statusKeys.map(k=>statusColors[k]||'#999');
+
+    render(`
+      <div class="header">
+        <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+          <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
+          <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+        </div>
+      </div>
+      <div class="container" style="max-width:1100px">
+        <h2 style="font-size:24px;font-weight:900;margin-bottom:18px">📊 Fleet Analytics</h2>
+
+        <!-- KPI Cards -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
+          <div class="kpi" style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700">Total Revenue</div>
+            <div style="font-size:26px;font-weight:900;color:#34c759;margin-top:4px">${fmt(k.total_revenue)}</div>
+            <div style="font-size:11px;color:#999;margin-top:2px">Paid bookings only</div>
+          </div>
+          <div class="kpi" style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700">This Month</div>
+            <div style="font-size:26px;font-weight:900;color:#007aff;margin-top:4px">${fmt(k.revenue_this_month)}</div>
+            <div style="font-size:11px;color:#999;margin-top:2px">Collected this month</div>
+          </div>
+          <div class="kpi" style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700">Total Bookings</div>
+            <div style="font-size:26px;font-weight:900;color:#0a0a0a;margin-top:4px">${k.total_bookings||0}</div>
+            <div style="font-size:11px;color:#999;margin-top:2px">${k.paid_bookings||0} paid</div>
+          </div>
+          <div class="kpi" style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700">Active Now</div>
+            <div style="font-size:26px;font-weight:900;color:#ff9500;margin-top:4px">${k.active_bookings||0}</div>
+            <div style="font-size:11px;color:#999;margin-top:2px">Confirmed + active</div>
+          </div>
+          <div class="kpi" style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700">Avg / Booking</div>
+            <div style="font-size:26px;font-weight:900;color:#5856d6;margin-top:4px">${fmt(k.avg_revenue_per_booking)}</div>
+            <div style="font-size:11px;color:#999;margin-top:2px">Per paid booking</div>
+          </div>
+        </div>
+
+        <!-- Charts Row 1: Monthly Revenue + Status Breakdown -->
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">
+          <div style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <h3 style="font-size:15px;font-weight:800;margin-bottom:12px">Revenue · last 6 months</h3>
+            <canvas id="chart-revenue" height="120"></canvas>
+          </div>
+          <div style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <h3 style="font-size:15px;font-weight:800;margin-bottom:12px">Bookings by status</h3>
+            <canvas id="chart-status" height="200"></canvas>
+          </div>
+        </div>
+
+        <!-- Charts Row 2: Booking Trend -->
+        <div style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5;margin-bottom:16px">
+          <h3 style="font-size:15px;font-weight:800;margin-bottom:12px">Bookings trend · last 6 months</h3>
+          <canvas id="chart-trend" height="80"></canvas>
+        </div>
+
+        <!-- Top Cars + Top Locations -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+          <div style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <h3 style="font-size:15px;font-weight:800;margin-bottom:12px">🏆 Top 10 Cars</h3>
+            ${(data.top_cars||[]).length === 0 ? '<p style="color:#999;font-size:13px">No bookings yet.</p>' : (data.top_cars||[]).map((c,i)=>`
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0">
+                <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
+                  <span style="background:#ff3b30;color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${i+1}</span>
+                  <span style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(c.car_name||'Unknown').trim()}</span>
+                </div>
+                <div style="text-align:right;flex-shrink:0;margin-left:8px">
+                  <div style="font-size:13px;font-weight:700">${c.count} bookings</div>
+                  <div style="font-size:11px;color:#34c759;font-weight:600">${fmt(c.revenue)}</div>
+                </div>
+              </div>`).join('')}
+          </div>
+          <div style="background:#fff;border-radius:16px;padding:18px;border:1px solid #e5e5e5">
+            <h3 style="font-size:15px;font-weight:800;margin-bottom:12px">📍 Top Pickup Locations</h3>
+            ${(data.top_locations||[]).length === 0 ? '<p style="color:#999;font-size:13px">No bookings yet.</p>' : (data.top_locations||[]).map((l,i)=>`
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0">
+                <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
+                  <span style="background:#007aff;color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${i+1}</span>
+                  <span style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.name}</span>
+                </div>
+                <div style="font-size:13px;font-weight:700;flex-shrink:0;margin-left:8px">${l.count} bookings</div>
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>
+    `);
+
+    // Build charts after render (Chart.js available globally)
+    // Revenue bar chart
+    new Chart(document.getElementById('chart-revenue').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: monthLabels,
+        datasets: [{ label: 'Revenue ($)', data: monthRevenue, backgroundColor: '#34c759', borderRadius: 6 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { callback: v => '$'+v } } }
+      }
+    });
+
+    // Status donut chart
+    new Chart(document.getElementById('chart-status').getContext('2d'), {
+      type: 'doughnut',
+      data: { labels: statusKeys.map(s => s.replace(/_/g,' ')), datasets: [{ data: statusVals, backgroundColor: statusBg, borderWidth: 0 }] },
+      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } }
+    });
+
+    // Booking trend line chart
+    new Chart(document.getElementById('chart-trend').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: monthLabels,
+        datasets: [{
+          label: 'Bookings', data: monthCounts,
+          borderColor: '#ff3b30', backgroundColor: 'rgba(255,59,48,0.1)',
+          tension: 0.3, fill: true, pointBackgroundColor: '#ff3b30', pointRadius: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+      }
+    });
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
 
 function carCard(c) {
   return `<div class="card">
