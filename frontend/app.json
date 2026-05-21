@@ -13,7 +13,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos of cars for listings",
         "NSPhotoLibraryUsageDescription": "Select car photos from gallery",
-        "NSFaceIDUsageDescription": "Sign in faster using Face ID"
+        "NSFaceIDUsageDescription": "Sign in faster using Face ID",
+        "NSLocationWhenInUseUsageDescription": "Show directions from your location to pickup"
       }
     },
     "android": {
@@ -27,7 +28,9 @@
         "READ_MEDIA_IMAGES",
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -57,7 +60,13 @@
       ],
       "expo-localization",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Show directions from your location to pickup"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
