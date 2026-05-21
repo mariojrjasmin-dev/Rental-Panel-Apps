@@ -203,22 +203,28 @@ export default function HomeScreen() {
       )}
 
       {/* Category filter */}
-      <FlatList
-        horizontal
-        data={CATEGORIES}
-        keyExtractor={(item) => item}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.categoriesList}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            testID={`category-${item}`}
-            style={[styles.categoryPill, activeCategory === item && styles.categoryPillActive]}
-            onPress={() => setActiveCategory(item)}
-          >
-            <Text style={[styles.categoryPillText, activeCategory === item && styles.categoryPillTextActive]}>{item}</Text>
-          </TouchableOpacity>
-        )}
-      />
+      <View>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="car-sport" size={16} color="#FF3B30" />
+          <Text style={styles.sectionLabel}>Vehicle Type</Text>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesList}
+        >
+          {CATEGORIES.map(item => (
+            <TouchableOpacity
+              key={item}
+              testID={`category-${item}`}
+              style={[styles.categoryPill, activeCategory === item && styles.categoryPillActive]}
+              onPress={() => setActiveCategory(item)}
+            >
+              <Text style={[styles.categoryPillText, activeCategory === item && styles.categoryPillTextActive]}>{item}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {/* Active filters bar */}
       {hasFilters ? (
