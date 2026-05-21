@@ -403,7 +403,8 @@ async def register_push_token(req: PushTokenRequest, request: Request):
     if not token.startswith(("ExponentPushToken[", "ExpoPushToken[")):
         raise HTTPException(status_code=400, detail="Invalid Expo push token format")
 
-    user_id_obj = user["_id"] if "_id" in user else ObjectId(user["id"])
+    raw_id = user.get("_id") or user.get("id")
+    user_id_obj = raw_id if isinstance(raw_id, ObjectId) else ObjectId(str(raw_id))
     await db.users.update_one(
         {"_id": user_id_obj},
         {"$addToSet": {"push_tokens": token}}
@@ -418,7 +419,8 @@ async def unregister_push_token(req: PushTokenRequest, request: Request):
     token = (req.token or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail="Missing token")
-    user_id_obj = user["_id"] if "_id" in user else ObjectId(user["id"])
+    raw_id = user.get("_id") or user.get("id")
+    user_id_obj = raw_id if isinstance(raw_id, ObjectId) else ObjectId(str(raw_id))
     await db.users.update_one(
         {"_id": user_id_obj},
         {"$pull": {"push_tokens": token}}
