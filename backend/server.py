@@ -1057,11 +1057,12 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found")
     booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+    booking_payload = serialize_booking(booking)  # serialize once; serialize_booking mutates the dict
 
     # Send push notification to the customer about the status change
     try:
-        owner_id = booking.get("user_id")
-        car_label = booking.get("car_name") or "your car"
+        owner_id = booking_payload.get("user_id")
+        car_label = booking_payload.get("car_name") or "your car"
         new_status = update_data.get("status")
         new_pay = update_data.get("payment_status")
         # Friendly messages
@@ -1104,18 +1105,17 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
             "completed": "status_completed",
             "cancelled": "cancelled",
         }
-        # Special case: payment_status='paid' for cash → treat as payment_confirmed
         event_key = None
         if update_data.get("payment_status") == "paid":
             event_key = "payment_confirmed"
         elif update_data.get("status") in event_map:
             event_key = event_map[update_data["status"]]
-        if event_key and booking.get("user_email"):
-            await send_booking_email(event_key, serialize_booking(booking), booking.get("user_email"))
+        if event_key and booking_payload.get("user_email"):
+            await send_booking_email(event_key, booking_payload, booking_payload.get("user_email"))
     except Exception as _e:
         logger.warning(f"Status update email error: {_e}")
 
-    return serialize_booking(booking)
+    return booking_payload
 
 
 @api_router.get("/bookings/{booking_id}/receipt.pdf")
@@ -1382,16 +1382,17 @@ async def stripe_webhook(request: Request):
                 try:
                     booking = await db.bookings.find_one({"_id": ObjectId(tx["booking_id"])})
                     if booking:
-                        car_label = booking.get("car_name") or "your car"
+                        booking_payload = serialize_booking(booking)
+                        car_label = booking_payload.get("car_name") or "your car"
                         await send_push_to_user(
-                            booking.get("user_id", ""),
+                            booking_payload.get("user_id", ""),
                             "Payment received",
                             f"Card payment confirmed for {car_label}. Your booking is confirmed!",
                             {"type": "booking_update", "booking_id": str(tx["booking_id"]), "status": "confirmed", "payment_status": "paid"},
                         )
                         # Email customer
-                        if booking.get("user_email"):
-                            await send_booking_email("payment_confirmed", serialize_booking(booking), booking.get("user_email"))
+                        if booking_payload.get("user_email"):
+                            await send_booking_email("payment_confirmed", booking_payload, booking_payload.get("user_email"))
                 except Exception as _e:
                     logger.warning(f"Stripe webhook push/email notify error: {_e}")
         return {"status": "ok"}
