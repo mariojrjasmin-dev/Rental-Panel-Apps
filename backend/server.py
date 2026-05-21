@@ -32,12 +32,12 @@ EXPO_PUSH_API = "https://exp.host/--/api/v2/push/send"
 async def send_expo_push(tokens: List[str], title: str, body: str, data: Optional[Dict] = None) -> Dict:
     """Send a push notification via the Expo Push API.
     Accepts a list of ExponentPushToken[...] strings. Silently skips empty/invalid tokens.
-    Returns the parsed Expo response (or an empty dict on failure).
+    Returns the parsed Expo response with ticket details and any failed tokens.
     """
     # Filter to valid Expo tokens
     valid_tokens = [t for t in (tokens or []) if isinstance(t, str) and t.startswith(("ExponentPushToken[", "ExpoPushToken["))]
     if not valid_tokens:
-        return {"sent": 0, "skipped": True}
+        return {"sent": 0, "skipped": True, "tickets": [], "errors": []}
 
     messages = [
         {
@@ -53,18 +53,57 @@ async def send_expo_push(tokens: List[str], title: str, body: str, data: Optiona
     ]
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client_http:
+        async with httpx.AsyncClient(timeout=15) as client_http:
             resp = await client_http.post(
                 EXPO_PUSH_API,
                 json=messages,
                 headers={"Content-Type": "application/json", "Accept": "application/json"},
             )
-            data_resp = resp.json() if resp.status_code == 200 else {}
-            logger.info(f"Expo push sent: {len(valid_tokens)} tokens, status={resp.status_code}")
-            return {"sent": len(valid_tokens), "expo_response": data_resp}
+            raw = resp.json() if resp.status_code == 200 else {}
+            tickets = raw.get("data", []) if isinstance(raw, dict) else []
+            # Pair each ticket with its target token, collect errors and DeviceNotRegistered tokens
+            errors: List[Dict] = []
+            invalid_tokens: List[str] = []
+            ok_count = 0
+            for i, ticket in enumerate(tickets):
+                tok = valid_tokens[i] if i < len(valid_tokens) else None
+                if isinstance(ticket, dict) and ticket.get("status") == "ok":
+                    ok_count += 1
+                else:
+                    err_code = (ticket.get("details") or {}).get("error") if isinstance(ticket, dict) else None
+                    errors.append({
+                        "token": tok,
+                        "status": ticket.get("status") if isinstance(ticket, dict) else "unknown",
+                        "message": ticket.get("message") if isinstance(ticket, dict) else None,
+                        "error_code": err_code,
+                    })
+                    if err_code == "DeviceNotRegistered":
+                        invalid_tokens.append(tok)
+
+            # Auto-cleanup: remove DeviceNotRegistered tokens from all users
+            removed = 0
+            if invalid_tokens:
+                try:
+                    r = await db.users.update_many(
+                        {"push_tokens": {"$in": invalid_tokens}},
+                        {"$pull": {"push_tokens": {"$in": invalid_tokens}}},
+                    )
+                    removed = r.modified_count
+                    logger.info(f"Removed {removed} invalid push tokens (DeviceNotRegistered)")
+                except Exception as ce:
+                    logger.warning(f"Failed to cleanup invalid tokens: {ce}")
+
+            logger.info(f"Expo push: requested={len(valid_tokens)}, accepted={ok_count}, errors={len(errors)}, status={resp.status_code}")
+            return {
+                "sent": ok_count,
+                "requested": len(valid_tokens),
+                "errors": errors,
+                "invalid_tokens_removed": removed,
+                "raw_status": resp.status_code,
+            }
     except Exception as e:
         logger.warning(f"Expo push failed: {e}")
-        return {"sent": 0, "error": str(e)}
+        return {"sent": 0, "requested": len(valid_tokens), "error": str(e), "errors": []}
 
 
 async def send_push_to_user(user_id: str, title: str, body: str, data: Optional[Dict] = None) -> Dict:
@@ -1280,8 +1319,13 @@ async def admin_send_notification(req: AdminBroadcastRequest, request: Request):
     result = await send_expo_push(all_tokens, title, body, {"type": "admin_broadcast"})
     return {
         "sent": int(result.get("sent") or 0),
+        "requested": int(result.get("requested") or len(all_tokens)),
         "total_recipients": len(users),
         "tokens_count": len(all_tokens),
+        "errors": result.get("errors") or [],
+        "invalid_tokens_removed": int(result.get("invalid_tokens_removed") or 0),
+        "raw_status": result.get("raw_status"),
+        "error": result.get("error"),
     }
 
 

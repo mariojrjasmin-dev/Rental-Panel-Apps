@@ -385,12 +385,30 @@ async function sendNotification() {
       method: 'POST',
       body: JSON.stringify({ title, body, target }),
     });
-    alert(`✅ Notification sent!\n\nDevices reached: ${res.tokens_count||0}\nRecipients: ${res.total_recipients||0}`);
+    let msg = `Sent: ${res.sent||0} / ${res.requested||0} devices accepted by Expo\n`;
+    msg += `Recipients (users matched): ${res.total_recipients||0}\n`;
+    if (res.invalid_tokens_removed) {
+      msg += `\n⚠️ Cleaned up ${res.invalid_tokens_removed} stale token(s) (DeviceNotRegistered)`;
+    }
+    if (res.errors && res.errors.length) {
+      msg += `\n\n⚠️ ${res.errors.length} delivery error(s):\n`;
+      res.errors.slice(0,5).forEach(e => {
+        msg += `  • ${e.error_code || e.status || 'unknown'}${e.message ? ': ' + e.message : ''}\n`;
+      });
+    }
+    if ((res.sent||0) === 0) {
+      msg = '⚠️ Sent to 0 devices.\n\n' + msg + '\nLikely cause: tokens are invalid (e.g., APK built without an EAS project ID, or notification permission was denied).';
+      alert(msg);
+    } else {
+      alert('✅ Notification sent!\n\n' + msg);
+    }
     document.getElementById('n-title').value = '';
     document.getElementById('n-body').value = '';
     document.getElementById('n-preview').style.display = 'none';
+    // Refresh audience stats in case stale tokens were removed
+    showNotifications();
   } catch (e) {
-    alert('Failed to send: ' + e.message);
+    alert('Failed to send: ' + (e.message || e));
   }
 }
 
