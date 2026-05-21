@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
 import { BACKEND_URL } from '../src/config';
@@ -61,32 +61,42 @@ export default function ReceiptScreen() {
       const token = await AsyncStorage.getItem('auth_token');
       const url = `${BACKEND_URL}/api/bookings/${bookingId}/receipt.pdf`;
 
+      // Fetch the PDF (works on all platforms; properly handles auth headers)
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status} ${res.statusText}`);
+      }
+
       if (Platform.OS === 'web') {
-        // On web: fetch, create blob, open in new tab
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) throw new Error('Could not fetch receipt');
+        // On web: open the PDF in a new tab
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         window.open(blobUrl, '_blank');
         setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
       } else {
-        // On native: download to cache and share
-        const fileUri = FileSystem.cacheDirectory + `dams-receipt-${bookingId.slice(-8)}.pdf`;
-        const dl = await FileSystem.downloadAsync(url, fileUri, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        // On native: save bytes to cache, then open the share sheet.
+        // Uses the new File API from expo-file-system v19+.
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        const fileName = `dams-receipt-${bookingId.slice(-8)}.pdf`;
+        const file = new File(Paths.cache, fileName);
+        try { if (file.exists) file.delete(); } catch {}
+        file.create();
+        file.write(bytes);
+
         if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(dl.uri, {
+          await Sharing.shareAsync(file.uri, {
             mimeType: 'application/pdf',
             dialogTitle: 'DAMS Car Rental Receipt',
             UTI: 'com.adobe.pdf',
           });
         } else {
-          await Linking.openURL(dl.uri);
+          await Linking.openURL(file.uri);
         }
       }
     } catch (e: any) {
-      Alert.alert('Download failed', e.message || 'Could not download the receipt. Please try again.');
+      Alert.alert('Download failed', e?.message || 'Could not download the receipt. Please try again.');
     }
     setDownloading(false);
   };
