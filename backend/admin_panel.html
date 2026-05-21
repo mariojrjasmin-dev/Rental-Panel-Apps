@@ -108,6 +108,7 @@ async function showDashboard() {
           <button class="btn btn-sm" style="background:#5856d6;color:#fff" onclick="showAnalytics()">📊 Analytics</button>
           <button class="btn btn-sm" style="background:#ff9500;color:#fff" onclick="showNotifications()">📣 Notify</button>
           <button class="btn btn-sm" style="background:#ff2d92;color:#fff" onclick="showPromos()">🎟️ Promos</button>
+          <button class="btn btn-sm" style="background:#34c759;color:#fff" onclick="showTerms()">📜 Terms</button>
           <button class="btn btn-sm btn-blue" onclick="showMigration()">Import/Export</button>
           <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
         </div>
@@ -877,7 +878,7 @@ async function showLocations() {
       </div>
       ${locs.map(l => `<div class="card">
         <div style="width:48px;height:48px;border-radius:14px;background:#fff0f0;display:flex;align-items:center;justify-content:center;font-size:20px">📍</div>
-        <div class="card-info"><h3>${l.name}</h3><p>${l.city}, ${l.country} · ${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}${l.tax_rate ? ' · <strong style="color:#ff3b30">Tax '+l.tax_rate+'%</strong>' : ''}</p></div>
+        <div class="card-info"><h3>${l.name}</h3><p>${l.city}, ${l.country} · ${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}${l.tax_rate ? ' · <strong style="color:#ff3b30">Tax '+l.tax_rate+'%</strong>' : ''}${l.refuel_amount ? ' · <strong style="color:#34c759">⛽ $'+Number(l.refuel_amount).toFixed(2)+'</strong>' : ''}${l.insurance_included ? ' · <strong style="color:#0a84ff">🛡️ Ins</strong>' : ''}</p></div>
         <div class="card-actions">
           <button class="btn btn-sm btn-blue" onclick='showLocForm("${l.id}")'>Edit</button>
           <button class="btn btn-sm btn-gray" onclick="deleteLoc('${l.id}','${l.name.replace(/'/g,"\\'")}')">Delete</button>
@@ -910,6 +911,11 @@ async function showLocForm(id) {
           <div class="form-group" style="flex:1"><label>Min Booking Days</label><input class="input" id="l-mindays" type="number" min="1" max="365" value="${loc.min_booking_days||1}" placeholder="1"></div>
         </div>
         <div class="form-group">
+          <label>⛽ Pre-paid Refuel Fee ($)</label>
+          <input class="input" id="l-refuel" type="number" min="0" step="0.01" value="${loc.refuel_amount||0}" placeholder="0 = disabled · e.g. 45 for $45 flat fee">
+          <div style="font-size:12px;color:#666;margin-top:4px">Flat amount the customer can prepay at checkout to skip refueling at return. Set to 0 to hide the option for this location.</div>
+        </div>
+        <div class="form-group">
           <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px;background:#fafafa;border-radius:10px;border:1px solid #e5e5e5">
             <input type="checkbox" id="l-insurance" ${loc.insurance_included?'checked':''} style="width:18px;height:18px;cursor:pointer"/>
             <div style="flex:1">
@@ -927,7 +933,7 @@ async function showLocForm(id) {
 }
 
 async function saveLoc(id) {
-  const body = {name:document.getElementById('l-name').value, address:document.getElementById('l-addr').value, city:document.getElementById('l-city').value, country:document.getElementById('l-country').value, lat:parseFloat(document.getElementById('l-lat').value)||0, lng:parseFloat(document.getElementById('l-lng').value)||0, type:'both', tax_rate:parseFloat(document.getElementById('l-tax').value)||0, min_booking_days:parseInt(document.getElementById('l-mindays').value)||1, insurance_included:document.getElementById('l-insurance').checked};
+  const body = {name:document.getElementById('l-name').value, address:document.getElementById('l-addr').value, city:document.getElementById('l-city').value, country:document.getElementById('l-country').value, lat:parseFloat(document.getElementById('l-lat').value)||0, lng:parseFloat(document.getElementById('l-lng').value)||0, type:'both', tax_rate:parseFloat(document.getElementById('l-tax').value)||0, min_booking_days:parseInt(document.getElementById('l-mindays').value)||1, insurance_included:document.getElementById('l-insurance').checked, refuel_amount:parseFloat(document.getElementById('l-refuel').value)||0};
   if (!body.name||!body.city) { alert('Name and city required'); return; }
   try { await api(id?'/locations/'+id:'/locations',{method:id?'PUT':'POST',body:JSON.stringify(body)}); closeModal(); showLocations(); } catch(e) { alert(e.message); }
 }
@@ -935,6 +941,48 @@ async function saveLoc(id) {
 async function deleteLoc(id,name) {
   if (!confirm('Delete '+name+'?')) return;
   try { await api('/locations/'+id,{method:'DELETE'}); showLocations(); } catch(e) { alert(e.message); }
+}
+
+// ==================== RENTAL TERMS ====================
+async function showTerms() {
+  let terms = '';
+  try { const r = await api('/settings/rental-terms'); terms = (r && r.terms) || ''; } catch(e){}
+  render(`
+    <div class="header">
+      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+    <div class="container">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+        <h2 style="font-size:20px;font-weight:800">📜 Rental Terms &amp; Conditions</h2>
+        <span id="terms-count" style="color:#666;font-size:13px;font-weight:600"></span>
+      </div>
+      <div style="background:#fff8e5;border:1px solid #ffd48a;border-radius:12px;padding:14px;margin-bottom:16px;color:#8a6500;font-size:13px;line-height:1.5">
+        ℹ️ Customers must accept these terms before confirming a booking. They will be shown in a modal at checkout. Markdown is not supported — use plain text. Recommended max length: 50,000 characters.
+      </div>
+      <textarea id="terms-text" style="width:100%;min-height:520px;padding:16px;border:1px solid #e5e5e5;border-radius:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;color:#0a0a0a;background:#fafafa;resize:vertical" oninput="document.getElementById('terms-count').textContent=this.value.length+' chars'">${terms.replace(/</g,'&lt;')}</textarea>
+      <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end">
+        <button class="btn btn-gray" onclick="showDashboard()">Cancel</button>
+        <button class="btn btn-red" onclick="saveTerms()">💾 Save Terms</button>
+      </div>
+    </div>
+    <div id="modal-root"></div>
+  `);
+  const ta = document.getElementById('terms-text');
+  document.getElementById('terms-count').textContent = (ta.value || '').length + ' chars';
+}
+
+async function saveTerms() {
+  const text = document.getElementById('terms-text').value || '';
+  if (text.trim().length < 10) { alert('Terms text is too short (min 10 chars).'); return; }
+  if (text.length > 50000) { alert('Terms text is too long (max 50,000 chars).'); return; }
+  try {
+    await api('/admin/settings/rental-terms', { method:'PUT', body: JSON.stringify({ terms: text }) });
+    alert('✅ Rental terms saved successfully.');
+  } catch(e) { alert('Failed to save: ' + e.message); }
 }
 
 function doLogout() { token=null; localStorage.removeItem('admin_token'); showLogin(); }

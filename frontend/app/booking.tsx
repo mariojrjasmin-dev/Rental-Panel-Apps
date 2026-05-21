@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform, TextInput, Modal, Switch } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +18,12 @@ export default function BookingScreen() {
   const [taxRate, setTaxRate] = useState(0);
   const [locMinDays, setLocMinDays] = useState(1);
   const [insuranceIncluded, setInsuranceIncluded] = useState(false);
+  const [refuelAmount, setRefuelAmount] = useState(0);
+  const [refuelOptedIn, setRefuelOptedIn] = useState(false);
+  // Rental terms state
+  const [termsText, setTermsText] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsModalVisible, setTermsModalVisible] = useState(false);
   // Promo code state
   const [promoInput, setPromoInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number; type: string; value: number } | null>(null);
@@ -88,9 +94,11 @@ export default function BookingScreen() {
     const sub = parseFloat(total);
     const disc = appliedPromo?.discount ? Number(appliedPromo.discount) : 0;
     const discountedSub = Math.max(sub - disc, 0);
-    const tax = discountedSub * (taxRate / 100);
-    return (discountedSub + tax).toFixed(2);
-  }, [total, taxRate, appliedPromo]);
+    const refuel = (refuelOptedIn && refuelAmount > 0) ? refuelAmount : 0;
+    const taxable = discountedSub + refuel;
+    const tax = taxable * (taxRate / 100);
+    return (taxable + tax).toFixed(2);
+  }, [total, taxRate, appliedPromo, refuelOptedIn, refuelAmount]);
 
   const discountedSubtotal = useMemo(() => {
     const sub = parseFloat(total);
@@ -99,8 +107,10 @@ export default function BookingScreen() {
   }, [total, appliedPromo]);
 
   const recomputedTax = useMemo(() => {
-    return (parseFloat(discountedSubtotal) * (taxRate / 100)).toFixed(2);
-  }, [discountedSubtotal, taxRate]);
+    const refuel = (refuelOptedIn && refuelAmount > 0) ? refuelAmount : 0;
+    const taxable = parseFloat(discountedSubtotal) + refuel;
+    return (taxable * (taxRate / 100)).toFixed(2);
+  }, [discountedSubtotal, taxRate, refuelOptedIn, refuelAmount]);
 
   const applyPromo = async () => {
     const code = promoInput.trim().toUpperCase();
@@ -172,6 +182,19 @@ export default function BookingScreen() {
     if (carId) fetchCar();
   }, [carId]);
 
+  // Fetch rental terms (global)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${BACKEND_URL}/api/settings/rental-terms`);
+        if (r.ok) {
+          const data = await r.json();
+          setTermsText(data.terms || '');
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  }, []);
+
   // Tax rate refreshes whenever the car's pickup location changes
   useEffect(() => {
     const locName = car?.pickup_location?.name;
@@ -188,10 +211,15 @@ export default function BookingScreen() {
           setTaxRate(Number(taxData.tax_rate) || 0);
           setLocMinDays(Number(taxData.min_booking_days) || 1);
           setInsuranceIncluded(Boolean(taxData.insurance_included));
+          const refuel = Number(taxData.refuel_amount) || 0;
+          setRefuelAmount(refuel);
+          if (refuel <= 0) setRefuelOptedIn(false);
         } else {
           setTaxRate(0);
           setLocMinDays(1);
           setInsuranceIncluded(false);
+          setRefuelAmount(0);
+          setRefuelOptedIn(false);
         }
       } catch (e: any) {
         if (e?.name !== 'AbortError') console.log('Tax fetch error:', e);
@@ -202,6 +230,10 @@ export default function BookingScreen() {
 
   const handleBooking = async () => {
     if (!car) return;
+    if (!termsAccepted) {
+      Alert.alert('Terms required', 'Please review and accept the rental terms before confirming.');
+      return;
+    }
     setBooking(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -219,6 +251,8 @@ export default function BookingScreen() {
           dropoff_location: car.dropoff_location || { name: 'TBD', lat: 0, lng: 0 },
           payment_method: paymentMethod,
           promo_code: appliedPromo?.code || null,
+          refuel_opted_in: refuelOptedIn && refuelAmount > 0,
+          terms_accepted: true,
         }),
       });
 
@@ -387,6 +421,40 @@ export default function BookingScreen() {
           </View>
         </View>
 
+        {refuelAmount > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>⛽ Pre-paid Refuel</Text>
+            <TouchableOpacity
+              testID="refuel-toggle"
+              activeOpacity={0.8}
+              onPress={() => setRefuelOptedIn(!refuelOptedIn)}
+              style={refuelOptedIn ? styles.refuelOn : styles.refuelOff}
+            >
+              <Ionicons
+                name={refuelOptedIn ? 'checkmark-circle' : 'flash-outline'}
+                size={22}
+                color={refuelOptedIn ? '#34c759' : '#666'}
+              />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={[styles.refuelTitle, { color: refuelOptedIn ? '#0a5d2b' : '#0a0a0a' }]}>
+                  {refuelOptedIn ? `Pre-paid refuel — $${refuelAmount.toFixed(2)} (added)` : `Add Pre-paid Refuel — $${refuelAmount.toFixed(2)}`}
+                </Text>
+                <Text style={styles.refuelSub}>
+                  {refuelOptedIn
+                    ? 'No need to refuel before return. Save time at drop-off.'
+                    : 'Skip refueling at return — return the car empty. Tap to add.'}
+                </Text>
+              </View>
+              <Switch
+                value={refuelOptedIn}
+                onValueChange={setRefuelOptedIn}
+                trackColor={{ false: '#e5e5e5', true: '#34c759' }}
+                thumbColor={Platform.OS === 'android' ? '#fff' : undefined}
+              />
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>🎟️ Promo Code</Text>
           {appliedPromo ? (
@@ -456,6 +524,12 @@ export default function BookingScreen() {
               </Text>
             </View>
           )}
+          {refuelOptedIn && refuelAmount > 0 && (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: '#34c759', fontWeight: '700' }]}>⛽ Pre-paid Refuel</Text>
+              <Text style={[styles.summaryValue, { color: '#34c759', fontWeight: '700' }]}>+${refuelAmount.toFixed(2)}</Text>
+            </View>
+          )}
           {taxRate > 0 ? (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>{tr('tax')} ({taxRate}%)</Text>
@@ -476,21 +550,80 @@ export default function BookingScreen() {
 
       <View style={styles.bottomBar}>
         <TouchableOpacity
+          testID="terms-toggle"
+          activeOpacity={0.7}
+          onPress={() => setTermsAccepted(!termsAccepted)}
+          style={styles.termsRow}
+        >
+          <View style={[styles.termsBox, termsAccepted && styles.termsBoxChecked]}>
+            {termsAccepted && <Ionicons name="checkmark" size={16} color="#FFF" />}
+          </View>
+          <Text style={styles.termsLabel}>
+            I have read and accept the{' '}
+            <Text
+              style={styles.termsLink}
+              onPress={(e: any) => { e?.stopPropagation && e.stopPropagation(); setTermsModalVisible(true); }}
+            >
+              Rental Terms &amp; Conditions
+            </Text>
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           testID="confirm-booking-btn"
-          style={styles.confirmBtn}
+          style={[styles.confirmBtn, (!termsAccepted || booking) && styles.confirmBtnDisabled]}
           onPress={handleBooking}
-          disabled={booking}
+          disabled={booking || !termsAccepted}
           activeOpacity={0.7}
         >
           {booking ? (
             <ActivityIndicator color="#FFF" />
           ) : (
             <Text style={styles.confirmBtnText}>
-              {paymentMethod === 'stripe' ? `${tr('pay')} $${grandTotal}` : tr('confirmBooking')}
+              {!termsAccepted
+                ? 'Accept Terms to Continue'
+                : (paymentMethod === 'stripe' ? `${tr('pay')} $${grandTotal}` : tr('confirmBooking'))}
             </Text>
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Terms & Conditions Modal */}
+      <Modal
+        visible={termsModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setTermsModalVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer} edges={['top']}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>📜 Rental Terms &amp; Conditions</Text>
+            <TouchableOpacity onPress={() => setTermsModalVisible(false)} style={styles.modalCloseBtn}>
+              <Ionicons name="close" size={24} color="#0A0A0A" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.modalScroll} contentContainerStyle={{ padding: 20 }}>
+            <Text style={styles.modalBody}>
+              {termsText || 'Loading rental terms…'}
+            </Text>
+          </ScrollView>
+          <View style={styles.modalFooter}>
+            <TouchableOpacity
+              style={[styles.modalBtn, styles.modalBtnGhost]}
+              onPress={() => setTermsModalVisible(false)}
+            >
+              <Text style={styles.modalBtnGhostText}>Close</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="terms-accept-btn"
+              style={[styles.modalBtn, styles.modalBtnPrimary]}
+              onPress={() => { setTermsAccepted(true); setTermsModalVisible(false); }}
+            >
+              <Text style={styles.modalBtnPrimaryText}>I Accept</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -501,7 +634,7 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
   topTitle: { fontSize: 18, fontWeight: '800', color: '#0A0A0A' },
-  scroll: { paddingHorizontal: 24, paddingBottom: 120 },
+  scroll: { paddingHorizontal: 24, paddingBottom: 180 },
   carSummary: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#E5E5E5', marginBottom: 24 },
   carName: { fontSize: 20, fontWeight: '900', color: '#0A0A0A' },
   carSub: { fontSize: 14, color: '#666', marginTop: 2 },
@@ -544,5 +677,27 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 24, fontWeight: '900', color: '#FF3B30' },
   bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 24, paddingVertical: 16, paddingBottom: 32, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#E5E5E5' },
   confirmBtn: { backgroundColor: '#FF3B30', borderRadius: 50, paddingVertical: 18, alignItems: 'center', justifyContent: 'center' },
+  confirmBtnDisabled: { backgroundColor: '#C7C7CC' },
   confirmBtnText: { color: '#FFF', fontSize: 18, fontWeight: '700' },
+  refuelOn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e6f9ed', borderWidth: 1, borderColor: '#34c759', borderRadius: 12, padding: 14 },
+  refuelOff: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E5E5E5', borderRadius: 12, padding: 14 },
+  refuelTitle: { fontSize: 14, fontWeight: '800' },
+  refuelSub: { fontSize: 12, color: '#666', marginTop: 4, lineHeight: 16 },
+  termsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingHorizontal: 4 },
+  termsBox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#999', alignItems: 'center', justifyContent: 'center', marginRight: 10, backgroundColor: '#FFF' },
+  termsBoxChecked: { backgroundColor: '#FF3B30', borderColor: '#FF3B30' },
+  termsLabel: { flex: 1, fontSize: 13, color: '#333', fontWeight: '600', lineHeight: 18 },
+  termsLink: { color: '#007AFF', textDecorationLine: 'underline', fontWeight: '700' },
+  modalContainer: { flex: 1, backgroundColor: '#FFF' },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E5E5E5' },
+  modalTitle: { fontSize: 17, fontWeight: '800', color: '#0A0A0A', flex: 1 },
+  modalCloseBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' },
+  modalScroll: { flex: 1 },
+  modalBody: { fontSize: 13, color: '#333', lineHeight: 20 },
+  modalFooter: { flexDirection: 'row', gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: '#E5E5E5', paddingBottom: 24 },
+  modalBtn: { flex: 1, paddingVertical: 14, borderRadius: 50, alignItems: 'center', justifyContent: 'center' },
+  modalBtnGhost: { backgroundColor: '#F5F5F5' },
+  modalBtnGhostText: { color: '#0A0A0A', fontSize: 15, fontWeight: '700' },
+  modalBtnPrimary: { backgroundColor: '#FF3B30' },
+  modalBtnPrimaryText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
 });
