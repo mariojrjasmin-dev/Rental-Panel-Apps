@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Switch } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Switch, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
 import { t } from '../../src/i18n';
 import { isBiometricAvailable, isBiometricEnabled, disableBiometricLogin, type BiometricCheck } from '../../src/biometric';
+import LegalLinks from '../../components/LegalLinks';
 
 export default function ProfileScreen() {
   const { user, logout, locale, changeLocale } = useAuth();
@@ -51,7 +52,11 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.content}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.title}>{t('profile')}</Text>
 
         <View style={styles.profileCard}>
@@ -128,6 +133,10 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        <View style={styles.legalWrap}>
+          <LegalLinks />
+        </View>
+
         <View style={styles.logoutArea}>
           {!confirmLogout ? (
             <Pressable
@@ -159,7 +168,7 @@ export default function ProfileScreen() {
             </View>
           )}
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -188,7 +197,8 @@ const styles = StyleSheet.create({
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', cursor: 'pointer' as any },
   menuIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   menuText: { flex: 1, fontSize: 16, fontWeight: '600', color: '#0A0A0A' },
-  logoutArea: { marginTop: 'auto' as any, paddingBottom: 40 },
+  legalWrap: { marginHorizontal: -24, marginTop: 8, marginBottom: 4 },
+  logoutArea: { paddingBottom: 40 },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 16, borderWidth: 1.5, borderColor: '#FF3B30', cursor: 'pointer' as any },
   logoutText: { fontSize: 16, fontWeight: '700', color: '#FF3B30' },
   confirmSection: { backgroundColor: '#FFF0F0', borderRadius: 16, padding: 20, alignItems: 'center', gap: 16 },

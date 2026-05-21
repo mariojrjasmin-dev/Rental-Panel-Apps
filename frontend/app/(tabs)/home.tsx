@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
 import StarRating from '../../components/StarRating';
+import LegalLinks from '../../components/LegalLinks';
 import { t as tr } from '../../src/i18n';
 
 import { BACKEND_URL } from '../../src/config';
@@ -260,6 +261,7 @@ export default function HomeScreen() {
           contentContainerStyle={styles.carList}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF3B30" />}
+          ListFooterComponent={<LegalLinks />}
         />
       )}
     </SafeAreaView>
