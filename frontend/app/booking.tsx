@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +17,10 @@ export default function BookingScreen() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('cash');
   const [taxRate, setTaxRate] = useState(0);
   const [locMinDays, setLocMinDays] = useState(1);
+  // Promo code state
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number; type: string; value: number } | null>(null);
+  const [validatingPromo, setValidatingPromo] = useState(false);
   const router = useRouter();
 
   // Default dates: tomorrow pickup, dropoff respects min_booking_days when known
@@ -80,8 +84,53 @@ export default function BookingScreen() {
   }, [days, car, taxRate]);
 
   const grandTotal = useMemo(() => {
-    return (parseFloat(total) + parseFloat(taxAmount)).toFixed(2);
-  }, [total, taxAmount]);
+    const sub = parseFloat(total);
+    const disc = appliedPromo?.discount ? Number(appliedPromo.discount) : 0;
+    const discountedSub = Math.max(sub - disc, 0);
+    const tax = discountedSub * (taxRate / 100);
+    return (discountedSub + tax).toFixed(2);
+  }, [total, taxRate, appliedPromo]);
+
+  const discountedSubtotal = useMemo(() => {
+    const sub = parseFloat(total);
+    const disc = appliedPromo?.discount ? Number(appliedPromo.discount) : 0;
+    return Math.max(sub - disc, 0).toFixed(2);
+  }, [total, appliedPromo]);
+
+  const recomputedTax = useMemo(() => {
+    return (parseFloat(discountedSubtotal) * (taxRate / 100)).toFixed(2);
+  }, [discountedSubtotal, taxRate]);
+
+  const applyPromo = async () => {
+    const code = promoInput.trim().toUpperCase();
+    if (!code) { Alert.alert('Promo code', 'Please enter a code.'); return; }
+    setValidatingPromo(true);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${BACKEND_URL}/api/promo-codes/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ code, subtotal: parseFloat(total) }),
+      });
+      const data = await res.json();
+      if (data.valid) {
+        setAppliedPromo({
+          code: data.code,
+          discount: Number(data.discount) || 0,
+          type: data.discount_type,
+          value: Number(data.discount_value) || 0,
+        });
+      } else {
+        setAppliedPromo(null);
+        Alert.alert('Promo code', data.message || 'Invalid promo code');
+      }
+    } catch (e: any) {
+      Alert.alert('Promo code', e?.message || 'Could not validate code');
+    }
+    setValidatingPromo(false);
+  };
+
+  const removePromo = () => { setAppliedPromo(null); setPromoInput(''); };
 
   // When pickup changes, ensure dropoff respects min_booking_days
   const handlePickupChange = (newDate: Date) => {
@@ -166,6 +215,7 @@ export default function BookingScreen() {
           pickup_location: car.pickup_location || { name: 'TBD', lat: 0, lng: 0 },
           dropoff_location: car.dropoff_location || { name: 'TBD', lat: 0, lng: 0 },
           payment_method: paymentMethod,
+          promo_code: appliedPromo?.code || null,
         }),
       });
 
@@ -313,6 +363,43 @@ export default function BookingScreen() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🎟️ Promo Code</Text>
+          {appliedPromo ? (
+            <View style={styles.promoApplied}>
+              <Ionicons name="checkmark-circle" size={20} color="#34c759" />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.promoCode}>{appliedPromo.code}</Text>
+                <Text style={styles.promoSub}>
+                  {appliedPromo.type === 'percent' ? `${appliedPromo.value}% off` : `$${appliedPromo.value} off`} · You save ${appliedPromo.discount.toFixed(2)}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={removePromo} style={styles.promoRemoveBtn}>
+                <Text style={styles.promoRemoveText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.promoRow}>
+              <TextInput
+                style={styles.promoInput}
+                value={promoInput}
+                onChangeText={(t) => setPromoInput(t.toUpperCase())}
+                placeholder="Enter code"
+                placeholderTextColor="#999"
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.promoApplyBtn, validatingPromo && { opacity: 0.5 }]}
+                onPress={applyPromo}
+                disabled={validatingPromo}
+              >
+                {validatingPromo ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.promoApplyText}>Apply</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
         <View style={styles.summary}>
           <Text style={styles.summaryTitle}>{tr('costBreakdown')}</Text>
           <View style={styles.summaryRow}>
@@ -335,10 +422,20 @@ export default function BookingScreen() {
             <Text style={styles.summaryLabel}>{tr('subtotal')}</Text>
             <Text style={styles.summaryValue}>${total}</Text>
           </View>
+          {appliedPromo && (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: '#ff2d92', fontWeight: '700' }]}>
+                🎟️ {appliedPromo.code} ({appliedPromo.type === 'percent' ? `${appliedPromo.value}%` : `$${appliedPromo.value}`})
+              </Text>
+              <Text style={[styles.summaryValue, { color: '#ff2d92', fontWeight: '700' }]}>
+                −${appliedPromo.discount.toFixed(2)}
+              </Text>
+            </View>
+          )}
           {taxRate > 0 ? (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>{tr('tax')} ({taxRate}%)</Text>
-              <Text style={styles.summaryValue}>${taxAmount}</Text>
+              <Text style={styles.summaryValue}>${appliedPromo ? recomputedTax : taxAmount}</Text>
             </View>
           ) : (
             <View style={styles.summaryRow}>
@@ -401,6 +498,15 @@ const styles = StyleSheet.create({
   paymentLabel: { fontSize: 15, fontWeight: '700', color: '#666' },
   paymentLabelActive: { color: '#FF3B30' },
   summary: { backgroundColor: '#F5F5F5', borderRadius: 20, padding: 20, gap: 12 },
+  promoRow: { flexDirection: 'row', gap: 10 },
+  promoInput: { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontWeight: '600', color: '#0A0A0A', letterSpacing: 1 },
+  promoApplyBtn: { backgroundColor: '#ff2d92', paddingHorizontal: 20, justifyContent: 'center', borderRadius: 12, minWidth: 80, alignItems: 'center' },
+  promoApplyText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
+  promoApplied: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e6f9ed', borderRadius: 12, padding: 14 },
+  promoCode: { fontWeight: '800', fontSize: 14, color: '#0A0A0A', letterSpacing: 1 },
+  promoSub: { fontSize: 12, color: '#34c759', marginTop: 2, fontWeight: '600' },
+  promoRemoveBtn: { paddingHorizontal: 10, paddingVertical: 6 },
+  promoRemoveText: { color: '#FF3B30', fontWeight: '700', fontSize: 13 },
   summaryTitle: { fontSize: 16, fontWeight: '800', color: '#0A0A0A', marginBottom: 4 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between' },
   summaryLabel: { fontSize: 14, color: '#666' },

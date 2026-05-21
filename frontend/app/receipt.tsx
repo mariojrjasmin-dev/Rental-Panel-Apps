@@ -208,6 +208,12 @@ export default function ReceiptScreen() {
             value={`$${(booking.days ? (booking.subtotal || 0) / booking.days : 0).toFixed(2)} × ${booking.days}`}
           />
           <Row label="Subtotal" value={`$${(booking.subtotal || 0).toFixed(2)}`} bold />
+          {(booking as any).promo_code && (booking as any).discount_amount > 0 && (
+            <Row
+              label={`Promo (${(booking as any).promo_code})`}
+              value={`−$${((booking as any).discount_amount || 0).toFixed(2)}`}
+            />
+          )}
           <Row
             label={`Tax (${booking.tax_rate || 0}%)`}
             value={`$${(booking.tax_amount || 0).toFixed(2)}`}

@@ -107,6 +107,7 @@ async function showDashboard() {
           <button class="btn btn-sm btn-gray" onclick="showLocations()">Locations</button>
           <button class="btn btn-sm" style="background:#5856d6;color:#fff" onclick="showAnalytics()">📊 Analytics</button>
           <button class="btn btn-sm" style="background:#ff9500;color:#fff" onclick="showNotifications()">📣 Notify</button>
+          <button class="btn btn-sm" style="background:#ff2d92;color:#fff" onclick="showPromos()">🎟️ Promos</button>
           <button class="btn btn-sm btn-blue" onclick="showMigration()">Import/Export</button>
           <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
         </div>
@@ -431,6 +432,169 @@ async function sendNotification() {
     alert('Failed to send: ' + (e.message || e));
   }
 }
+
+
+// ==================== PROMO CODES ====================
+async function showPromos() {
+  let promos = [];
+  try { promos = await api('/admin/promo-codes'); } catch (e) {}
+
+  const rows = (promos||[]).map(p => {
+    const exp = p.expires_at ? new Date(p.expires_at).toLocaleDateString() : 'No expiry';
+    const usage = (p.max_uses && p.max_uses > 0) ? `${p.used_count||0} / ${p.max_uses}` : `${p.used_count||0} / ∞`;
+    const valueLabel = p.discount_type === 'percent' ? `${p.discount_value}% off` : `$${Number(p.discount_value).toFixed(2)} off`;
+    const statusBadge = p.active
+      ? '<span style="background:#34c759;color:#fff;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700">ACTIVE</span>'
+      : '<span style="background:#8e8e93;color:#fff;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700">INACTIVE</span>';
+    return `<tr>
+      <td><strong style="font-family:monospace;font-size:14px;color:#ff2d92">${p.code}</strong></td>
+      <td>${valueLabel}</td>
+      <td>${usage}</td>
+      <td style="font-size:12px;color:#666">${exp}</td>
+      <td style="font-size:12px">$${Number(p.min_amount||0).toFixed(2)}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <button class="btn btn-sm btn-blue" onclick='editPromo(${JSON.stringify(p)})'>Edit</button>
+        <button class="btn btn-sm" style="background:#ff3b30;color:#fff" onclick="deletePromo('${p.id}','${p.code}')">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  render(`
+    <div class="header">
+      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+        <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
+        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+    <div class="container" style="max-width:1100px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <div>
+          <h2 style="font-size:24px;font-weight:900;margin-bottom:4px">🎟️ Promo Codes</h2>
+          <p style="color:#666;font-size:13px;margin:0">Create discount codes for your customers.</p>
+        </div>
+        <button class="btn" style="background:#ff2d92;color:#fff" onclick="editPromo(null)">+ New Promo Code</button>
+      </div>
+
+      ${promos.length === 0 ? `
+        <div style="background:#fff;border-radius:16px;padding:48px;text-align:center;border:2px dashed #e5e5e5">
+          <div style="font-size:48px;margin-bottom:12px">🎟️</div>
+          <h3 style="font-size:18px;font-weight:800;margin-bottom:6px">No promo codes yet</h3>
+          <p style="color:#666;font-size:13px;margin-bottom:20px">Create your first promo code to give customers a discount at checkout.</p>
+          <button class="btn" style="background:#ff2d92;color:#fff" onclick="editPromo(null)">+ Create First Promo Code</button>
+        </div>
+      ` : `
+        <div style="background:#fff;border-radius:16px;padding:6px;border:1px solid #e5e5e5;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="text-align:left;background:#fafafa">
+                <th style="padding:12px 10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666">Code</th>
+                <th style="padding:12px 10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666">Discount</th>
+                <th style="padding:12px 10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666">Usage</th>
+                <th style="padding:12px 10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666">Expires</th>
+                <th style="padding:12px 10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666">Min Order</th>
+                <th style="padding:12px 10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666">Status</th>
+                <th style="padding:12px 10px"></th>
+              </tr>
+            </thead>
+            <tbody style="font-size:14px">${rows}</tbody>
+          </table>
+        </div>
+      `}
+    </div>
+  `);
+}
+
+function editPromo(p) {
+  const isEdit = !!p;
+  const data = p || { code:'', discount_type:'percent', discount_value:10, max_uses:0, expires_at:'', min_amount:0, active:true };
+  const expDate = data.expires_at ? new Date(data.expires_at).toISOString().slice(0,10) : '';
+
+  render(`
+    <div class="header">
+      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><button class="btn btn-sm btn-gray" onclick="showPromos()">← Back</button></div>
+    </div>
+    <div class="container" style="max-width:640px">
+      <h2 style="font-size:22px;font-weight:900;margin-bottom:18px">${isEdit ? '✏️ Edit Promo Code' : '🎟️ New Promo Code'}</h2>
+      <div style="background:#fff;border-radius:18px;padding:22px;border:1px solid #e5e5e5">
+        <div class="form-group">
+          <label>Code <span style="color:#999;font-size:11px;font-weight:normal">(uppercase, e.g. SUMMER20)</span></label>
+          <input class="input" id="p-code" value="${data.code||''}" style="text-transform:uppercase;font-family:monospace;font-weight:700" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label>Discount Type</label>
+            <select class="input" id="p-type">
+              <option value="percent" ${data.discount_type==='percent'?'selected':''}>Percentage (%)</option>
+              <option value="fixed" ${data.discount_type==='fixed'?'selected':''}>Fixed amount ($)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Value</label>
+            <input class="input" id="p-value" type="number" step="0.01" value="${data.discount_value||10}" />
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label>Max Uses <span style="color:#999;font-size:11px;font-weight:normal">(0 = unlimited)</span></label>
+            <input class="input" id="p-maxuses" type="number" value="${data.max_uses||0}" />
+          </div>
+          <div class="form-group">
+            <label>Min Order Amount ($)</label>
+            <input class="input" id="p-minamt" type="number" step="0.01" value="${data.min_amount||0}" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Expiration Date <span style="color:#999;font-size:11px;font-weight:normal">(optional)</span></label>
+          <input class="input" id="p-expires" type="date" value="${expDate}" />
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="p-active" ${data.active!==false?'checked':''} style="width:18px;height:18px"/>
+            <span>Active (customers can use this code)</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn" style="background:#ff2d92;color:#fff;flex:1" onclick="savePromo('${isEdit?data.id:''}')">${isEdit?'Save Changes':'Create Code'}</button>
+          <button class="btn btn-gray" onclick="showPromos()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function savePromo(id) {
+  const expDate = document.getElementById('p-expires').value;
+  const payload = {
+    code: document.getElementById('p-code').value.trim().toUpperCase(),
+    discount_type: document.getElementById('p-type').value,
+    discount_value: parseFloat(document.getElementById('p-value').value) || 0,
+    max_uses: parseInt(document.getElementById('p-maxuses').value) || 0,
+    min_amount: parseFloat(document.getElementById('p-minamt').value) || 0,
+    expires_at: expDate ? new Date(expDate + 'T23:59:59Z').toISOString() : null,
+    active: document.getElementById('p-active').checked,
+  };
+  if (!payload.code || payload.code.length < 2) return alert('Please enter a valid code (at least 2 characters).');
+  if (payload.discount_value <= 0) return alert('Discount value must be greater than 0.');
+  if (payload.discount_type === 'percent' && payload.discount_value > 100) return alert('Percentage discount cannot exceed 100.');
+  try {
+    if (id) await api('/admin/promo-codes/'+id, { method:'PUT', body: JSON.stringify(payload) });
+    else await api('/admin/promo-codes', { method:'POST', body: JSON.stringify(payload) });
+    showPromos();
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function deletePromo(id, code) {
+  if (!confirm('Delete promo code "'+code+'"? This action cannot be undone.')) return;
+  try {
+    await api('/admin/promo-codes/'+id, { method: 'DELETE' });
+    showPromos();
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
 
 
 

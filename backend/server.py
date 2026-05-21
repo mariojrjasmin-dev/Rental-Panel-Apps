@@ -444,6 +444,83 @@ class BookingCreate(BaseModel):
     pickup_location: Dict
     dropoff_location: Dict
     payment_method: str = "cash"
+    promo_code: Optional[str] = None
+
+
+# ==================== PROMO CODES ====================
+class PromoCodeCreate(BaseModel):
+    code: str
+    discount_type: str  # "percent" | "fixed"
+    discount_value: float
+    max_uses: int = 0  # 0 = unlimited
+    expires_at: Optional[str] = None  # ISO date string or null
+    min_amount: float = 0.0
+    active: bool = True
+
+
+class PromoCodeUpdate(BaseModel):
+    code: Optional[str] = None
+    discount_type: Optional[str] = None
+    discount_value: Optional[float] = None
+    max_uses: Optional[int] = None
+    expires_at: Optional[str] = None
+    min_amount: Optional[float] = None
+    active: Optional[bool] = None
+
+
+class PromoValidateRequest(BaseModel):
+    code: str
+    subtotal: float
+
+
+def _validate_promo(promo: dict, subtotal: float):
+    """Pure function; returns (is_valid, reason, discount_amount)."""
+    if not promo.get("active", True):
+        return False, "This promo code is inactive", 0.0
+    max_uses = int(promo.get("max_uses") or 0)
+    used = int(promo.get("used_count") or 0)
+    if max_uses > 0 and used >= max_uses:
+        return False, "This promo code has reached its usage limit", 0.0
+    expires_at = promo.get("expires_at")
+    if expires_at:
+        try:
+            if isinstance(expires_at, str):
+                exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            else:
+                exp = expires_at
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > exp:
+                return False, "This promo code has expired", 0.0
+        except Exception:
+            pass
+    min_amt = float(promo.get("min_amount") or 0)
+    if subtotal < min_amt:
+        return False, f"Minimum subtotal of ${min_amt:.2f} required", 0.0
+    # Compute discount
+    dtype = (promo.get("discount_type") or "percent").lower()
+    value = float(promo.get("discount_value") or 0)
+    if dtype == "percent":
+        discount = round(subtotal * (value / 100), 2)
+    else:  # fixed
+        discount = round(value, 2)
+    # Cap discount at subtotal
+    discount = min(discount, subtotal)
+    return True, "ok", discount
+
+
+def _serialize_promo(p: dict) -> dict:
+    p["id"] = str(p.pop("_id"))
+    if isinstance(p.get("expires_at"), datetime):
+        p["expires_at"] = p["expires_at"].isoformat()
+    if isinstance(p.get("created_at"), datetime):
+        p["created_at"] = p["created_at"].isoformat()
+    return p
+
+
+# Promo code endpoints are registered later in the file (after api_router is defined).
+
+
 
 class CheckoutRequest(BaseModel):
     booking_id: str
@@ -841,30 +918,33 @@ async def create_booking(booking: BookingCreate, request: Request):
             status_code=400,
             detail=f"This pickup location requires a minimum rental of {min_days} day(s). Please extend your drop-off date.",
         )
-    
+
     subtotal = round(days * car["price_per_day"], 2)
-    tax_amount = round(subtotal * (tax_rate / 100), 2)
-    total = round(subtotal + tax_amount, 2)
-    
-    # Look up tax rate from pickup location.
-    # Use case-insensitive exact match (anchored regex) + trim whitespace
-    # so admin-entered name variations don't silently fall back to 0% tax.
-    tax_rate = 0.0
-    pickup_loc_name = (booking.pickup_location.get("name", "") or "").strip()
-    if pickup_loc_name:
-        import re
-        escaped = re.escape(pickup_loc_name)
-        loc = await db.locations.find_one(
-            {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
-            {"_id": 0, "tax_rate": 1, "name": 1},
-        )
-        if loc:
-            tax_rate = float(loc.get("tax_rate") or 0)
-        else:
-            logger.warning(f"No location matched name={pickup_loc_name!r} for tax lookup")
-    
-    tax_amount = round(subtotal * (tax_rate / 100), 2)
-    total = round(subtotal + tax_amount, 2)
+
+    # ---- Promo code application ----
+    promo_code_used: Optional[str] = None
+    discount_amount = 0.0
+    if booking.promo_code:
+        normalized = booking.promo_code.strip().upper()
+        promo = await db.promo_codes.find_one({"code": normalized})
+        if not promo:
+            raise HTTPException(status_code=400, detail="Invalid promo code")
+        is_valid, reason, calc = _validate_promo(promo, subtotal)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=reason)
+        discount_amount = float(calc)
+        promo_code_used = normalized
+        # Increment usage atomically
+        try:
+            await db.promo_codes.update_one(
+                {"_id": promo["_id"]}, {"$inc": {"used_count": 1}}
+            )
+        except Exception as _e:
+            logger.warning(f"promo code usage increment failed: {_e}")
+
+    discounted_subtotal = round(max(subtotal - discount_amount, 0.0), 2)
+    tax_amount = round(discounted_subtotal * (tax_rate / 100), 2)
+    total = round(discounted_subtotal + tax_amount, 2)
     
     booking_doc = {
         "user_id": str(user_id),
@@ -880,6 +960,8 @@ async def create_booking(booking: BookingCreate, request: Request):
         "days": days,
         "price_per_day": car["price_per_day"],
         "subtotal": subtotal,
+        "promo_code": promo_code_used,
+        "discount_amount": discount_amount,
         "tax_rate": tax_rate,
         "tax_amount": tax_amount,
         "total_price": total,
@@ -2342,6 +2424,105 @@ async def shutdown():
     client.close()
 
 # Include router
+
+# ==================== PROMO CODE ENDPOINTS ====================
+@api_router.get("/admin/promo-codes")
+async def admin_list_promo_codes(request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    rows = await db.promo_codes.find({}).sort("created_at", -1).to_list(500)
+    return [_serialize_promo(r) for r in rows]
+
+
+@api_router.post("/admin/promo-codes")
+async def admin_create_promo_code(body: PromoCodeCreate, request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    code = (body.code or "").strip().upper()
+    if not code or len(code) < 2:
+        raise HTTPException(status_code=400, detail="Code must be at least 2 characters")
+    if body.discount_type not in ("percent", "fixed"):
+        raise HTTPException(status_code=400, detail="discount_type must be 'percent' or 'fixed'")
+    if body.discount_value <= 0:
+        raise HTTPException(status_code=400, detail="discount_value must be > 0")
+    if body.discount_type == "percent" and body.discount_value > 100:
+        raise HTTPException(status_code=400, detail="Percentage discount cannot exceed 100")
+    if await db.promo_codes.find_one({"code": code}):
+        raise HTTPException(status_code=400, detail="Promo code already exists")
+    doc = {
+        "code": code,
+        "discount_type": body.discount_type,
+        "discount_value": float(body.discount_value),
+        "max_uses": int(body.max_uses or 0),
+        "used_count": 0,
+        "expires_at": body.expires_at,
+        "min_amount": float(body.min_amount or 0),
+        "active": bool(body.active),
+        "created_at": datetime.now(timezone.utc),
+    }
+    res = await db.promo_codes.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return _serialize_promo(doc)
+
+
+@api_router.put("/admin/promo-codes/{promo_id}")
+async def admin_update_promo_code(promo_id: str, body: PromoCodeUpdate, request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if not ObjectId.is_valid(promo_id):
+        raise HTTPException(status_code=400, detail="Invalid promo id")
+    update_data: Dict = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    if "code" in update_data:
+        update_data["code"] = update_data["code"].strip().upper()
+    if "discount_type" in update_data and update_data["discount_type"] not in ("percent", "fixed"):
+        raise HTTPException(status_code=400, detail="discount_type must be 'percent' or 'fixed'")
+    if "discount_value" in update_data and update_data["discount_value"] <= 0:
+        raise HTTPException(status_code=400, detail="discount_value must be > 0")
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    res = await db.promo_codes.update_one({"_id": ObjectId(promo_id)}, {"$set": update_data})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Promo code not found")
+    p = await db.promo_codes.find_one({"_id": ObjectId(promo_id)})
+    return _serialize_promo(p)
+
+
+@api_router.delete("/admin/promo-codes/{promo_id}")
+async def admin_delete_promo_code(promo_id: str, request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if not ObjectId.is_valid(promo_id):
+        raise HTTPException(status_code=400, detail="Invalid promo id")
+    res = await db.promo_codes.delete_one({"_id": ObjectId(promo_id)})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Promo code not found")
+    return {"ok": True}
+
+
+@api_router.post("/promo-codes/validate")
+async def validate_promo_code(body: PromoValidateRequest, request: Request):
+    """Validate a promo code against a given subtotal. Auth required."""
+    await get_authenticated_user(request)
+    code = (body.code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
+    promo = await db.promo_codes.find_one({"code": code})
+    if not promo:
+        return {"valid": False, "message": "Invalid promo code", "discount": 0}
+    is_valid, reason, discount = _validate_promo(promo, float(body.subtotal or 0))
+    return {
+        "valid": is_valid,
+        "code": promo.get("code"),
+        "discount_type": promo.get("discount_type"),
+        "discount_value": promo.get("discount_value"),
+        "discount": discount,
+        "message": reason if not is_valid else "Promo applied",
+    }
+
 app.include_router(api_router)
 
 # Serve admin panel HTML
