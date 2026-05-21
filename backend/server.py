@@ -445,6 +445,8 @@ class BookingCreate(BaseModel):
     dropoff_location: Dict
     payment_method: str = "cash"
     promo_code: Optional[str] = None
+    refuel_opted_in: bool = False
+    terms_accepted: bool = False
 
 
 # ==================== PROMO CODES ====================
@@ -537,6 +539,7 @@ class LocationCreate(BaseModel):
     tax_rate: float = 0.0  # percentage e.g. 18.0 for 18%
     min_booking_days: int = 1
     insurance_included: bool = False
+    refuel_amount: float = 0.0  # flat fee for pre-paid refuel option (0 = disabled)
 
 class LocationUpdate(BaseModel):
     name: Optional[str] = None
@@ -549,6 +552,7 @@ class LocationUpdate(BaseModel):
     tax_rate: Optional[float] = None
     min_booking_days: Optional[int] = None
     insurance_included: Optional[bool] = None
+    refuel_amount: Optional[float] = None
 
 class ReviewCreate(BaseModel):
     car_id: str
@@ -923,6 +927,21 @@ async def create_booking(booking: BookingCreate, request: Request):
 
     subtotal = round(days * car["price_per_day"], 2)
 
+    # ---- Mandatory: rental terms acceptance ----
+    if not booking.terms_accepted:
+        raise HTTPException(
+            status_code=400,
+            detail="You must accept the Rental Terms & Conditions to complete this booking.",
+        )
+
+    # ---- Pre-paid refuel option (flat fee per booking, applied before tax) ----
+    pickup_loc_for_refuel = await db.locations.find_one(
+        {"name": {"$regex": f"^{__import__('re').escape(pickup_loc_name)}$", "$options": "i"}},
+        {"_id": 0, "refuel_amount": 1},
+    ) if pickup_loc_name else None
+    available_refuel = float((pickup_loc_for_refuel or {}).get("refuel_amount") or 0.0)
+    refuel_charge = round(available_refuel, 2) if (booking.refuel_opted_in and available_refuel > 0) else 0.0
+
     # ---- Promo code application ----
     promo_code_used: Optional[str] = None
     discount_amount = 0.0
@@ -945,8 +964,9 @@ async def create_booking(booking: BookingCreate, request: Request):
             logger.warning(f"promo code usage increment failed: {_e}")
 
     discounted_subtotal = round(max(subtotal - discount_amount, 0.0), 2)
-    tax_amount = round(discounted_subtotal * (tax_rate / 100), 2)
-    total = round(discounted_subtotal + tax_amount, 2)
+    taxable_amount = round(discounted_subtotal + refuel_charge, 2)
+    tax_amount = round(taxable_amount * (tax_rate / 100), 2)
+    total = round(taxable_amount + tax_amount, 2)
     
     booking_doc = {
         "user_id": str(user_id),
@@ -964,6 +984,9 @@ async def create_booking(booking: BookingCreate, request: Request):
         "subtotal": subtotal,
         "promo_code": promo_code_used,
         "discount_amount": discount_amount,
+        "refuel_amount": refuel_charge,
+        "refuel_opted_in": bool(booking.refuel_opted_in and refuel_charge > 0),
+        "terms_accepted_at": datetime.now(timezone.utc),
         "tax_rate": tax_rate,
         "tax_amount": tax_amount,
         "total_price": total,
@@ -1616,6 +1639,61 @@ async def admin_test_email(req: TestEmailRequest, request: Request):
     return result
 
 
+# ==================== RENTAL TERMS SETTINGS ====================
+DEFAULT_RENTAL_TERMS = """DEFINITIONS. "Agreement" means all terms and conditions found on both sides of this form, any addenda or any additional materials we provide at the time of rental. "You" or "your" means the person identified as the renter on Page 1, any person signing this agreement, any authorized Driver and any person or organization to whom charges are billed by us on the renter's direction. All persons referred to as "you" or "your" are jointly and severally bound by this agreement. "We," "our" or "us" means the Rental Agent identified on Page 1. "Authorized Driver" means you, any additional driver approved by us and listed by us on this agreement, and any other driver authorized by the law of the state where the vehicle is rented provided that person has a valid driver's license and, unless the law of this state requires otherwise, is at least twenty-one (25) years of age. "Vehicle" means the automobile identified in this agreement and any substitute and all its tires, tools, accessories, keys, equipment, keys, and vehicle documents. "Physical damage" means all damage to, or loss of, the Vehicle caused by collision or upset; it does not include damage to, or loss of the Vehicle due to theft, vandalism, act of nature, riot or civil disturbance, hail, flood, or fire. "Loss of use" means the amount calculated by multiplying the number of days/weeks/months from the date of damages to the Vehicle until it is repaired times the corresponding periodic rental rate, unless otherwise provided by law.
+
+RENTAL. This agreement is a contract for the rental of the Vehicle. WE MAKE NO WARRANTIES, EXPRESS, IMPLIED OR APPARENT REGARDING THE VEHICLE, INCLUDING ANY WARRANTY OF MERCHANTABILITY OR THAT THE VEHICLE IS FIT FOR A PARTICULAR PURPOSE. We may repossess the Vehicle at your expense without notice to you, if the Vehicle is abandoned or used in violation of law or this agreement. You waive all recourse against us for any criminal reports or prosecutions that we take against you that arise out of your breach of this agreement.
+
+CONDITION AND RETURN OF VEHICLE. You must return the Vehicle to our rental office or other location we specify on the date and time specified in this agreement and in the same condition that you received it, except for ordinary wear. Service to the Vehicle or replacement of parts or accessories during the rental must have our prior approval. You will check and maintain all fluid levels including the brake fluid level in the master cylinder.
+
+RESPONSIBILITY FOR DAMAGE OR LOSS; REPORTING TO POLICE. You are responsible for all damage to or loss of the Vehicle, loss of use of the Vehicle while it is being repaired, diminution of the Vehicle's value caused by damage to it or repair of it, missing equipment, and all administrative costs we incur due to damage to, or loss of, the Vehicle regardless of whether or not you are at fault, unless this responsibility is otherwise limited by law. You must report all accidents or incidents of theft and vandalism to the police as soon as you discover them. You must report all accidents involving the vehicle to us immediately.
+
+LIABILITY INSURANCE. You are responsible for all damages or losses you cause to others. You agree to provide auto liability insurance covering you, us, and the Vehicle. If you have auto liability insurance, we provide no liability insurance. Where state law requires us to provide auto liability insurance, or if you have no liability insurance, we provide auto liability insurance, excess to any insurance you may have, under a policy of insurance (the "Policy"). The Policy provides bodily injury and property damage liability coverage with limits no higher than minimum levels prescribed by the vehicular financial responsibility laws of the state where the damage or loss occurs. The Policy provides uninsured/underinsured motorist coverage only in states where such coverage is mandated by law. Coverage applies only in the Unites States. Coverage is void if you violate the terms of this Agreement or if you fail to cooperate in any loss investigation conducted by us or our insurer. You and we reject PIP, no fault, and uninsured or underinsured motorist coverage. Giving the vehicle to an unauthorized driver terminates our liability insurance coverage, if any. You will indemnify, defend, and hold us harmless from all liability, costs and attorney fees arising out of use of the Vehicle that are in excess of, or excluded from, the protection provided you, if any, under the policy.
+
+CHARGES. You will pay us on demand for all charges due under this Agreement that are allowed by law, including, but not limited to: (a) time and usage for the period during which you keep the Vehicle; (b) charges for optional services, if you elect to purchase any; (c) applicable sales use and other taxes; (d) loss of, or damage to the Vehicle, which is included in the cost of repair of the retail value of the Vehicle based on valuation methods accepted by the auto insurance industry on the date of the loss if the Vehicle is not repairable, plus loss of use, diminution of the Vehicle's value caused by damage to it or repair to it, and our administrative fees incurred for processing the claim; (e) all fines, penalties, forfeitures, court costs, towing charges and other expenses involving the Vehicle assessed against us or the Vehicle during your rental, unless these expenses are our fault; (f) all expenses we incur in locating and recovering the Vehicle if you fail to return it or we elect to repossess the Vehicle under the terms of this Agreement; (g) all costs, including pre and post judgment attorney fees, we incur collecting payment from you or otherwise enforcing our rights under this agreement; (h) a 2% late payment fee or the highest amount allowed by law, if lower, on all amounts past due; (i) One and one half percent per month interest, or the maximum amount allowed by the laws of the state where the Vehicle is rented, for monies due but not paid upon return of the Vehicle; (j) Fifty dollars ($50.00) plus $5.00 per mile between the renting location and place where the vehicle is returned or abandoned, plus any additional recovery expenses we incur, and (k) Twenty Five dollars ($25.00) or the maximum amount permitted by law, whichever is greater if you pay us with a check backed by insufficient funds.
+
+DEPOSIT. We may use your deposit to pay any amounts owed to us under this agreement.
+
+BREACH OF AGREEMENT. If you breach this agreement, you will be liable for all damage to, or loss of, the Vehicle caused by your breach, unless otherwise provided by law.
+
+MODIFICATIONS. No term of this agreement can be waived or modified except by a writing that we have signed. If you wish to extend the rental period, you must return the Vehicle to our rental office for inspection and written amendment by us of the due in date or time.
+
+MISCELLANEOUS. No waiver by us of any breach of this Agreement will constitute a waiver of any additional breach or waiver of the performance of your obligations under this agreement. Unless prohibited by law, you release us from any liability for consequential special or punitive damages in connection with this rental or the reservation of a vehicle. If any provision of this Agreement is deemed void or unenforceable, the remaining provisions are valid and enforceable. This agreement constitutes the entire Agreement between you and us. All prior representations and agreements between you and us are merged into this agreement.
+
+RENTAL AGREEMENT VIOLATIONS. You agree to properly operate this vehicle. If any of the following acts are committed, any coverage provided to you will be voided: (a) Operation of the Vehicle by an unauthorized driver; (b) Violation of any provision of this Agreement while operating the Vehicle; (c) Driving while intoxicated or under the influence of drugs, alcohol or other substances which would impair driving ability; (d) Reckless driving of the Vehicle to include, among other things, off regularly maintained roadways, to carry hazardous or explosive substances, to carry hazardous waste of any kind, to transport weight in excess of the vehicle's maximum payload capacity, where insufficient clearance or height or width exists, improper loading; (e) Transporting more passengers than number of seat belts or transporting passengers outside of the passenger compartment; (f) Using the Vehicle to participate or act or assist in any activity that violates any law, rule, or regulation; (g) Using vehicle to carry persons or property for hire; (h) Using Vehicle to engage in an organized or any other speed contest; (i) Using Vehicle to tow or push any other vehicle, trailer or other object; (j) Operation of Vehicle by person who has used false or misleading information to obtain the Vehicle; (k) Operating the Vehicle outside the continental United States and Canada; (l) Leave the Vehicle and fail to remove the keys or close and lock all doors, windows, and the trunk and the vehicle is stolen."""
+
+
+class RentalTermsUpdate(BaseModel):
+    terms: str
+
+
+@api_router.get("/settings/rental-terms")
+async def get_rental_terms():
+    """Public: return the current rental terms text customers must accept."""
+    doc = await db.settings.find_one({"key": "rental_terms"})
+    text = (doc or {}).get("value") or DEFAULT_RENTAL_TERMS
+    return {"terms": text}
+
+
+@api_router.put("/admin/settings/rental-terms")
+async def update_rental_terms(body: RentalTermsUpdate, request: Request):
+    """Admin: update the rental terms text. Stored in settings collection (singleton)."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    text = (body.terms or "").strip()
+    if not text or len(text) < 10:
+        raise HTTPException(status_code=400, detail="Terms text is too short")
+    if len(text) > 50000:
+        raise HTTPException(status_code=400, detail="Terms text is too long (max 50,000 chars)")
+    await db.settings.update_one(
+        {"key": "rental_terms"},
+        {"$set": {"key": "rental_terms", "value": text, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"ok": True, "length": len(text)}
+
+
 
 
 @api_router.get("/admin/analytics")
@@ -1824,9 +1902,9 @@ async def get_tax_by_location_name(name: str):
     import re as _re
     q = (name or "").strip()
     if not q:
-        return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False}
+        return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0}
 
-    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "min_booking_days": 1, "insurance_included": 1}
+    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "min_booking_days": 1, "insurance_included": 1, "refuel_amount": 1}
     safe_q = _re.escape(q)
 
     # 1) Exact (case-insensitive)
@@ -1865,8 +1943,9 @@ async def get_tax_by_location_name(name: str):
             "city": loc.get("city", ""),
             "min_booking_days": int(loc.get("min_booking_days") or 1),
             "insurance_included": bool(loc.get("insurance_included") or False),
+            "refuel_amount": float(loc.get("refuel_amount") or 0.0),
         }
-    return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False}
+    return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0}
 
 @api_router.get("/locations/{location_id}")
 async def get_location(location_id: str):
