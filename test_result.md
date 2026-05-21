@@ -102,9 +102,24 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Allow panel admin user to send push notifications from the admin panel. They should be able to choose audience (all/customers/admins/individual user), enter title and body, and broadcast to all matching users with registered push tokens."
+user_problem_statement: "Send transactional emails via SMTP2GO for booking events (created, payment confirmed, status updates, cancellation). Admin can also send a test email from the admin panel to verify SMTP delivery."
 
 backend:
+  - task: "Email notifications via SMTP2GO + admin test endpoint"
+    implemented: true
+    working: false
+    file: "backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added SMTP credentials to backend/.env (SMTP_HOST=mail.smtp2go.com, SMTP_PORT=587, SMTP_USER=info@damsrentacar.com, SMTP_FROM_NAME='DAMS Car Rental'). New send_email helper uses aiosmtplib with STARTTLS. New send_booking_email helper supports 5 events: created, payment_confirmed, status_active, status_completed, cancelled. Beautiful HTML templates with DAMS branding + booking summary table. Wired emails to: (1) POST /api/bookings → 'created'; (2) PUT /api/admin/bookings/{id}/status → 'payment_confirmed' when payment_status='paid', or matching status events (active/completed/cancelled); (3) Stripe webhook → 'payment_confirmed' on card payment success. All emails fire-and-forget (no API blocking). New endpoint POST /api/admin/email/test to verify SMTP credentials are working. Smoke test confirmed working: test email sent successfully to info@damsrentacar.com (log: 'Email sent to info@damsrentacar.com'). Need to verify: test endpoint returns {ok:true} for valid email, 400 for invalid recipient, 403 for non-admin; booking flow still works when SMTP fails (graceful degradation)."
+        - working: false
+          agent: "testing"
+          comment: "🚨 CRITICAL REGRESSION introduced by email hookup: PUT /api/admin/bookings/{id}/status now returns 500 (KeyError: '_id') ALWAYS when an email event is triggered (status confirmed/active/completed/cancelled OR payment_status=paid). 14/15 assertions passed in /app/backend_test_email.py — the only failure is the admin status update returning 500 instead of 200. ROOT CAUSE: In `admin_update_booking_status` (server.py line ~1114), the code calls `serialize_booking(booking)` INSIDE the email try-block to pass a serialized payload to send_booking_email. But `serialize_booking()` MUTATES its argument (does `b['id']=str(b['_id']); del b['_id']`), so the booking dict no longer has `_id`. Then the function's final `return serialize_booking(booking)` at line 1118 runs `b['_id']` → KeyError → 500. Backend traceback confirms: `File '/app/backend/server.py', line 1118, in admin_update_booking_status: return serialize_booking(booking)` -> `File '/app/backend/server.py', line 801, in serialize_booking: b['id'] = str(b['_id'])` -> `KeyError: '_id'`. FIX: serialize the booking ONCE before the email block (e.g., `booking_payload = serialize_booking(booking)`), then use `booking_payload` for both the email call and the return. Same antipattern in stripe_webhook line 1394 — it doesn't affect HTTP responses there (webhook returns {status:'ok'}) but should be fixed for consistency. EVERYTHING ELSE PASSED: (1) POST /api/admin/email/test with valid recipient `info@damsrentacar.com` returns 200 {ok:true} — backend log shows 'Email sent to info@damsrentacar.com (subject: DAMS Car Rental — SMTP test)'. (2) Empty string → 400 'Invalid recipient email'. (3) 'not-an-email' → 400 'Invalid recipient email'. (4) Non-admin → 403. (5) No auth → 401. (6) Booking creation (POST /api/bookings, cash) → 200 with status=pending_payment, payment_status=pending, took 5.44s (fire-and-forget email/push didn't break the flow); booking persisted and retrievable via GET. The 'created' email also went out (log: 'Email sent to customer_email_test_*@example.com (subject: Booking received · #54268713)'). (7) The 'Payment confirmed' email DID get sent during status update (log: 'Email sent to customer_email_test_*@example.com (subject: Payment confirmed · #54268713)') — the email itself works; the bug is purely the response serialization crash AFTER the email was sent. Net effect for the customer: emails ARE arriving and the booking IS being updated in Mongo (status=confirmed, payment_status=paid persist), but the admin panel sees a 500 error and can't read the updated booking back. This is a regression of a previously-working endpoint and blocks the admin UI."
+
   - task: "Admin broadcast push notifications endpoint"
     implemented: true
     working: true
@@ -294,12 +309,15 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Email notifications via SMTP2GO + admin test endpoint"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+    - agent: "testing"
+      message: "🚨 CRITICAL REGRESSION found in PUT /api/admin/bookings/{id}/status. The new SMTP email hookup introduced a serialization bug: the email try-block calls `serialize_booking(booking)` (which MUTATES the dict by removing `_id` and adding `id`), and then the function's final `return serialize_booking(booking)` at line 1118 crashes with KeyError: '_id'. Result: the endpoint always returns 500 whenever an email event fires (status confirmed/active/completed/cancelled OR payment_status=paid). The DB IS being updated and the email IS being sent successfully — but the admin UI sees HTTP 500 and can't read the updated booking back. This was a previously-working endpoint, so this is a regression. FIX (3 lines): in `admin_update_booking_status` (server.py ~line 1099), do `booking_payload = serialize_booking(booking)` BEFORE the email block, pass `booking_payload` to send_booking_email, and `return booking_payload`. Same antipattern exists at line 1394 in `stripe_webhook` — doesn't break the webhook response shape (returns {status:'ok'}) but inflates logs with KeyErrors and should be fixed for consistency. ALL OTHER TESTS PASSED: POST /api/admin/email/test works for valid recipient (200 {ok:true}, real email sent — backend log confirms 'Email sent to info@damsrentacar.com'); empty/invalid → 400 'Invalid recipient email'; non-admin → 403; no auth → 401. Booking creation (cash) returns 200 with status=pending_payment/payment_status=pending in 5.4s, booking is persisted, AND the 'Booking received' email is sent (log confirmed). SMTP integration itself is fully functional — only the admin status-update response serialization needs fixing. 14/15 assertions in /app/backend_test_email.py passed."
     - agent: "main"
       message: "Fixed the production image preview issue. Root cause: images were stored as files under /app/backend/uploads/ which is ephemeral storage on production (wiped on redeploy). Solution: embed images as base64 data URLs directly in MongoDB. Added /api/admin/migrate-images endpoint and a 'Fix Vehicle Images' button on the admin panel for one-click migration. User must: 1) Run Convert Images on Preview, 2) Export, 3) Redeploy production, 4) Import on Production, 5) Run Convert Images on Production to be safe."
     - agent: "main"

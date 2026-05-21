@@ -354,6 +354,16 @@ async function showNotifications() {
       <div style="margin-top:14px;padding:14px;background:#fff8e6;border:1px solid #ffe5a1;border-radius:12px;font-size:12px;color:#8a6500">
         ℹ️ Notifications only reach users with the mobile app installed who have granted notification permission. Tokens are collected automatically after login on the mobile app.
       </div>
+
+      <h3 style="font-size:18px;font-weight:800;margin:30px 0 10px">✉️ Email Test</h3>
+      <p style="color:#666;font-size:13px;margin-bottom:14px">Verify your SMTP credentials are working by sending a test email.</p>
+      <div style="background:#fff;border-radius:18px;padding:20px;border:1px solid #e5e5e5">
+        <div class="form-group">
+          <label>Send test email to</label>
+          <input class="input" id="e-test-to" type="email" placeholder="your@email.com" value="info@damsrentacar.com" />
+        </div>
+        <button class="btn" style="background:#34c759;color:#fff" onclick="sendTestEmail()">📤 Send Test Email</button>
+      </div>
     </div>
   `);
 
@@ -372,6 +382,16 @@ async function showNotifications() {
   };
   document.getElementById('n-title').addEventListener('input', updatePreview);
   document.getElementById('n-body').addEventListener('input', updatePreview);
+}
+
+async function sendTestEmail() {
+  const to = document.getElementById('e-test-to').value.trim();
+  if (!to || !to.includes('@')) return alert('Please enter a valid email address.');
+  try {
+    const res = await api('/admin/email/test', { method: 'POST', body: JSON.stringify({ to }) });
+    if (res.ok) alert('✅ Test email sent to ' + to + '\n\nCheck your inbox (and spam folder).');
+    else alert('⚠️ Email failed: ' + (res.error || 'Unknown error'));
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 async function sendNotification() {

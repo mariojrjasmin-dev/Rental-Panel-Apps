@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 # ==================== EXPO PUSH NOTIFICATIONS ====================
 import httpx
+import aiosmtplib
+from email.message import EmailMessage
 
 EXPO_PUSH_API = "https://exp.host/--/api/v2/push/send"
 
@@ -136,6 +138,136 @@ async def send_push_to_admins(title: str, body: str, data: Optional[Dict] = None
     except Exception as e:
         logger.warning(f"send_push_to_admins error: {e}")
         return {"sent": 0, "error": str(e)}
+
+
+
+# ==================== EMAIL NOTIFICATIONS (SMTP) ====================
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL = os.environ.get("SMTP_FROM_EMAIL", SMTP_USER)
+SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "DAMS Car Rental")
+
+
+async def send_email(to: str, subject: str, html: str, text: Optional[str] = None) -> Dict:
+    """Send an email via SMTP (SMTP2GO). Fire-and-forget; never raises to caller."""
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD and to):
+        return {"ok": False, "error": "SMTP not configured or no recipient"}
+    try:
+        msg = EmailMessage()
+        msg["From"] = f'{SMTP_FROM_NAME} <{SMTP_FROM_EMAIL}>'
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg.set_content(text or "Please open this email in an HTML-capable client.")
+        msg.add_alternative(html, subtype="html")
+        await aiosmtplib.send(
+            msg, hostname=SMTP_HOST, port=SMTP_PORT,
+            username=SMTP_USER, password=SMTP_PASSWORD,
+            start_tls=True, timeout=15,
+        )
+        logger.info(f"Email sent to {to} (subject: {subject!r})")
+        return {"ok": True}
+    except Exception as e:
+        logger.warning(f"Email send to {to} failed: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def _email_template(title: str, intro: str, body_blocks_html: str, cta_label: Optional[str] = None, cta_url: Optional[str] = None) -> str:
+    cta = ""
+    if cta_label and cta_url:
+        cta = f'<a href="{cta_url}" style="display:inline-block;background:#FF3B30;color:#fff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:700;margin-top:24px">{cta_label}</a>'
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+  <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:28px;font-weight:900;color:#0a0a0a;letter-spacing:1px">DAMS</div>
+      <div style="font-size:11px;font-weight:700;color:#FF3B30;letter-spacing:4px">CAR RENTAL</div>
+    </div>
+    <h1 style="color:#0a0a0a;font-size:22px;font-weight:800;margin:0 0 12px">{title}</h1>
+    <p style="color:#555;font-size:15px;line-height:1.5;margin:0 0 20px">{intro}</p>
+    {body_blocks_html}
+    {cta}
+    <hr style="border:0;border-top:1px solid #eee;margin:32px 0">
+    <p style="color:#999;font-size:12px;line-height:1.5;margin:0;text-align:center">
+      You are receiving this email because you made a booking with DAMS Car Rental.<br>
+      Need help? Reply to this email or contact us at {SMTP_FROM_EMAIL}.
+    </p>
+  </div>
+</body></html>"""
+
+
+def _booking_summary_block(booking: dict) -> str:
+    car = booking.get("car_name") or "Vehicle"
+    pickup_date = (str(booking.get("pickup_date") or ""))[:10]
+    drop_date = (str(booking.get("dropoff_date") or ""))[:10]
+    pickup_loc = (booking.get("pickup_location") or {}).get("name", "—")
+    drop_loc = (booking.get("dropoff_location") or {}).get("name", "—")
+    total = booking.get("total_price") or 0
+    subtotal = booking.get("subtotal") or 0
+    tax = booking.get("tax_amount") or 0
+    rows = [
+        ("Vehicle", car),
+        ("Pickup", f"{pickup_date} · {pickup_loc}"),
+        ("Drop-off", f"{drop_date} · {drop_loc}"),
+        ("Subtotal", f"${float(subtotal):,.2f}"),
+        ("Tax", f"${float(tax):,.2f}"),
+        ("Total", f"<strong style='color:#FF3B30'>${float(total):,.2f}</strong>"),
+        ("Payment", (booking.get("payment_method") or "—").upper()),
+    ]
+    rows_html = "".join(
+        f"<tr><td style='padding:8px 0;color:#666;font-size:13px'>{k}</td>"
+        f"<td style='padding:8px 0;color:#0a0a0a;font-size:13px;text-align:right;font-weight:600'>{v}</td></tr>"
+        for k, v in rows
+    )
+    return (
+        "<div style='background:#fafafa;border-radius:12px;padding:16px;margin:16px 0'>"
+        "<div style='font-size:11px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px'>Booking summary</div>"
+        f"<table style='width:100%;border-collapse:collapse'>{rows_html}</table>"
+        "</div>"
+    )
+
+
+async def send_booking_email(event: str, booking: dict, user_email: Optional[str] = None) -> Dict:
+    to = user_email or booking.get("user_email")
+    if not to:
+        return {"ok": False, "error": "no_recipient"}
+    car = booking.get("car_name") or "your vehicle"
+    short_id = str(booking.get("id") or "")[-8:].upper()
+    summary = _booking_summary_block(booking)
+    cfgs = {
+        "created": {
+            "subject": f"Booking received · #{short_id}",
+            "title": "We received your booking!",
+            "intro": f"Thank you for choosing DAMS Car Rental. Your booking for <strong>{car}</strong> is now pending payment confirmation.",
+        },
+        "payment_confirmed": {
+            "subject": f"Payment confirmed · #{short_id}",
+            "title": "Your booking is confirmed!",
+            "intro": f"We have received payment for your booking of <strong>{car}</strong>. See you at pickup!",
+        },
+        "status_active": {
+            "subject": f"Rental started · #{short_id}",
+            "title": "Your rental is now active",
+            "intro": f"Your rental of <strong>{car}</strong> has begun. Drive safely!",
+        },
+        "status_completed": {
+            "subject": f"Thank you for renting with us · #{short_id}",
+            "title": "Rental completed — thank you!",
+            "intro": f"Your rental of <strong>{car}</strong> has been completed. We hope you enjoyed your trip!",
+        },
+        "cancelled": {
+            "subject": f"Booking cancelled · #{short_id}",
+            "title": "Booking cancelled",
+            "intro": f"Your booking of <strong>{car}</strong> has been cancelled. If this was unexpected, please contact us.",
+        },
+    }
+    cfg = cfgs.get(event)
+    if not cfg:
+        return {"ok": False, "error": f"unknown_event:{event}"}
+    html = _email_template(cfg["title"], cfg["intro"], summary)
+    return await send_email(to, cfg["subject"], html)
 
 
 # MongoDB connection
@@ -782,6 +914,12 @@ async def create_booking(booking: BookingCreate, request: Request):
     except Exception as _e:
         logger.warning(f"Booking push notify error: {_e}")
 
+    # Email notification (fire-and-forget)
+    try:
+        await send_booking_email("created", booking_doc, user.get("email"))
+    except Exception as _e:
+        logger.warning(f"Booking created email error: {_e}")
+
     return booking_doc
 
 @api_router.get("/bookings")
@@ -957,6 +1095,25 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
             )
     except Exception as _e:
         logger.warning(f"Status update push notify error: {_e}")
+
+    # Email customer about status change
+    try:
+        event_map = {
+            "confirmed": "payment_confirmed",
+            "active": "status_active",
+            "completed": "status_completed",
+            "cancelled": "cancelled",
+        }
+        # Special case: payment_status='paid' for cash → treat as payment_confirmed
+        event_key = None
+        if update_data.get("payment_status") == "paid":
+            event_key = "payment_confirmed"
+        elif update_data.get("status") in event_map:
+            event_key = event_map[update_data["status"]]
+        if event_key and booking.get("user_email"):
+            await send_booking_email(event_key, serialize_booking(booking), booking.get("user_email"))
+    except Exception as _e:
+        logger.warning(f"Status update email error: {_e}")
 
     return serialize_booking(booking)
 
@@ -1232,8 +1389,11 @@ async def stripe_webhook(request: Request):
                             f"Card payment confirmed for {car_label}. Your booking is confirmed!",
                             {"type": "booking_update", "booking_id": str(tx["booking_id"]), "status": "confirmed", "payment_status": "paid"},
                         )
+                        # Email customer
+                        if booking.get("user_email"):
+                            await send_booking_email("payment_confirmed", serialize_booking(booking), booking.get("user_email"))
                 except Exception as _e:
-                    logger.warning(f"Stripe webhook push notify error: {_e}")
+                    logger.warning(f"Stripe webhook push/email notify error: {_e}")
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -1348,6 +1508,27 @@ async def admin_audience_stats(request: Request):
         "customers_with_push": customers,
         "admins_with_push": admins,
     }
+
+
+class TestEmailRequest(BaseModel):
+    to: str
+
+
+@api_router.post("/admin/email/test")
+async def admin_test_email(req: TestEmailRequest, request: Request):
+    """Send a test email to verify SMTP credentials are working. Admin-only."""
+    admin = await get_authenticated_user(request)
+    if admin.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if not req.to or "@" not in req.to:
+        raise HTTPException(status_code=400, detail="Invalid recipient email")
+    html = _email_template(
+        "SMTP test email",
+        "If you received this, your SMTP credentials are working correctly. 🎉",
+        "<p style='color:#666;font-size:13px'>Sent from the DAMS Car Rental admin panel.</p>",
+    )
+    result = await send_email(req.to, "DAMS Car Rental — SMTP test", html)
+    return result
 
 
 
