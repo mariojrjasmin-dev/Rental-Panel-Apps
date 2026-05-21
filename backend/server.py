@@ -1223,6 +1223,91 @@ async def get_admin_stats(request: Request):
     }
 
 
+class AdminBroadcastRequest(BaseModel):
+    title: str
+    body: str
+    target: str = "all"  # "all" | "customers" | "admins" | "user:<user_id>"
+
+
+@api_router.post("/admin/notifications/send")
+async def admin_send_notification(req: AdminBroadcastRequest, request: Request):
+    """Send a push notification to a chosen audience from the admin panel.
+
+    target options:
+      - "all"        → every user with at least one push token
+      - "customers"  → all non-admin users with push tokens
+      - "admins"     → admin users with push tokens
+      - "user:<id>"  → a single specific user
+    """
+    admin = await get_authenticated_user(request)
+    if admin.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    title = (req.title or "").strip()
+    body = (req.body or "").strip()
+    if not title or not body:
+        raise HTTPException(status_code=400, detail="Title and body are required")
+    if len(title) > 100:
+        raise HTTPException(status_code=400, detail="Title must be ≤ 100 chars")
+    if len(body) > 500:
+        raise HTTPException(status_code=400, detail="Body must be ≤ 500 chars")
+
+    target = (req.target or "all").strip()
+    query: Dict = {}
+    if target == "all":
+        query = {"push_tokens": {"$exists": True, "$ne": []}}
+    elif target == "customers":
+        query = {"push_tokens": {"$exists": True, "$ne": []}, "role": {"$ne": "admin"}}
+    elif target == "admins":
+        query = {"push_tokens": {"$exists": True, "$ne": []}, "role": "admin"}
+    elif target.startswith("user:"):
+        uid = target.split(":", 1)[1].strip()
+        if not ObjectId.is_valid(uid):
+            raise HTTPException(status_code=400, detail="Invalid user id")
+        query = {"_id": ObjectId(uid)}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid target. Use 'all' | 'customers' | 'admins' | 'user:<id>'")
+
+    users = await db.users.find(query, {"push_tokens": 1}).to_list(2000)
+    all_tokens: List[str] = []
+    for u in users:
+        all_tokens.extend(u.get("push_tokens") or [])
+    # Dedupe
+    all_tokens = list({t for t in all_tokens if isinstance(t, str)})
+    if not all_tokens:
+        return {"sent": 0, "total_recipients": len(users), "reason": "no_tokens_in_audience"}
+
+    result = await send_expo_push(all_tokens, title, body, {"type": "admin_broadcast"})
+    return {
+        "sent": int(result.get("sent") or 0),
+        "total_recipients": len(users),
+        "tokens_count": len(all_tokens),
+    }
+
+
+@api_router.get("/admin/notifications/audience-stats")
+async def admin_audience_stats(request: Request):
+    """Return how many users have push tokens, segmented by role.
+    Useful so the admin sees how many devices a broadcast will reach.
+    """
+    admin = await get_authenticated_user(request)
+    if admin.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    base = {"push_tokens": {"$exists": True, "$ne": []}}
+    total = await db.users.count_documents(base)
+    customers = await db.users.count_documents({**base, "role": {"$ne": "admin"}})
+    admins = await db.users.count_documents({**base, "role": "admin"})
+    total_users = await db.users.count_documents({})
+    return {
+        "total_users": total_users,
+        "users_with_push": total,
+        "customers_with_push": customers,
+        "admins_with_push": admins,
+    }
+
+
+
+
 @api_router.get("/admin/analytics")
 async def get_admin_analytics(request: Request):
     """Aggregated fleet analytics for the admin dashboard.

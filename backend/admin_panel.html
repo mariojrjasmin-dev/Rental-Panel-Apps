@@ -106,6 +106,7 @@ async function showDashboard() {
           <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
           <button class="btn btn-sm btn-gray" onclick="showLocations()">Locations</button>
           <button class="btn btn-sm" style="background:#5856d6;color:#fff" onclick="showAnalytics()">📊 Analytics</button>
+          <button class="btn btn-sm" style="background:#ff9500;color:#fff" onclick="showNotifications()">📣 Notify</button>
           <button class="btn btn-sm btn-blue" onclick="showMigration()">Import/Export</button>
           <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
         </div>
@@ -287,6 +288,112 @@ async function showAnalytics() {
     });
   } catch(e) { alert('Failed: ' + e.message); }
 }
+
+// ==================== ADMIN NOTIFICATIONS (PUSH) ====================
+async function showNotifications() {
+  let stats = { users_with_push: 0, customers_with_push: 0, admins_with_push: 0, total_users: 0 };
+  try { stats = await api('/admin/notifications/audience-stats'); } catch (e) { /* ignore */ }
+
+  render(`
+    <div class="header">
+      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+        <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
+        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+    <div class="container" style="max-width:780px">
+      <h2 style="font-size:24px;font-weight:900;margin-bottom:6px">📣 Send Push Notification</h2>
+      <p style="color:#666;font-size:13px;margin-bottom:20px">Broadcast a message to your customers' mobile devices.</p>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px">
+        <div style="background:#fff;border-radius:14px;padding:14px;border:1px solid #e5e5e5;text-align:center">
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700">Reachable</div>
+          <div style="font-size:24px;font-weight:900;color:#34c759">${stats.users_with_push||0}</div>
+          <div style="font-size:11px;color:#999">of ${stats.total_users||0} users</div>
+        </div>
+        <div style="background:#fff;border-radius:14px;padding:14px;border:1px solid #e5e5e5;text-align:center">
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700">Customers</div>
+          <div style="font-size:24px;font-weight:900;color:#007aff">${stats.customers_with_push||0}</div>
+        </div>
+        <div style="background:#fff;border-radius:14px;padding:14px;border:1px solid #e5e5e5;text-align:center">
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700">Admins</div>
+          <div style="font-size:24px;font-weight:900;color:#5856d6">${stats.admins_with_push||0}</div>
+        </div>
+      </div>
+
+      <div style="background:#fff;border-radius:18px;padding:20px;border:1px solid #e5e5e5">
+        <div class="form-group">
+          <label>Audience</label>
+          <select class="input" id="n-target">
+            <option value="customers">📱 Customers only (${stats.customers_with_push||0} devices)</option>
+            <option value="all">🌍 Everyone (${stats.users_with_push||0} devices)</option>
+            <option value="admins">🛠️ Admins only (${stats.admins_with_push||0} devices)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Title <span style="color:#999;font-weight:normal;font-size:11px">(max 100)</span></label>
+          <input class="input" id="n-title" maxlength="100" placeholder="e.g. Weekend special — 20% off!" />
+        </div>
+        <div class="form-group">
+          <label>Message <span style="color:#999;font-weight:normal;font-size:11px">(max 500)</span></label>
+          <textarea class="input" id="n-body" rows="4" maxlength="500" placeholder="Book this weekend and save 20% on any car rental. Tap to browse."></textarea>
+        </div>
+        <div id="n-preview" style="background:#0a0a0a;color:#fff;border-radius:12px;padding:14px;margin:14px 0;font-size:13px;display:none">
+          <div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Preview</div>
+          <div id="n-prev-title" style="font-weight:700;font-size:14px"></div>
+          <div id="n-prev-body" style="color:#ccc;margin-top:2px"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button class="btn" style="background:#ff9500;color:#fff;flex:1" onclick="sendNotification()">📣 Send Notification</button>
+          <button class="btn btn-gray" onclick="showDashboard()">Cancel</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;padding:14px;background:#fff8e6;border:1px solid #ffe5a1;border-radius:12px;font-size:12px;color:#8a6500">
+        ℹ️ Notifications only reach users with the mobile app installed who have granted notification permission. Tokens are collected automatically after login on the mobile app.
+      </div>
+    </div>
+  `);
+
+  // Live preview
+  const updatePreview = () => {
+    const t = document.getElementById('n-title').value.trim();
+    const b = document.getElementById('n-body').value.trim();
+    const box = document.getElementById('n-preview');
+    if (t || b) {
+      box.style.display = 'block';
+      document.getElementById('n-prev-title').textContent = t || '(no title)';
+      document.getElementById('n-prev-body').textContent = b || '(no message)';
+    } else {
+      box.style.display = 'none';
+    }
+  };
+  document.getElementById('n-title').addEventListener('input', updatePreview);
+  document.getElementById('n-body').addEventListener('input', updatePreview);
+}
+
+async function sendNotification() {
+  const title = document.getElementById('n-title').value.trim();
+  const body = document.getElementById('n-body').value.trim();
+  const target = document.getElementById('n-target').value;
+  if (!title || !body) return alert('Please enter both a title and a message.');
+  if (!confirm(`Send this notification to "${target}"?\n\nTitle: ${title}\nMessage: ${body}`)) return;
+  try {
+    const res = await api('/admin/notifications/send', {
+      method: 'POST',
+      body: JSON.stringify({ title, body, target }),
+    });
+    alert(`✅ Notification sent!\n\nDevices reached: ${res.tokens_count||0}\nRecipients: ${res.total_recipients||0}`);
+    document.getElementById('n-title').value = '';
+    document.getElementById('n-body').value = '';
+    document.getElementById('n-preview').style.display = 'none';
+  } catch (e) {
+    alert('Failed to send: ' + e.message);
+  }
+}
+
 
 
 function carCard(c) {
