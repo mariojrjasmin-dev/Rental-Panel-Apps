@@ -23,6 +23,82 @@ from datetime import datetime, timezone, timedelta
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ==================== EXPO PUSH NOTIFICATIONS ====================
+import httpx
+
+EXPO_PUSH_API = "https://exp.host/--/api/v2/push/send"
+
+
+async def send_expo_push(tokens: List[str], title: str, body: str, data: Optional[Dict] = None) -> Dict:
+    """Send a push notification via the Expo Push API.
+    Accepts a list of ExponentPushToken[...] strings. Silently skips empty/invalid tokens.
+    Returns the parsed Expo response (or an empty dict on failure).
+    """
+    # Filter to valid Expo tokens
+    valid_tokens = [t for t in (tokens or []) if isinstance(t, str) and t.startswith(("ExponentPushToken[", "ExpoPushToken["))]
+    if not valid_tokens:
+        return {"sent": 0, "skipped": True}
+
+    messages = [
+        {
+            "to": tok,
+            "sound": "default",
+            "title": title,
+            "body": body,
+            "data": data or {},
+            "priority": "high",
+            "channelId": "default",
+        }
+        for tok in valid_tokens
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client_http:
+            resp = await client_http.post(
+                EXPO_PUSH_API,
+                json=messages,
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+            )
+            data_resp = resp.json() if resp.status_code == 200 else {}
+            logger.info(f"Expo push sent: {len(valid_tokens)} tokens, status={resp.status_code}")
+            return {"sent": len(valid_tokens), "expo_response": data_resp}
+    except Exception as e:
+        logger.warning(f"Expo push failed: {e}")
+        return {"sent": 0, "error": str(e)}
+
+
+async def send_push_to_user(user_id: str, title: str, body: str, data: Optional[Dict] = None) -> Dict:
+    """Look up a user's stored push tokens and send a notification.
+    Fails silently (logs warnings) so booking flows are never blocked by push errors.
+    """
+    try:
+        user = await db.users.find_one({"_id": ObjectId(user_id)}) if ObjectId.is_valid(user_id) else None
+        if not user:
+            return {"sent": 0, "reason": "user_not_found"}
+        tokens = user.get("push_tokens") or []
+        if not tokens:
+            return {"sent": 0, "reason": "no_tokens"}
+        return await send_expo_push(tokens, title, body, data)
+    except Exception as e:
+        logger.warning(f"send_push_to_user error: {e}")
+        return {"sent": 0, "error": str(e)}
+
+
+async def send_push_to_admins(title: str, body: str, data: Optional[Dict] = None) -> Dict:
+    """Broadcast a notification to ALL admins (e.g., new booking alerts)."""
+    try:
+        admins = await db.users.find({"role": "admin"}, {"push_tokens": 1}).to_list(50)
+        all_tokens: List[str] = []
+        for a in admins:
+            all_tokens.extend(a.get("push_tokens") or [])
+        # De-duplicate
+        all_tokens = list(set(all_tokens))
+        return await send_expo_push(all_tokens, title, body, data)
+    except Exception as e:
+        logger.warning(f"send_push_to_admins error: {e}")
+        return {"sent": 0, "error": str(e)}
+
+
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -307,6 +383,48 @@ async def logout(response: Response):
     response.delete_cookie("refresh_token", path="/")
     response.delete_cookie("session_token", path="/")
     return {"message": "Logged out"}
+
+
+# ==================== PUSH NOTIFICATION TOKENS ====================
+class PushTokenRequest(BaseModel):
+    token: str
+    platform: Optional[str] = None  # "ios" / "android" (informational)
+
+
+@api_router.post("/users/push-token")
+async def register_push_token(req: PushTokenRequest, request: Request):
+    """Register/refresh the authenticated user's Expo push token.
+    A user may have multiple devices, so we store an array of unique tokens.
+    """
+    user = await get_authenticated_user(request)
+    token = (req.token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    if not token.startswith(("ExponentPushToken[", "ExpoPushToken[")):
+        raise HTTPException(status_code=400, detail="Invalid Expo push token format")
+
+    user_id_obj = user["_id"] if "_id" in user else ObjectId(user["id"])
+    await db.users.update_one(
+        {"_id": user_id_obj},
+        {"$addToSet": {"push_tokens": token}}
+    )
+    return {"ok": True}
+
+
+@api_router.delete("/users/push-token")
+async def unregister_push_token(req: PushTokenRequest, request: Request):
+    """Remove a stored push token (e.g., on logout or token refresh)."""
+    user = await get_authenticated_user(request)
+    token = (req.token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    user_id_obj = user["_id"] if "_id" in user else ObjectId(user["id"])
+    await db.users.update_one(
+        {"_id": user_id_obj},
+        {"$pull": {"push_tokens": token}}
+    )
+    return {"ok": True}
+
 
 @api_router.post("/auth/refresh")
 async def refresh_token(request: Request, response: Response):
@@ -603,6 +721,26 @@ async def create_booking(booking: BookingCreate, request: Request):
     result = await db.bookings.insert_one(booking_doc)
     booking_doc["id"] = str(result.inserted_id)
     del booking_doc["_id"]
+
+    # Push notifications (fire-and-forget; never blocks the response)
+    try:
+        car_label = car.get("name") or f"{car.get('brand','')} {car.get('model','')}".strip() or "your car"
+        # Notify the customer
+        await send_push_to_user(
+            str(user_id),
+            "Booking received",
+            f"Your booking for {car_label} is pending payment confirmation.",
+            {"type": "booking_created", "booking_id": booking_doc["id"]},
+        )
+        # Notify all admins
+        await send_push_to_admins(
+            "New booking",
+            f"{user.get('name', 'A customer')} booked {car_label} (${total:.2f}).",
+            {"type": "new_booking", "booking_id": booking_doc["id"]},
+        )
+    except Exception as _e:
+        logger.warning(f"Booking push notify error: {_e}")
+
     return booking_doc
 
 @api_router.get("/bookings")
@@ -740,6 +878,45 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found")
     booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+
+    # Send push notification to the customer about the status change
+    try:
+        owner_id = booking.get("user_id")
+        car_label = booking.get("car_name") or "your car"
+        new_status = update_data.get("status")
+        new_pay = update_data.get("payment_status")
+        # Friendly messages
+        title, body_msg = None, None
+        if new_pay == "paid" and new_status == "confirmed":
+            title = "Payment confirmed"
+            body_msg = f"Cash received for {car_label}. Your booking is confirmed!"
+        elif new_status == "confirmed":
+            title = "Booking confirmed"
+            body_msg = f"Your booking for {car_label} is confirmed."
+        elif new_status == "active":
+            title = "Rental active"
+            body_msg = f"Your rental of {car_label} is now active. Drive safe!"
+        elif new_status == "completed":
+            title = "Rental completed"
+            body_msg = f"Thanks for renting {car_label}. We hope you enjoyed it!"
+        elif new_status == "cancelled":
+            title = "Booking cancelled"
+            body_msg = f"Your booking for {car_label} has been cancelled."
+        elif new_pay == "paid":
+            title = "Payment received"
+            body_msg = f"Payment received for {car_label}."
+        elif new_pay == "refunded":
+            title = "Refund issued"
+            body_msg = f"A refund was issued for your booking of {car_label}."
+
+        if title and owner_id:
+            await send_push_to_user(
+                owner_id, title, body_msg,
+                {"type": "booking_update", "booking_id": booking_id, "status": new_status, "payment_status": new_pay},
+            )
+    except Exception as _e:
+        logger.warning(f"Status update push notify error: {_e}")
+
     return serialize_booking(booking)
 
 
@@ -1003,6 +1180,19 @@ async def stripe_webhook(request: Request):
                     {"_id": ObjectId(tx["booking_id"])},
                     {"$set": {"payment_status": "paid", "status": "confirmed"}}
                 )
+                # Notify the customer that the card payment succeeded
+                try:
+                    booking = await db.bookings.find_one({"_id": ObjectId(tx["booking_id"])})
+                    if booking:
+                        car_label = booking.get("car_name") or "your car"
+                        await send_push_to_user(
+                            booking.get("user_id", ""),
+                            "Payment received",
+                            f"Card payment confirmed for {car_label}. Your booking is confirmed!",
+                            {"type": "booking_update", "booking_id": str(tx["booking_id"]), "status": "confirmed", "payment_status": "paid"},
+                        )
+                except Exception as _e:
+                    logger.warning(f"Stripe webhook push notify error: {_e}")
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Webhook error: {e}")

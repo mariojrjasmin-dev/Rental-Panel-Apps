@@ -102,9 +102,24 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Add a Fleet Analytics dashboard to the admin panel: KPI cards (revenue/bookings), monthly revenue chart, booking trend, top 10 cars, top pickup locations, status breakdown."
+user_problem_statement: "Add push notifications for booking updates. Customers should get notifications when a booking is created, payment is confirmed (cash or stripe), booking status changes, etc. Admins should get notifications when a new booking is created."
 
 backend:
+  - task: "Push notification token registration + send via Expo Push API"
+    implemented: true
+    working: false
+    file: "backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "(1) New endpoints: POST /api/users/push-token (registers an Expo push token under the authenticated user's `push_tokens` array, uses $addToSet to dedupe) and DELETE /api/users/push-token (removes a token via $pull). Both validate the token starts with 'ExponentPushToken[' or 'ExpoPushToken['. (2) Added send_expo_push, send_push_to_user, send_push_to_admins helpers that POST to https://exp.host/--/api/v2/push/send. (3) Triggers wired: POST /api/bookings sends a customer 'Booking received' notification AND admin 'New booking' notification; PUT /api/admin/bookings/{id}/status sends a customer notification with friendly text based on status (confirmed / active / completed / cancelled) and payment_status (paid / refunded); Stripe webhook sends a 'Payment received' notification when card payment succeeds. All push calls are wrapped in try/except and never block the API response. Need to verify: register endpoint persists tokens, rejects invalid format, rejects unauthenticated; delete endpoint pulls from array; auth required; tokens are unique (no dupes)."
+        - working: false
+          agent: "testing"
+          comment: "CRITICAL BUG: POST /api/users/push-token returns 200 {ok:true} but DOES NOT PERSIST the token in MongoDB. Root cause: in `register_push_token` (line 406) and `unregister_push_token` (line 421), the endpoint does `user_id_obj = user['_id'] if '_id' in user else ObjectId(user['id'])`. However `get_current_user` (line 146) already converted user['_id'] to a STRING via `user['_id'] = str(user['_id'])` before returning. So the Mongo query becomes `db.users.update_one({'_id': '<string>'}, ...)` which matches 0 documents (Mongo expects ObjectId for _id). $addToSet/$pull silently do nothing and the endpoint still returns 200 because update_one doesn't raise. Verified via direct Mongo query post-call: push_tokens array is empty / None. FIX (one-line): `user_id_obj = ObjectId(user['_id']) if '_id' in user else ObjectId(user['id'])` -- wrap in ObjectId(). Without this fix, push notifications will NEVER be delivered to any JWT-authenticated user. 13/16 push test assertions passed in /app/backend_test_push.py; the 3 failures are all the persistence assertions. PASSING: (a) 401 without auth for POST and DELETE; (b) 400 'Invalid Expo push token format' for 'garbage'; (c) 400 'Missing token' for empty string; (d) DELETE returns 200 idempotently; (e) Booking creation smoke test (POST /api/bookings with cash) returns 200 with correct shape (status=pending_payment, payment_status=pending) even when user has zero tokens; (f) Admin status update smoke test (PUT /api/admin/bookings/{id}/status with {status:'confirmed', payment_status:'paid'}) returns 200 booking with updated fields. The push trigger code paths execute but send_push_to_user just logs 'no_tokens' and returns – which is why those endpoints still succeed; the underlying problem is that no user will EVER have a token because the registration endpoint never writes to the DB. Also note: same bug pattern in `unregister_push_token` (string vs ObjectId) but it doesn't manifest because the array is already empty."
+
   - task: "Admin Fleet Analytics endpoint GET /api/admin/analytics"
     implemented: true
     working: true
@@ -262,8 +277,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Admin Fleet Analytics endpoint GET /api/admin/analytics"
-  stuck_tasks: []
+    - "Push notification token registration + send via Expo Push API"
+  stuck_tasks:
+    - "Push notification token registration + send via Expo Push API"
   test_all: false
   test_priority: "high_first"
 
@@ -285,3 +301,5 @@ agent_communication:
       message: "✅ MINIMUM BOOKING DAYS FRONTEND FEATURE TESTED: Successfully verified the complete implementation of minimum booking days per location feature. Backend API working correctly - set Punta Cana Airport to min_booking_days=5 and updated Mercedes Benz car to use this location. Frontend code in booking.tsx shows full implementation: (1) Fetches min_booking_days from GET /api/locations/tax-by-name API, (2) Auto-extends dropoff date if duration < minDays, (3) Shows yellow banner 'Minimum rental: X days' when min > 1, (4) Restricts date picker minimumDate, (5) Alerts user if dropoff too close to pickup. Feature is fully functional and ready for production use."
     - agent: "testing"
       message: "Tested 'Admin Fleet Analytics endpoint GET /api/admin/analytics'. 137/137 assertions passed in /app/backend_test_analytics.py against the live preview backend. Verified: (1) Admin GET returns 200 with all top-level keys kpis/monthly_revenue/top_cars/top_locations/status_breakdown/payment_breakdown. (2) kpis fields are all numeric & >= 0 (total_revenue=15816.52, revenue_this_month, total_bookings=16, paid_bookings=13, active_bookings, avg_revenue_per_booking=1216.66). (3) monthly_revenue is EXACTLY 6 items with month YYYY-MM strings sorted chronologically ['2025-12'..'2026-05']; last item is current UTC month; each has numeric revenue (>=0) and int count (>=0). (4) top_cars list <=10 (got 3) sorted by count desc, each item has car_id/car_name/count/revenue. (5) top_locations list <=10 (got 4), items have {name(str), count(int)}. (6) status_breakdown & payment_breakdown are dicts of {str: non-negative int}. (7) Cross-checked via /api/admin/bookings: total_revenue == sum(total_price) for payment_status='paid'; paid_bookings == count of paid; total_bookings matches admin bookings length. (8) avg_revenue_per_booking == total_revenue/paid_bookings (with proper 0-handling). (9) Auth: unauthenticated → 401; non-admin → 403 with detail 'Admin only'. Feature is fully working end-to-end."
+    - agent: "testing"
+      message: "🚨 CRITICAL BUG in Push Notification token registration. 13/16 assertions passed in /app/backend_test_push.py. POST /api/users/push-token returns 200 {ok:true} but DOES NOT actually persist the token in MongoDB — the user document's push_tokens array stays empty. ROOT CAUSE: in `register_push_token` (line 406) and `unregister_push_token` (line 421), the code does `user_id_obj = user['_id'] if '_id' in user else ObjectId(user['id'])`. However `get_current_user` (line 146) already stringified `user['_id']` via `user['_id'] = str(user['_id'])` before returning. So Mongo's `update_one({'_id': '<string>'}, ...)` matches 0 documents (Mongo expects ObjectId for _id), $addToSet/$pull silently no-op, and the endpoint returns 200 because update_one doesn't raise on matched_count=0. FIX (1 line): change to `user_id_obj = ObjectId(user['_id']) if '_id' in user else ObjectId(user['id'])` in BOTH endpoints. Without this fix, push notifications will NEVER reach any JWT-authenticated user because no token ever lands in the DB. All other test scenarios PASS: 401 without auth (POST & DELETE), 400 'Invalid Expo push token format' for 'garbage', 400 'Missing token' for empty string, idempotent DELETE returns 200 even on already-removed tokens, booking creation smoke test returns 200 with correct shape (status=pending_payment, payment_status=pending), admin status update smoke test returns 200 with updated booking. Push trigger code paths execute but `send_push_to_user` just hits the `no_tokens` branch — which is why those endpoints still appear to work; the underlying delivery is broken until persistence is fixed."

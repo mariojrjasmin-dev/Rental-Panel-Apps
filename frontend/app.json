@@ -26,7 +26,8 @@
         "CAMERA",
         "READ_MEDIA_IMAGES",
         "USE_BIOMETRIC",
-        "USE_FINGERPRINT"
+        "USE_FINGERPRINT",
+        "POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -36,6 +37,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {

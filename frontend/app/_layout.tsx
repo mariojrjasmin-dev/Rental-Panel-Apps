@@ -3,6 +3,11 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState, createContext, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadSavedLocale, setLocale as persistLocale, AppLocale } from '../src/i18n';
+import {
+  setupNotificationHandler,
+  registerForPushNotifications,
+  unregisterPushToken,
+} from '../src/notifications';
 
 import { BACKEND_URL } from '../src/config';
 
@@ -47,12 +52,20 @@ export default function RootLayout() {
   const [locale, setLocaleState] = useState<AppLocale>('en');
 
   useEffect(() => {
+    setupNotificationHandler();
     (async () => {
       const lang = await loadSavedLocale();
       setLocaleState(lang);
       checkAuth();
     })();
   }, []);
+
+  // Re-register for push whenever user becomes logged in
+  useEffect(() => {
+    if (user?.token) {
+      registerForPushNotifications().catch(() => {});
+    }
+  }, [user?.token]);
 
   const changeLocale = async (l: AppLocale) => {
     await persistLocale(l);
@@ -111,6 +124,8 @@ export default function RootLayout() {
   const logout = async () => {
     try {
       const token = await AsyncStorage.getItem('auth_token');
+      // Unregister this device from receiving push notifications first
+      try { await unregisterPushToken(); } catch {}
       await fetch(`${BACKEND_URL}/api/auth/logout`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
