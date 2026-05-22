@@ -2737,6 +2737,117 @@ async def validate_promo_code(body: PromoValidateRequest, request: Request):
         "message": reason if not is_valid else "Promo applied",
     }
 
+# ==================== PUBLIC LEGAL HTML PAGES ====================
+# Public HTML pages for /api/legal/terms and /api/legal/privacy so that
+# the customer-facing marketing website (damsrentacar.com) can link the
+# footer "Terms" / "Privacy" links to a publicly hosted, mobile-responsive,
+# branded page. The Terms text is the live `rental_terms` setting (the same
+# one the admin manages in the Admin Panel → 📜 Terms tab). The Privacy text
+# is stored in /app/backend/legal/privacy.txt.
+_PRIVACY_TXT_PATH = _Path(__file__).parent / "legal" / "privacy.txt"
+PRIVACY_UPDATED_AT = "May 21st, 2026"
+
+def _legal_layout(title: str, subtitle: str, body_html: str, accent: str = "#FF3B30") -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+<title>{title} · DAMS Rent a Car</title>
+<meta name="robots" content="index, follow" />
+<meta name="description" content="{title} for DAMS Rent a Car. Read our policies before booking your next rental." />
+<meta property="og:title" content="{title} · DAMS Rent a Car" />
+<meta property="og:type" content="article" />
+<style>
+  :root {{ --accent: {accent}; --ink: #0a0a0a; --muted: #555; --bg: #fafafa; --card: #ffffff; --border: #e5e5e5; }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: var(--bg); -webkit-font-smoothing: antialiased; }}
+  a {{ color: #007AFF; text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  header {{ background: #0a0a0a; color: #fff; padding: 20px 24px; }}
+  header .wrap {{ max-width: 920px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }}
+  header .badge {{ width: 44px; height: 44px; border-radius: 12px; background: var(--accent); display: inline-flex; align-items: center; justify-content: center; font-weight: 900; color: #fff; font-size: 18px; letter-spacing: -1px; }}
+  header h1 {{ margin: 0; font-size: 16px; font-weight: 800; letter-spacing: 0.5px; }}
+  header .sub {{ margin: 2px 0 0; font-size: 11px; color: #cfcfcf; letter-spacing: 1px; font-weight: 600; }}
+  main {{ max-width: 920px; margin: 0 auto; padding: 32px 24px 64px; }}
+  .titlewrap {{ margin-bottom: 24px; }}
+  .titlewrap h2 {{ font-size: 32px; font-weight: 900; margin: 0 0 6px; line-height: 1.15; letter-spacing: -0.5px; }}
+  .titlewrap p {{ font-size: 14px; color: var(--muted); margin: 0; }}
+  .card {{ background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 28px 32px; box-shadow: 0 1px 4px rgba(0,0,0,0.03); }}
+  .card pre {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14.5px; color: #1a1a1a; line-height: 1.7; white-space: pre-wrap; word-wrap: break-word; margin: 0; }}
+  .notice {{ display: flex; align-items: flex-start; gap: 10px; background: #f0f8ff; border: 1px solid #cfe3ff; border-radius: 12px; padding: 12px 14px; margin: 0 0 22px; color: #0a5dff; font-size: 13px; font-weight: 600; }}
+  .notice.privacy {{ background: #e6f9ed; border-color: #bce7c8; color: #0a5d2b; }}
+  .notice strong {{ font-weight: 800; }}
+  .crumbs {{ font-size: 12px; color: var(--muted); margin: 0 0 10px; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; }}
+  footer {{ max-width: 920px; margin: 0 auto; padding: 24px; color: var(--muted); font-size: 12px; text-align: center; }}
+  footer a {{ color: var(--accent); font-weight: 700; }}
+  @media (max-width: 640px) {{
+    .titlewrap h2 {{ font-size: 26px; }}
+    .card {{ padding: 20px 18px; border-radius: 14px; }}
+    .card pre {{ font-size: 13.5px; line-height: 1.65; }}
+    header {{ padding: 14px 18px; }}
+    main {{ padding: 24px 16px 48px; }}
+  }}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <span class="badge">DR</span>
+    <div>
+      <h1>DAMS RENT A CAR, S.R.L.</h1>
+      <div class="sub">PREMIUM CAR RENTALS · DOMINICAN REPUBLIC</div>
+    </div>
+  </div>
+</header>
+<main>
+  <div class="crumbs">Legal · {title}</div>
+  <div class="titlewrap">
+    <h2>{title}</h2>
+    <p>{subtitle}</p>
+  </div>
+  {body_html}
+</main>
+<footer>
+  © 2026 DAMS Car Rental · <a href="mailto:info@damsrentacar.com">info@damsrentacar.com</a> · <a href="/api/legal/terms">Terms</a> · <a href="/api/legal/privacy">Privacy</a>
+</footer>
+</body>
+</html>"""
+
+
+def _esc(s: str) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+@app.get("/api/legal/terms", response_class=HTMLResponse)
+async def legal_terms_html():
+    """Public, branded HTML rendering of the rental Terms & Conditions for the customer-facing website footer link."""
+    setting = await db.settings.find_one({"key": "rental_terms"})
+    terms = (setting or {}).get("value") or DEFAULT_RENTAL_TERMS
+    body = f"""
+      <div class="notice"><span>📜</span><div>These are the rental Terms &amp; Conditions you accept when booking with DAMS Rent a Car. By using our service, you agree to these terms.</div></div>
+      <div class="card"><pre>{_esc(terms)}</pre></div>
+    """
+    html = _legal_layout("Terms & Conditions", "The rental agreement applicable to all bookings.", body)
+    return HTMLResponse(content=html, headers={"Cache-Control": "public, max-age=300"})
+
+
+@app.get("/api/legal/privacy", response_class=HTMLResponse)
+async def legal_privacy_html():
+    """Public, branded HTML rendering of the Privacy Policy for the customer-facing website footer link."""
+    try:
+        privacy_text = _PRIVACY_TXT_PATH.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.exception(f"Could not read privacy.txt: {e}")
+        privacy_text = "Privacy policy not available. Please contact info@damsrentacar.com."
+    body = f"""
+      <div class="notice privacy"><span>🔒</span><div><strong>Your privacy matters to us.</strong> &nbsp;Last updated: {PRIVACY_UPDATED_AT}</div></div>
+      <div class="card"><pre>{_esc(privacy_text)}</pre></div>
+    """
+    html = _legal_layout("Privacy Policy", "How we collect, use, and protect your data.", body, accent="#34c759")
+    return HTMLResponse(content=html, headers={"Cache-Control": "public, max-age=300"})
+
+
 app.include_router(api_router)
 
 # Serve admin panel HTML
