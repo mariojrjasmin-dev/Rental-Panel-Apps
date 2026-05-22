@@ -113,6 +113,26 @@ const translations = {
     yes: 'Yes, enable',
     notNow: 'Not now',
     signInWithBiometric: 'Sign in with Face ID / Touch ID',
+    // Type-specific labels
+    faceIdTitle: 'Face ID',
+    touchIdTitle: 'Touch ID',
+    fingerprintTitle: 'Fingerprint',
+    biometricGenericTitle: 'Biometric Login',
+    biometricEnableSubFace: 'Sign in faster with a glance using Face ID.',
+    biometricEnableSubTouch: 'Sign in faster with your finger using Touch ID.',
+    biometricEnableSubFinger: 'Sign in faster with your fingerprint.',
+    biometricOnFace: 'Face ID is on. Sign in with a glance.',
+    biometricOnTouch: 'Touch ID is on. Sign in with your finger.',
+    biometricOnFinger: 'Fingerprint is on. Tap to sign in.',
+    // Confirm password modal
+    confirmPasswordTitle: 'Confirm your password',
+    confirmPasswordSub: 'For security, please enter your password to enable biometric login.',
+    cancelBtn: 'Cancel',
+    enableBtn: 'Enable',
+    wrongPassword: 'Wrong password. Please try again.',
+    biometricEnableSuccess: 'Biometric login enabled.',
+    biometricNotEnrolled: 'No biometrics enrolled on this device. Please add Face ID / Touch ID in Settings first.',
+    biometricUnenrolledTitle: 'Set up Face ID / Touch ID',
 
     // ---- Receipt ----
     rentalReceipt: 'Rental Receipt',
@@ -263,6 +283,26 @@ const translations = {
     yes: 'Sí, activar',
     notNow: 'Ahora no',
     signInWithBiometric: 'Iniciar sesión con Face ID / Huella',
+    // Type-specific labels
+    faceIdTitle: 'Face ID',
+    touchIdTitle: 'Touch ID',
+    fingerprintTitle: 'Huella digital',
+    biometricGenericTitle: 'Acceso biométrico',
+    biometricEnableSubFace: 'Inicia sesión más rápido con una mirada usando Face ID.',
+    biometricEnableSubTouch: 'Inicia sesión más rápido con tu dedo usando Touch ID.',
+    biometricEnableSubFinger: 'Inicia sesión más rápido con tu huella digital.',
+    biometricOnFace: 'Face ID está activado. Inicia sesión con una mirada.',
+    biometricOnTouch: 'Touch ID está activado. Inicia sesión con tu dedo.',
+    biometricOnFinger: 'La huella está activada. Toca para iniciar sesión.',
+    // Confirm password modal
+    confirmPasswordTitle: 'Confirma tu contraseña',
+    confirmPasswordSub: 'Por seguridad, ingresa tu contraseña para activar el acceso biométrico.',
+    cancelBtn: 'Cancelar',
+    enableBtn: 'Activar',
+    wrongPassword: 'Contraseña incorrecta. Inténtalo de nuevo.',
+    biometricEnableSuccess: 'Acceso biométrico activado.',
+    biometricNotEnrolled: 'No hay datos biométricos registrados en este dispositivo. Configura Face ID / Touch ID en Ajustes primero.',
+    biometricUnenrolledTitle: 'Configura Face ID / Touch ID',
 
     // ---- Receipt ----
     rentalReceipt: 'Recibo de renta',

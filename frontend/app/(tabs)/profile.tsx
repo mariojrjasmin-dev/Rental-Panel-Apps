@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Switch, ScrollView } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Switch, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
 import { t } from '../../src/i18n';
-import { isBiometricAvailable, isBiometricEnabled, disableBiometricLogin, type BiometricCheck } from '../../src/biometric';
+import { isBiometricAvailable, isBiometricEnabled, disableBiometricLogin, enableBiometricLogin, type BiometricCheck } from '../../src/biometric';
+import { BACKEND_URL } from '../../src/config';
 import LegalLinks from '../../components/LegalLinks';
 
 export default function ProfileScreen() {
@@ -15,6 +16,43 @@ export default function ProfileScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [bioState, setBioState] = useState<BiometricCheck>({ available: false, enrolled: false, type: 'none' });
   const [bioEnabled, setBioEnabled] = useState(false);
+  // Password-confirm modal state (used to enable biometric from Profile)
+  const [pwdModalVisible, setPwdModalVisible] = useState(false);
+  const [pwdInput, setPwdInput] = useState('');
+  const [pwdError, setPwdError] = useState('');
+  const [pwdSubmitting, setPwdSubmitting] = useState(false);
+
+  // Resolve type-specific labels & icon — Face ID / Touch ID / Fingerprint
+  const bioMeta = (() => {
+    if (bioState.type === 'face') {
+      // On iOS this is Face ID. On Android with face unlock it's a generic facial.
+      const isApple = Platform.OS === 'ios';
+      return {
+        title: isApple ? t('faceIdTitle') : t('biometricGenericTitle'),
+        subOn: t('biometricOnFace'),
+        subOff: t('biometricEnableSubFace'),
+        icon: 'scan-outline' as const,
+        accent: '#0a84ff',
+      };
+    }
+    if (bioState.type === 'fingerprint') {
+      const isApple = Platform.OS === 'ios';
+      return {
+        title: isApple ? t('touchIdTitle') : t('fingerprintTitle'),
+        subOn: isApple ? t('biometricOnTouch') : t('biometricOnFinger'),
+        subOff: isApple ? t('biometricEnableSubTouch') : t('biometricEnableSubFinger'),
+        icon: 'finger-print' as const,
+        accent: '#34c759',
+      };
+    }
+    return {
+      title: t('biometricGenericTitle'),
+      subOn: t('biometricEnabled'),
+      subOff: t('enableBiometricSub'),
+      icon: 'lock-closed-outline' as const,
+      accent: '#666',
+    };
+  })();
 
   useEffect(() => {
     (async () => {
@@ -23,13 +61,55 @@ export default function ProfileScreen() {
     })();
   }, []);
 
-  const toggleBiometric = useCallback(async (val: boolean) => {
-    if (!val) {
-      await disableBiometricLogin();
-      setBioEnabled(false);
+  const askPasswordToEnable = useCallback(() => {
+    if (!bioState.available || !bioState.enrolled) {
+      Alert.alert(t('biometricUnenrolledTitle'), t('biometricNotEnrolled'));
+      return;
     }
-    // Enabling requires the user to login normally first (in login screen).
-  }, []);
+    setPwdError('');
+    setPwdInput('');
+    setPwdModalVisible(true);
+  }, [bioState.available, bioState.enrolled]);
+
+  const submitPasswordToEnable = useCallback(async () => {
+    if (!user?.email) { setPwdError(t('wrongPassword')); return; }
+    if (!pwdInput.trim()) { setPwdError(t('wrongPassword')); return; }
+    setPwdSubmitting(true);
+    setPwdError('');
+    try {
+      // Re-verify password by calling /api/auth/login. If 200, the password is correct.
+      const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, password: pwdInput }),
+      });
+      if (!res.ok) {
+        setPwdError(t('wrongPassword'));
+        setPwdSubmitting(false);
+        return;
+      }
+      // Persist credentials in SecureStore for future biometric unlock.
+      await enableBiometricLogin(user.email, pwdInput);
+      setBioEnabled(true);
+      setPwdModalVisible(false);
+      setPwdInput('');
+      Alert.alert(bioMeta.title, t('biometricEnableSuccess'));
+    } catch (e: any) {
+      setPwdError(t('wrongPassword'));
+    }
+    setPwdSubmitting(false);
+  }, [user?.email, pwdInput, bioMeta.title]);
+
+  const toggleBiometric = useCallback(async (val: boolean) => {
+    if (val) {
+      // Enabling — require password confirmation.
+      askPasswordToEnable();
+      return;
+    }
+    // Disabling — clear stored credentials immediately.
+    await disableBiometricLogin();
+    setBioEnabled(false);
+  }, [askPasswordToEnable]);
 
   const doLogout = useCallback(async () => {
     setLoggingOut(true);
@@ -95,17 +175,33 @@ export default function ProfileScreen() {
         {/* Biometric login (mobile only, when supported) */}
         {bioState.available && bioState.enrolled && Platform.OS !== 'web' && (
           <View style={styles.bioCard}>
+            <View style={[styles.bioIconWrap, { backgroundColor: bioMeta.accent + '22' }]}>
+              <Ionicons name={bioMeta.icon} size={22} color={bioMeta.accent} />
+            </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.bioTitle}>{t('biometricLogin')}</Text>
-              <Text style={styles.bioSub}>{bioEnabled ? t('biometricEnabled') : t('enableBiometricSub')}</Text>
+              <Text style={styles.bioTitle}>{bioMeta.title}</Text>
+              <Text style={styles.bioSub}>{bioEnabled ? bioMeta.subOn : bioMeta.subOff}</Text>
             </View>
             <Switch
+              testID="biometric-toggle"
               value={bioEnabled}
               onValueChange={toggleBiometric}
               trackColor={{ false: '#E5E5E5', true: '#34C759' }}
               thumbColor="#FFF"
-              disabled={!bioEnabled /* enabling happens during login */}
             />
+          </View>
+        )}
+
+        {/* When hardware is available but no biometrics are enrolled */}
+        {bioState.available && !bioState.enrolled && Platform.OS !== 'web' && (
+          <View style={[styles.bioCard, { backgroundColor: '#fff5e6', borderWidth: 1, borderColor: '#ffd48a' }]}>
+            <View style={[styles.bioIconWrap, { backgroundColor: '#ffe0a3' }]}>
+              <Ionicons name="warning-outline" size={20} color="#a05a00" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.bioTitle, { color: '#a05a00' }]}>{t('biometricUnenrolledTitle')}</Text>
+              <Text style={[styles.bioSub, { color: '#b87600' }]}>{t('biometricNotEnrolled')}</Text>
+            </View>
           </View>
         )}
 
@@ -169,6 +265,69 @@ export default function ProfileScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Confirm Password Modal — required to enable biometric login from Profile */}
+      <Modal
+        visible={pwdModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!pwdSubmitting) setPwdModalVisible(false); }}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalCard}>
+            <View style={[styles.modalIconWrap, { backgroundColor: bioMeta.accent + '22' }]}>
+              <Ionicons name={bioMeta.icon} size={30} color={bioMeta.accent} />
+            </View>
+            <Text style={styles.modalTitle}>{t('confirmPasswordTitle')}</Text>
+            <Text style={styles.modalSub}>{t('confirmPasswordSub')}</Text>
+
+            <View style={styles.modalInputWrap}>
+              <Ionicons name="mail-outline" size={18} color="#999" />
+              <Text style={styles.modalEmail} numberOfLines={1}>{user?.email || ''}</Text>
+            </View>
+
+            <View style={styles.modalInputWrap}>
+              <Ionicons name="lock-closed-outline" size={18} color="#999" />
+              <TextInput
+                testID="biometric-password-input"
+                style={styles.modalInput}
+                placeholder={t('password')}
+                placeholderTextColor="#999"
+                value={pwdInput}
+                onChangeText={(v) => { setPwdInput(v); if (pwdError) setPwdError(''); }}
+                secureTextEntry
+                autoFocus
+                editable={!pwdSubmitting}
+                onSubmitEditing={submitPasswordToEnable}
+              />
+            </View>
+
+            {pwdError ? <Text style={styles.modalErr}>{pwdError}</Text> : null}
+
+            <View style={styles.modalActions}>
+              <Pressable
+                testID="biometric-pwd-cancel"
+                style={[styles.modalBtn, styles.modalBtnGhost]}
+                onPress={() => { if (!pwdSubmitting) { setPwdModalVisible(false); setPwdInput(''); setPwdError(''); } }}
+                disabled={pwdSubmitting}
+              >
+                <Text style={styles.modalBtnGhostText}>{t('cancelBtn')}</Text>
+              </Pressable>
+              <Pressable
+                testID="biometric-pwd-submit"
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={submitPasswordToEnable}
+                disabled={pwdSubmitting}
+              >
+                {pwdSubmitting ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalBtnPrimaryText}>{t('enableBtn')}</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -192,8 +351,24 @@ const styles = StyleSheet.create({
   langBtnText: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
   langBtnTextActive: { color: '#FFF' },
   bioCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FAFAFA', borderRadius: 16, padding: 14, marginBottom: 16 },
-  bioTitle: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
-  bioSub: { fontSize: 12, color: '#666', marginTop: 2 },
+  bioIconWrap: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  bioTitle: { fontSize: 15, fontWeight: '800', color: '#0A0A0A' },
+  bioSub: { fontSize: 12, color: '#666', marginTop: 2, lineHeight: 16 },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  modalCard: { width: '100%', maxWidth: 360, backgroundColor: '#FFF', borderRadius: 20, padding: 22, alignItems: 'center' },
+  modalIconWrap: { width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#0A0A0A', textAlign: 'center' },
+  modalSub: { fontSize: 13, color: '#666', textAlign: 'center', marginTop: 6, marginBottom: 16, lineHeight: 18 },
+  modalInputWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'stretch', backgroundColor: '#F5F5F5', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E5E5' },
+  modalEmail: { flex: 1, fontSize: 14, color: '#666', fontWeight: '600' },
+  modalInput: { flex: 1, fontSize: 15, color: '#0A0A0A', paddingVertical: 2 },
+  modalErr: { color: '#FF3B30', fontSize: 13, alignSelf: 'stretch', marginTop: 2, marginBottom: 8, fontWeight: '600' },
+  modalActions: { flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 8 },
+  modalBtn: { flex: 1, paddingVertical: 14, borderRadius: 50, alignItems: 'center', justifyContent: 'center' },
+  modalBtnGhost: { backgroundColor: '#F5F5F5' },
+  modalBtnGhostText: { color: '#0A0A0A', fontSize: 15, fontWeight: '700' },
+  modalBtnPrimary: { backgroundColor: '#FF3B30' },
+  modalBtnPrimaryText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', cursor: 'pointer' as any },
   menuIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   menuText: { flex: 1, fontSize: 16, fontWeight: '600', color: '#0A0A0A' },
