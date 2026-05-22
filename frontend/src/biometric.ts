@@ -24,6 +24,15 @@ export type BiometricCheck = {
 
 export async function isBiometricAvailable(): Promise<BiometricCheck> {
   if (Platform.OS === 'web') {
+    // Test-only escape hatch: when running in a browser with the flag set,
+    // simulate Face ID hardware so the Profile toggle + password modal can be
+    // verified end-to-end by the automated UI testing agent.
+    // Has no effect on production native builds.
+    try {
+      if (typeof window !== 'undefined' && window.localStorage?.getItem('__bio_test') === '1') {
+        return { available: true, enrolled: true, type: 'face' };
+      }
+    } catch {}
     return { available: false, enrolled: false, type: 'none' };
   }
   try {

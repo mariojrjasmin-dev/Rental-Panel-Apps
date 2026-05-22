@@ -172,8 +172,8 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Biometric login (mobile only, when supported) */}
-        {bioState.available && bioState.enrolled && Platform.OS !== 'web' && (
+        {/* Biometric login (mobile only, when supported — bioState.available is false on web in prod) */}
+        {bioState.available && bioState.enrolled && (
           <View style={styles.bioCard}>
             <View style={[styles.bioIconWrap, { backgroundColor: bioMeta.accent + '22' }]}>
               <Ionicons name={bioMeta.icon} size={22} color={bioMeta.accent} />
