@@ -1483,15 +1483,42 @@ def _generate_receipt_pdf(booking: dict) -> bytes:
     # Header
     c.setFillColor(DARK)
     c.rect(0, H - 28 * mm, W, 28 * mm, fill=1, stroke=0)
+    # --- Draw the brand logo (PNG embedded into the PDF). ---
+    # The logo image is loaded from disk; falls back gracefully to the old
+    # text wordmark if the file is unreadable for any reason.
+    try:
+        from reportlab.lib.utils import ImageReader as _ImgReader
+        if LOGO_PATH.exists():
+            _logo = _ImgReader(str(LOGO_PATH))
+            _lw, _lh = _logo.getSize()
+            # Render at ~14mm tall (white-on-dark works on the dark header).
+            _draw_h = 14 * mm
+            _draw_w = (_lw / _lh) * _draw_h if _lh else 40 * mm
+            # Cap width so it never overlaps the right-side "RECEIPT" block.
+            _max_w = 60 * mm
+            if _draw_w > _max_w:
+                _draw_w = _max_w
+                _draw_h = (_lh / _lw) * _draw_w if _lw else _draw_h
+            c.drawImage(
+                _logo,
+                18 * mm,
+                H - 22 * mm,
+                width=_draw_w,
+                height=_draw_h,
+                mask='auto',
+                preserveAspectRatio=True,
+            )
+        else:
+            raise FileNotFoundError(str(LOGO_PATH))
+    except Exception as _e:
+        logger.warning(f"PDF logo render fell back to text: {_e}")
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 26)
+        c.drawString(18 * mm, H - 15 * mm, "DAMS")
+        c.setFillColor(RED)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(42 * mm, H - 15 * mm, "CAR  RENTAL")
     c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 26)
-    c.drawString(18 * mm, H - 15 * mm, "DAMS")
-    c.setFillColor(RED)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(42 * mm, H - 15 * mm, "CAR  RENTAL")
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica", 9)
-    c.drawString(18 * mm, H - 22 * mm, "Official Rental Receipt")
     c.setFont("Helvetica-Bold", 14)
     c.drawRightString(W - 18 * mm, H - 15 * mm, "RECEIPT")
     c.setFont("Helvetica", 9)
@@ -2896,9 +2923,7 @@ def _legal_layout(title: str, subtitle: str, body_html: str, accent: str = "#FF3
   a:hover {{ text-decoration: underline; }}
   header {{ background: #0a0a0a; color: #fff; padding: 20px 24px; }}
   header .wrap {{ max-width: 920px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }}
-  header .badge {{ width: 44px; height: 44px; border-radius: 12px; background: var(--accent); display: inline-flex; align-items: center; justify-content: center; font-weight: 900; color: #fff; font-size: 18px; letter-spacing: -1px; }}
-  header h1 {{ margin: 0; font-size: 16px; font-weight: 800; letter-spacing: 0.5px; }}
-  header .sub {{ margin: 2px 0 0; font-size: 11px; color: #cfcfcf; letter-spacing: 1px; font-weight: 600; }}
+  header img.logo {{ height: 56px; width: auto; max-width: 240px; object-fit: contain; display: block; }}
   main {{ max-width: 920px; margin: 0 auto; padding: 32px 24px 64px; }}
   .titlewrap {{ margin-bottom: 24px; }}
   .titlewrap h2 {{ font-size: 32px; font-weight: 900; margin: 0 0 6px; line-height: 1.15; letter-spacing: -0.5px; }}
@@ -2923,11 +2948,7 @@ def _legal_layout(title: str, subtitle: str, body_html: str, accent: str = "#FF3
 <body>
 <header>
   <div class="wrap">
-    <span class="badge">DR</span>
-    <div>
-      <h1>DAMS RENT A CAR, S.R.L.</h1>
-      <div class="sub">PREMIUM CAR RENTALS · DOMINICAN REPUBLIC</div>
-    </div>
+    <img class="logo" src="/api/assets/logo.png" alt="DAMS Rent a Car" />
   </div>
 </header>
 <main>
@@ -3097,11 +3118,28 @@ async def admin_customer_detail(customer_id: str, request: Request):
 # Serve admin panel HTML
 ADMIN_HTML = _Path(__file__).parent / "admin_panel.html"
 
+# Brand logo file (used by PDF receipts, public legal pages, etc.)
+LOGO_PATH = _Path(__file__).parent.parent / "frontend" / "assets" / "images" / "dams-logo.png"
+
 @app.get("/api/admin-panel", response_class=HTMLResponse)
 async def serve_admin_panel():
     if ADMIN_HTML.exists():
         return HTMLResponse(content=ADMIN_HTML.read_text(), status_code=200)
     return HTMLResponse(content="<h1>Admin panel not found</h1>", status_code=404)
+
+@app.get("/api/assets/logo.png")
+async def serve_brand_logo():
+    """Public endpoint that serves the DAMS Rent A Car brand logo.
+    Cached for 1 day. Returned as image/png with the original bytes.
+    """
+    from fastapi.responses import Response as _FResp
+    if LOGO_PATH.exists():
+        return _FResp(
+            content=LOGO_PATH.read_bytes(),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    raise HTTPException(status_code=404, detail="Logo not found")
 
 # Serve uploaded images
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")

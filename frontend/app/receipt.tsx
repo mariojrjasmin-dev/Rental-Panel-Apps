@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import BrandLogo from '../components/BrandLogo';
 
 import { BACKEND_URL } from '../src/config';
 
@@ -142,7 +143,7 @@ export default function ReceiptScreen() {
           <Ionicons name="arrow-back" size={22} color="#0A0A0A" />
         </TouchableOpacity>
         <View style={styles.headerTitle}>
-          <Text style={styles.headerBrand}>DAMS</Text>
+          <BrandLogo size="small" testID="receipt-header-logo" imageStyle={{ width: 100, height: 38 }} />
           <Text style={styles.headerSub}>RECEIPT</Text>
         </View>
         <TouchableOpacity style={styles.downloadIconBtn} onPress={downloadPdf} disabled={downloading} activeOpacity={0.6}>
@@ -283,9 +284,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E5E5',
   },
   backBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { flex: 1, alignItems: 'center' },
-  headerBrand: { fontSize: 18, fontWeight: '900', color: '#0A0A0A', letterSpacing: -0.5 },
-  headerSub: { fontSize: 10, color: '#FF3B30', fontWeight: '700', letterSpacing: 2 },
+  headerTitle: { flex: 1, alignItems: 'center', gap: 2 },
+  headerSub: { fontSize: 9, color: '#FF3B30', fontWeight: '800', letterSpacing: 3, marginTop: -2 },
   downloadIconBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
   scroll: { padding: 16, paddingBottom: 40 },
 
