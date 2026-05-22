@@ -148,6 +148,15 @@ SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL = os.environ.get("SMTP_FROM_EMAIL", SMTP_USER)
 SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "DAMS Car Rental")
+# Public base URL — used to build absolute logo/asset URLs in outbound emails.
+# Falls back to FRONTEND_URL or the production host so transactional emails
+# always have a reachable logo image (mail clients do not load localhost URLs).
+PUBLIC_BASE_URL = (
+    os.environ.get("PUBLIC_BASE_URL")
+    or os.environ.get("FRONTEND_URL")
+    or "https://rental-routes.preview.emergentagent.com"
+).rstrip("/")
+EMAIL_LOGO_URL = f"{PUBLIC_BASE_URL}/api/assets/logo.png"
 
 
 async def send_email(to: str, subject: str, html: str, text: Optional[str] = None) -> Dict:
@@ -182,8 +191,7 @@ def _email_template(title: str, intro: str, body_blocks_html: str, cta_label: Op
 <body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
   <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px">
     <div style="text-align:center;margin-bottom:24px">
-      <div style="font-size:28px;font-weight:900;color:#0a0a0a;letter-spacing:1px">DAMS</div>
-      <div style="font-size:11px;font-weight:700;color:#FF3B30;letter-spacing:4px">CAR RENTAL</div>
+      <img src="{EMAIL_LOGO_URL}" alt="DAMS Rent a Car" width="180" style="display:inline-block;max-width:180px;height:auto;border:0;outline:none;text-decoration:none" />
     </div>
     <h1 style="color:#0a0a0a;font-size:22px;font-weight:800;margin:0 0 12px">{title}</h1>
     <p style="color:#555;font-size:15px;line-height:1.5;margin:0 0 20px">{intro}</p>
@@ -191,7 +199,7 @@ def _email_template(title: str, intro: str, body_blocks_html: str, cta_label: Op
     {cta}
     <hr style="border:0;border-top:1px solid #eee;margin:32px 0">
     <p style="color:#999;font-size:12px;line-height:1.5;margin:0;text-align:center">
-      You are receiving this email because you made a booking with DAMS Car Rental.<br>
+      You are receiving this email because you made a booking with DAMS Rent a Car.<br>
       Need help? Reply to this email or contact us at {SMTP_FROM_EMAIL}.
     </p>
   </div>
@@ -701,18 +709,21 @@ async def forgot_password(req: ForgotPasswordRequest):
 
     # Best-effort email delivery. Logs but does not fail the API if SMTP is down.
     try:
-        subject = "DAMS Car Rental — Password reset code"
+        subject = "DAMS Rent a Car — Password reset code"
         html = (
             f"<div style='font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width:520px; margin:0 auto; padding:24px; color:#0a0a0a;'>"
+            f"<div style='text-align:center;margin-bottom:20px'>"
+            f"<img src='{EMAIL_LOGO_URL}' alt='DAMS Rent a Car' width='180' style='display:inline-block;max-width:180px;height:auto;border:0;outline:none;text-decoration:none' />"
+            f"</div>"
             f"<h2 style='margin:0 0 12px;color:#FF3B30'>Password reset</h2>"
             f"<p>Hi {user.get('name','there')},</p>"
-            f"<p>Use the following 6-digit code to reset your DAMS Car Rental password. It expires in {PASSWORD_RESET_TTL_MIN} minutes.</p>"
+            f"<p>Use the following 6-digit code to reset your account password. It expires in {PASSWORD_RESET_TTL_MIN} minutes.</p>"
             f"<div style='font-size:36px;font-weight:900;letter-spacing:8px;background:#f5f5f5;padding:16px;text-align:center;border-radius:12px;margin:16px 0'>{code}</div>"
             f"<p style='color:#666;font-size:13px'>If you didn't request this, you can safely ignore this email.</p>"
-            f"<p style='color:#999;font-size:11px;margin-top:24px'>— DAMS Rent a Car, S.R.L.</p>"
+            f"<p style='color:#999;font-size:11px;margin-top:24px;text-align:center'>— DAMS Rent a Car, S.R.L.</p>"
             f"</div>"
         )
-        text = f"Your DAMS Car Rental password reset code is {code}. It expires in {PASSWORD_RESET_TTL_MIN} minutes."
+        text = f"Your DAMS Rent a Car password reset code is {code}. It expires in {PASSWORD_RESET_TTL_MIN} minutes."
         await send_email(email, subject, html, text)
     except Exception as e:
         logger.exception(f"Password reset email failed for {email}: {e}")
@@ -1879,9 +1890,9 @@ async def admin_test_email(req: TestEmailRequest, request: Request):
     html = _email_template(
         "SMTP test email",
         "If you received this, your SMTP credentials are working correctly. 🎉",
-        "<p style='color:#666;font-size:13px'>Sent from the DAMS Car Rental admin panel.</p>",
+        "<p style='color:#666;font-size:13px'>Sent from the DAMS Rent a Car admin panel.</p>",
     )
-    result = await send_email(req.to, "DAMS Car Rental — SMTP test", html)
+    result = await send_email(req.to, "DAMS Rent a Car — SMTP test", html)
     return result
 
 

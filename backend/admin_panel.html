@@ -11,6 +11,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .header{background:#0a0a0a;color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
 .header h1{font-size:20px;font-weight:900;letter-spacing:-0.5px}
 .header span{color:#ff3b30;font-size:12px;font-weight:700;letter-spacing:4px}
+.brand-logo{height:42px;width:auto;max-width:200px;object-fit:contain;display:block}
+.login-logo{height:80px;width:auto;max-width:260px;object-fit:contain;display:block;margin:0 auto 8px}
 .btn{padding:10px 20px;border:none;border-radius:50px;cursor:pointer;font-weight:700;font-size:14px}
 .btn-red{background:#ff3b30;color:#fff}
 .btn-gray{background:#e5e5e5;color:#666}
@@ -74,8 +76,7 @@ function render(html) { document.getElementById('app').innerHTML = html; }
 function showLogin(err='') {
   render(`
     <div class="login-box">
-      <h1 style="font-size:40px;font-weight:900">DAMS</h1>
-      <span style="color:#ff3b30;font-weight:700;letter-spacing:4px;font-size:14px">CAR RENTAL</span>
+      <img class="login-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/>
       <p style="margin-top:12px">Admin Panel Login</p>
       ${err ? '<div class="error">'+err+'</div>' : ''}
       <input class="input" id="email" placeholder="Email" value="admin@damscarrental.com">
@@ -101,7 +102,7 @@ async function showDashboard() {
     locations = locs;
     render(`
       <div class="header">
-        <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+        <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
           <button class="btn btn-sm btn-gray" onclick="showLocations()">Locations</button>
@@ -163,7 +164,7 @@ async function showAnalytics() {
 
     render(`
       <div class="header">
-        <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+        <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
           <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
@@ -300,7 +301,7 @@ async function showNotifications() {
 
   render(`
     <div class="header">
-      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
         <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
@@ -465,7 +466,7 @@ async function showPromos() {
 
   render(`
     <div class="header">
-      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
         <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
@@ -517,7 +518,7 @@ function editPromo(p) {
 
   render(`
     <div class="header">
-      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
       <div><button class="btn btn-sm btn-gray" onclick="showPromos()">← Back</button></div>
     </div>
     <div class="container" style="max-width:640px">
@@ -898,7 +899,7 @@ async function showLocations() {
   const locs = await api('/locations');
   render(`
     <div class="header">
-      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
         <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
@@ -982,7 +983,7 @@ async function showTerms() {
   try { const r = await api('/settings/rental-terms'); terms = (r && r.terms) || ''; } catch(e){}
   render(`
     <div class="header">
-      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
         <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
@@ -1029,7 +1030,7 @@ async function showPrivacy() {
   } catch(e){}
   render(`
     <div class="header">
-      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
         <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
@@ -1077,7 +1078,7 @@ async function showCustomers(page = 1, q = _custQ) {
   const items = data.items || [];
   render(`
     <div class="header">
-      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
         <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
@@ -1188,7 +1189,7 @@ async function showBookings() {
     ];
     render(`
       <div class="header">
-        <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+        <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
           <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
@@ -1300,7 +1301,7 @@ async function downloadReceipt(id) {
 async function showMigration() {
   render(`
     <div class="header">
-      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
         <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
