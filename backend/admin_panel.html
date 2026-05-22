@@ -607,7 +607,13 @@ function carCard(c) {
     <div class="card-info">
       <h3>${c.name}</h3>
       <p>${c.category} · $${c.price_per_day}/day · ${c.seats} seats</p>
-      ${c.pickup_location?.name ? '<p style="color:#007aff;font-size:11px">📍 '+c.pickup_location.name+'</p>' : ''}
+      ${(() => {
+        const pls = (c.pickup_locations && c.pickup_locations.length) ? c.pickup_locations : (c.pickup_location ? [c.pickup_location] : []);
+        if (!pls.length) return '';
+        const names = pls.map(p => p.name).filter(Boolean);
+        const label = names.length === 1 ? names[0] : (names[0] + ' +' + (names.length-1) + ' more');
+        return '<p style="color:#007aff;font-size:11px" title="' + names.join(', ').replace(/"/g,'&quot;') + '">📍 ' + label + '</p>';
+      })()}
     </div>
     <div class="card-actions">
       <button class="btn btn-sm btn-blue" onclick="showCarForm('${c.id}')">Edit</button>
@@ -694,16 +700,22 @@ async function showCarForm(id) {
           </label>
         </div>
 
-        <div class="section-title">Pickup Location <span style="color:#FF3B30">*</span></div>
-        ${car.pickup_location?.name ? `<div class="selected-loc"><span class="dot" style="background:#34c759"></span>${car.pickup_location.name}<span class="clear" onclick="document.getElementById('f-pickup').value='';this.parentNode.remove()">✕</span></div>` : ''}
-        <div class="loc-pills" id="pickup-pills">${locations.map(l=>`<span class="loc-pill ${car.pickup_location?.name===l.name?'active-green':''}" onclick="selectLoc('pickup','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
-        <input type="hidden" id="f-pickup" value='${JSON.stringify(car.pickup_location||{})}'>
-        <div class="section-title">Drop-off Location <span style="color:#FF3B30">*</span></div>
-        ${car.dropoff_location?.name ? `<div class="selected-loc"><span class="dot" style="background:#ff3b30"></span>${car.dropoff_location.name}<span class="clear" onclick="document.getElementById('f-dropoff').value='';this.parentNode.remove()">✕</span></div>` : ''}
-        <div class="loc-pills" id="dropoff-pills">${locations.map(l=>`<span class="loc-pill ${car.dropoff_location?.name===l.name?'active-red':''}" onclick="selectLoc('dropoff','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
-        <input type="hidden" id="f-dropoff" value='${JSON.stringify(car.dropoff_location||{})}'>
+        <div class="section-title">Pickup Locations <span style="color:#FF3B30">*</span> <span id="pickup-count" style="color:#666;font-size:11px;font-weight:600;margin-left:6px"></span></div>
+        <div class="loc-pills" id="pickup-pills">${locations.map(l=>{
+          const arr = (car.pickup_locations && car.pickup_locations.length) ? car.pickup_locations : (car.pickup_location ? [car.pickup_location] : []);
+          const selected = arr.some(x => x && x.name === l.name);
+          return `<span class="loc-pill ${selected?'active-green':''}" data-loc-type="pickup" data-loc-name="${l.name.replace(/"/g,'&quot;')}" onclick="toggleLoc('pickup','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`;
+        }).join('')}</div>
+        <input type="hidden" id="f-pickups" value='${JSON.stringify((car.pickup_locations && car.pickup_locations.length) ? car.pickup_locations : (car.pickup_location ? [car.pickup_location] : []))}'>
+        <div class="section-title" style="margin-top:14px">Drop-off Locations <span style="color:#FF3B30">*</span> <span id="dropoff-count" style="color:#666;font-size:11px;font-weight:600;margin-left:6px"></span></div>
+        <div class="loc-pills" id="dropoff-pills">${locations.map(l=>{
+          const arr = (car.dropoff_locations && car.dropoff_locations.length) ? car.dropoff_locations : (car.dropoff_location ? [car.dropoff_location] : []);
+          const selected = arr.some(x => x && x.name === l.name);
+          return `<span class="loc-pill ${selected?'active-red':''}" data-loc-type="dropoff" data-loc-name="${l.name.replace(/"/g,'&quot;')}" onclick="toggleLoc('dropoff','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`;
+        }).join('')}</div>
+        <input type="hidden" id="f-dropoffs" value='${JSON.stringify((car.dropoff_locations && car.dropoff_locations.length) ? car.dropoff_locations : (car.dropoff_location ? [car.dropoff_location] : []))}'>
         <div style="background:#fff5e6;border:1px solid #ffd48a;border-radius:10px;padding:10px 12px;margin-top:10px;font-size:12px;color:#a05a00;font-weight:600">
-          ⚠️ You must select <strong>both</strong> a Pickup and a Drop-off location before saving. Cars without locations cannot be booked.
+          ⚠️ Select <strong>one or more</strong> Pickup AND <strong>one or more</strong> Drop-off locations. Customers will choose from your selection at checkout. Cars without locations cannot be booked.
         </div>
         <div style="display:flex;gap:10px;margin-top:24px">
           <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
@@ -715,12 +727,26 @@ async function showCarForm(id) {
   setTimeout(renderGallery, 0);
 }
 
-function selectLoc(type, name, lat, lng) {
-  const data = JSON.stringify({name,lat,lng});
-  document.getElementById('f-'+type).value = data;
-  const pills = document.getElementById(type+'-pills');
-  pills.querySelectorAll('.loc-pill').forEach(p => p.classList.remove('active-green','active-red'));
-  event.target.classList.add(type==='pickup'?'active-green':'active-red');
+// Multi-select location toggle: adds/removes the location from the hidden
+// `f-pickups`/`f-dropoffs` JSON arrays. Updates the pill's active style and
+// the running count label.
+function toggleLoc(type, name, lat, lng) {
+  const inputId = 'f-' + (type==='pickup' ? 'pickups' : 'dropoffs');
+  const input = document.getElementById(inputId);
+  let arr = [];
+  try { arr = JSON.parse(input.value || '[]'); } catch(e) { arr = []; }
+  const idx = arr.findIndex(x => x && x.name === name);
+  const activeClass = type==='pickup' ? 'active-green' : 'active-red';
+  if (idx >= 0) {
+    arr.splice(idx, 1);
+    if (event && event.target && event.target.classList) event.target.classList.remove(activeClass);
+  } else {
+    arr.push({name, lat, lng});
+    if (event && event.target && event.target.classList) event.target.classList.add(activeClass);
+  }
+  input.value = JSON.stringify(arr);
+  const counter = document.getElementById(type+'-count');
+  if (counter) counter.textContent = arr.length ? '(' + arr.length + ' selected)' : '';
 }
 
 async function saveCar(id) {
@@ -750,11 +776,11 @@ async function saveCar(id) {
     keyless_entry: document.getElementById('f-keyless').checked,
     sunroof: document.getElementById('f-sunroof').checked,
   };
-  try { body.pickup_location = JSON.parse(document.getElementById('f-pickup').value); } catch(e) { body.pickup_location = {name:'',lat:0,lng:0}; }
-  try { body.dropoff_location = JSON.parse(document.getElementById('f-dropoff').value); } catch(e) { body.dropoff_location = {name:'',lat:0,lng:0}; }
+  try { body.pickup_locations = JSON.parse(document.getElementById('f-pickups').value || '[]'); } catch(e) { body.pickup_locations = []; }
+  try { body.dropoff_locations = JSON.parse(document.getElementById('f-dropoffs').value || '[]'); } catch(e) { body.dropoff_locations = []; }
   if (!body.name||!body.brand||!body.price_per_day) { alert('Name, brand and price required'); return; }
-  if (!body.pickup_location?.name) { alert('❌ Please select a Pickup Location before saving the vehicle.'); return; }
-  if (!body.dropoff_location?.name) { alert('❌ Please select a Drop-off Location before saving the vehicle.'); return; }
+  if (!body.pickup_locations.length) { alert('❌ Please select at least one Pickup Location before saving the vehicle.'); return; }
+  if (!body.dropoff_locations.length) { alert('❌ Please select at least one Drop-off Location before saving the vehicle.'); return; }
   try {
     await api(id?'/cars/'+id:'/cars', {method:id?'PUT':'POST', body:JSON.stringify(body)});
     closeModal(); showDashboard();

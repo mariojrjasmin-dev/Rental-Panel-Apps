@@ -405,8 +405,10 @@ class CarCreate(BaseModel):
     description: str = ""
     image_url: str = ""
     images: List[str] = []  # Additional photos beyond the primary image_url
-    pickup_location: Optional[Dict] = None
-    dropoff_location: Optional[Dict] = None
+    pickup_location: Optional[Dict] = None  # DEPRECATED — kept for backward compat (mirrors pickup_locations[0])
+    dropoff_location: Optional[Dict] = None  # DEPRECATED — kept for backward compat
+    pickup_locations: List[Dict] = []  # Multi-select: list of {name, lat, lng}
+    dropoff_locations: List[Dict] = []  # Multi-select: list of {name, lat, lng}
     available: bool = True
     # Mileage & premium features
     unlimited_mileage: bool = True
@@ -434,8 +436,10 @@ class CarUpdate(BaseModel):
     description: Optional[str] = None
     image_url: Optional[str] = None
     images: Optional[List[str]] = None
-    pickup_location: Optional[Dict] = None
-    dropoff_location: Optional[Dict] = None
+    pickup_location: Optional[Dict] = None  # DEPRECATED — kept for backward compat
+    dropoff_location: Optional[Dict] = None  # DEPRECATED — kept for backward compat
+    pickup_locations: Optional[List[Dict]] = None  # Multi-select list
+    dropoff_locations: Optional[List[Dict]] = None  # Multi-select list
     available: Optional[bool] = None
     unlimited_mileage: Optional[bool] = None
     mileage_limit: Optional[int] = None
@@ -889,6 +893,21 @@ async def google_session(request: Request, response: Response):
 def serialize_car(car):
     car["id"] = str(car["_id"])
     del car["_id"]
+    # Backward-compat normalisation: ensure both singular and plural location
+    # fields are always present so old mobile clients (singular) and new clients
+    # (plural) read the same data.
+    pl = car.get("pickup_locations") or []
+    dl = car.get("dropoff_locations") or []
+    if not pl and car.get("pickup_location"):
+        pl = [car["pickup_location"]]
+    if not dl and car.get("dropoff_location"):
+        dl = [car["dropoff_location"]]
+    car["pickup_locations"] = pl
+    car["dropoff_locations"] = dl
+    if not car.get("pickup_location") and pl:
+        car["pickup_location"] = pl[0]
+    if not car.get("dropoff_location") and dl:
+        car["dropoff_location"] = dl[0]
     return car
 
 async def enrich_car_with_rating(car):
@@ -974,16 +993,27 @@ async def create_car(car: CarCreate, request: Request):
     user = await get_authenticated_user(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-    # Pickup & drop-off locations are REQUIRED so that the car can actually be
-    # booked, taxed (per-location tax_rate), and routed in maps. Reject the
-    # request explicitly so admins can't accidentally create un-bookable cars.
-    p = car.pickup_location or {}
-    d = car.dropoff_location or {}
-    if not (p.get("name") or "").strip():
-        raise HTTPException(status_code=400, detail="Pickup location is required. Please select one from the list.")
-    if not (d.get("name") or "").strip():
-        raise HTTPException(status_code=400, detail="Drop-off location is required. Please select one from the list.")
     car_dict = car.dict()
+    # ---- Multi-location backward-compat layer ----
+    # If admin sent plural lists, mirror the first one back to the singular
+    # field so older mobile clients still work. If admin sent the singular only,
+    # auto-populate the plural list as [singular] so new clients work too.
+    pl = [l for l in (car_dict.get("pickup_locations") or []) if (l.get("name") or "").strip()]
+    dl = [l for l in (car_dict.get("dropoff_locations") or []) if (l.get("name") or "").strip()]
+    sp = car_dict.get("pickup_location") or {}
+    sd = car_dict.get("dropoff_location") or {}
+    if not pl and (sp.get("name") or "").strip():
+        pl = [sp]
+    if not dl and (sd.get("name") or "").strip():
+        dl = [sd]
+    if not pl:
+        raise HTTPException(status_code=400, detail="At least one Pickup location is required. Please select one or more from the list.")
+    if not dl:
+        raise HTTPException(status_code=400, detail="At least one Drop-off location is required. Please select one or more from the list.")
+    car_dict["pickup_locations"] = pl
+    car_dict["dropoff_locations"] = dl
+    car_dict["pickup_location"] = pl[0]
+    car_dict["dropoff_location"] = dl[0]
     car_dict["created_at"] = datetime.now(timezone.utc)
     result = await db.cars.insert_one(car_dict)
     car_dict["id"] = str(result.inserted_id)
@@ -998,15 +1028,29 @@ async def update_car(car_id: str, car: CarUpdate, request: Request):
     update_data = {k: v for k, v in car.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
-    # If pickup/dropoff location is being updated, it must still be non-empty.
-    if "pickup_location" in update_data:
+    # ---- Multi-location backward-compat layer (PUT) ----
+    if "pickup_locations" in update_data:
+        pl = [l for l in (update_data.get("pickup_locations") or []) if (l.get("name") or "").strip()]
+        if not pl:
+            raise HTTPException(status_code=400, detail="At least one Pickup location is required.")
+        update_data["pickup_locations"] = pl
+        update_data["pickup_location"] = pl[0]
+    elif "pickup_location" in update_data:
         p = update_data["pickup_location"] or {}
         if not (p.get("name") or "").strip():
-            raise HTTPException(status_code=400, detail="Pickup location cannot be empty. Please select one from the list.")
-    if "dropoff_location" in update_data:
+            raise HTTPException(status_code=400, detail="Pickup location cannot be empty.")
+        update_data["pickup_locations"] = [p]
+    if "dropoff_locations" in update_data:
+        dl = [l for l in (update_data.get("dropoff_locations") or []) if (l.get("name") or "").strip()]
+        if not dl:
+            raise HTTPException(status_code=400, detail="At least one Drop-off location is required.")
+        update_data["dropoff_locations"] = dl
+        update_data["dropoff_location"] = dl[0]
+    elif "dropoff_location" in update_data:
         d = update_data["dropoff_location"] or {}
         if not (d.get("name") or "").strip():
-            raise HTTPException(status_code=400, detail="Drop-off location cannot be empty. Please select one from the list.")
+            raise HTTPException(status_code=400, detail="Drop-off location cannot be empty.")
+        update_data["dropoff_locations"] = [d]
     result = await db.cars.update_one({"_id": ObjectId(car_id)}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Car not found")
