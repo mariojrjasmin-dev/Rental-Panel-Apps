@@ -1098,19 +1098,44 @@ async def create_booking(booking: BookingCreate, request: Request):
     # so admin-entered name variations don't silently fall back to defaults.
     tax_rate = 0.0
     min_days = 1
+    pickup_country = ""
     pickup_loc_name = (booking.pickup_location.get("name", "") or "").strip()
     if pickup_loc_name:
         import re
         escaped = re.escape(pickup_loc_name)
         loc = await db.locations.find_one(
             {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
-            {"_id": 0, "tax_rate": 1, "name": 1, "min_booking_days": 1},
+            {"_id": 0, "tax_rate": 1, "name": 1, "min_booking_days": 1, "country": 1},
         )
         if loc:
             tax_rate = float(loc.get("tax_rate") or 0)
             min_days = int(loc.get("min_booking_days") or 1)
+            pickup_country = (loc.get("country") or "").strip()
         else:
             logger.warning(f"No location matched name={pickup_loc_name!r} for tax/min-days lookup")
+
+    # ---- Mandatory: pickup & drop-off must be in the SAME COUNTRY ----
+    # Look up the dropoff country from the locations collection (best-effort
+    # case-insensitive match). If both countries resolve and differ → reject.
+    dropoff_loc_name = (booking.dropoff_location.get("name", "") or "").strip() if isinstance(booking.dropoff_location, dict) else ""
+    dropoff_country = ""
+    if dropoff_loc_name:
+        import re as _re_do
+        do_loc = await db.locations.find_one(
+            {"name": {"$regex": f"^{_re_do.escape(dropoff_loc_name)}$", "$options": "i"}},
+            {"_id": 0, "country": 1},
+        )
+        if do_loc:
+            dropoff_country = (do_loc.get("country") or "").strip()
+
+    if pickup_country and dropoff_country and pickup_country.lower() != dropoff_country.lower():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Pick-up and drop-off must be in the same country. "
+                f"Pick-up is in {pickup_country}, but drop-off is in {dropoff_country}."
+            ),
+        )
     
     # Enforce per-location minimum booking days
     if days < min_days:
@@ -2140,7 +2165,7 @@ async def get_tax_by_location_name(name: str):
     if not q:
         return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0}
 
-    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "min_booking_days": 1, "insurance_included": 1, "refuel_amount": 1}
+    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "country": 1, "min_booking_days": 1, "insurance_included": 1, "refuel_amount": 1}
     safe_q = _re.escape(q)
 
     # 1) Exact (case-insensitive)
@@ -2177,11 +2202,12 @@ async def get_tax_by_location_name(name: str):
             "tax_rate": float(loc.get("tax_rate") or 0.0),
             "name": loc.get("name", ""),
             "city": loc.get("city", ""),
+            "country": (loc.get("country") or "").strip(),
             "min_booking_days": int(loc.get("min_booking_days") or 1),
             "insurance_included": bool(loc.get("insurance_included") or False),
             "refuel_amount": float(loc.get("refuel_amount") or 0.0),
         }
-    return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0}
+    return {"tax_rate": 0.0, "name": q, "city": "", "country": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0}
 
 @api_router.get("/locations/{location_id}")
 async def get_location(location_id: str):

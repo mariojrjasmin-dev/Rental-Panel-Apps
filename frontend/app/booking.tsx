@@ -25,6 +25,9 @@ export default function BookingScreen() {
   type LocOpt = { name: string; lat: number; lng: number };
   const [selectedPickup, setSelectedPickup] = useState<LocOpt | null>(null);
   const [selectedDropoff, setSelectedDropoff] = useState<LocOpt | null>(null);
+  // Country lookup: name → country (used to enforce same-country pickup/dropoff)
+  const [pickupCountry, setPickupCountry] = useState<string>('');
+  const [countryByName, setCountryByName] = useState<Record<string, string>>({});
   // Rental terms state
   const [termsText, setTermsText] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -200,6 +203,27 @@ export default function BookingScreen() {
     })();
   }, []);
 
+  // Fetch the locations catalogue once → build a {name: country} lookup so
+  // we can enforce the "same country" rule on the booking screen without
+  // making one network call per chip.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${BACKEND_URL}/api/locations`);
+        if (r.ok) {
+          const list = await r.json();
+          const map: Record<string, string> = {};
+          for (const l of (list || [])) {
+            const nm = (l?.name || '').trim();
+            const co = (l?.country || '').trim();
+            if (nm) map[nm.toLowerCase()] = co;
+          }
+          setCountryByName(map);
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  }, []);
+
   // When the car loads, default the picker selection to the first allowed
   // pickup/dropoff (or the legacy singular fields for old data).
   useEffect(() => {
@@ -218,6 +242,35 @@ export default function BookingScreen() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [car?.id]);
+
+  // Helper: country for a given location-name (uses the prefetched map).
+  const countryFor = (name?: string) => {
+    if (!name) return '';
+    return (countryByName[name.toLowerCase()] || '').trim();
+  };
+
+  // Whenever pickupCountry resolves (or changes), make sure the currently
+  // selected dropoff is in the same country. If not, auto-fix to the first
+  // compatible dropoff option from the car's allowed list. This prevents
+  // the customer from ever ending up with a cross-country selection.
+  useEffect(() => {
+    if (!car || !pickupCountry) return;
+    const dropoffs: LocOpt[] = (car.dropoff_locations && car.dropoff_locations.length)
+      ? car.dropoff_locations
+      : (car.dropoff_location ? [car.dropoff_location] : []);
+    if (!dropoffs.length) return;
+    const currentCountry = countryFor(selectedDropoff?.name);
+    if (currentCountry && currentCountry.toLowerCase() === pickupCountry.toLowerCase()) return;
+    // Find first dropoff in same country
+    const sameCountry = dropoffs.find(d => {
+      const c = countryFor(d.name);
+      return c && c.toLowerCase() === pickupCountry.toLowerCase();
+    });
+    if (sameCountry) {
+      setSelectedDropoff(sameCountry);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickupCountry, car?.id, countryByName]);
 
   // Tax rate refreshes whenever the *selected* pickup location changes
   useEffect(() => {
@@ -238,12 +291,18 @@ export default function BookingScreen() {
           const refuel = Number(taxData.refuel_amount) || 0;
           setRefuelAmount(refuel);
           if (refuel <= 0) setRefuelOptedIn(false);
+          // Track pickup country so we can enforce same-country dropoff.
+          // Falls back to the {name → country} map if tax-by-name didn't resolve a country.
+          const co = (taxData.country || '').trim();
+          if (co) setPickupCountry(co);
+          else setPickupCountry((countryByName[(locName || '').toLowerCase()] || '').trim());
         } else {
           setTaxRate(0);
           setLocMinDays(1);
           setInsuranceIncluded(false);
           setRefuelAmount(0);
           setRefuelOptedIn(false);
+          setPickupCountry((countryByName[(locName || '').toLowerCase()] || '').trim());
         }
       } catch (e: any) {
         if (e?.name !== 'AbortError') console.log('Tax fetch error:', e);
@@ -256,6 +315,16 @@ export default function BookingScreen() {
     if (!car) return;
     if (!termsAccepted) {
       Alert.alert('Terms required', 'Please review and accept the rental terms before confirming.');
+      return;
+    }
+    // Same-country guard (client-side; server enforces the same rule).
+    const pCo = countryFor(selectedPickup?.name);
+    const dCo = countryFor(selectedDropoff?.name);
+    if (pCo && dCo && pCo.toLowerCase() !== dCo.toLowerCase()) {
+      Alert.alert(
+        'Different country',
+        `Pick-up is in ${pCo} but drop-off is in ${dCo}. Rentals are only allowed within the same country.`
+      );
       return;
     }
     setBooking(true);
@@ -386,6 +455,13 @@ export default function BookingScreen() {
           return (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>📍 Locations</Text>
+              {/* Same-country rule banner */}
+              <View style={styles.sameCountryBanner}>
+                <Ionicons name="globe-outline" size={14} color="#0a5d2b" />
+                <Text style={styles.sameCountryBannerText}>
+                  Pick-up and drop-off must be in the same country.
+                </Text>
+              </View>
               {/* Pickup picker — visible only when there are 2+ options */}
               {pickups.length > 1 && (
                 <View style={{ marginBottom: 8 }}>
@@ -393,6 +469,7 @@ export default function BookingScreen() {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                     {pickups.map((loc) => {
                       const active = selectedPickup?.name === loc.name;
+                      const co = countryFor(loc.name);
                       return (
                         <TouchableOpacity
                           key={`pu-${loc.name}`}
@@ -402,7 +479,10 @@ export default function BookingScreen() {
                           style={[styles.locChip, active && styles.locChipPickupActive]}
                         >
                           <View style={[styles.locDot, { backgroundColor: '#34C759' }]} />
-                          <Text style={[styles.locChipText, active && styles.locChipTextActive]} numberOfLines={1}>{loc.name}</Text>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={[styles.locChipText, active && styles.locChipTextActive]} numberOfLines={1}>{loc.name}</Text>
+                            {!!co && <Text style={styles.locChipCountry} numberOfLines={1}>{co}</Text>}
+                          </View>
                           {active && <Ionicons name="checkmark-circle" size={16} color="#34C759" />}
                         </TouchableOpacity>
                       );
@@ -417,17 +497,33 @@ export default function BookingScreen() {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                     {dropoffs.map((loc) => {
                       const active = selectedDropoff?.name === loc.name;
+                      const co = countryFor(loc.name);
+                      const sameCountry = !pickupCountry || !co || co.toLowerCase() === pickupCountry.toLowerCase();
+                      const disabled = !sameCountry;
                       return (
                         <TouchableOpacity
                           key={`do-${loc.name}`}
                           testID={`dropoff-option-${loc.name}`}
-                          onPress={() => setSelectedDropoff(loc)}
+                          onPress={() => {
+                            if (disabled) {
+                              Alert.alert(
+                                'Different country',
+                                `This drop-off is in ${co} but your pick-up is in ${pickupCountry}. Rentals must stay in the same country.`
+                              );
+                              return;
+                            }
+                            setSelectedDropoff(loc);
+                          }}
                           activeOpacity={0.7}
-                          style={[styles.locChip, active && styles.locChipDropoffActive]}
+                          style={[styles.locChip, active && styles.locChipDropoffActive, disabled && styles.locChipDisabled]}
                         >
-                          <View style={[styles.locDot, { backgroundColor: '#FF3B30' }]} />
-                          <Text style={[styles.locChipText, active && styles.locChipTextActive]} numberOfLines={1}>{loc.name}</Text>
-                          {active && <Ionicons name="checkmark-circle" size={16} color="#FF3B30" />}
+                          <View style={[styles.locDot, { backgroundColor: disabled ? '#C7C7CC' : '#FF3B30' }]} />
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={[styles.locChipText, active && styles.locChipTextActive, disabled && styles.locChipTextDisabled]} numberOfLines={1}>{loc.name}</Text>
+                            {!!co && <Text style={[styles.locChipCountry, disabled && styles.locChipCountryDisabled]} numberOfLines={1}>{co}{disabled ? ' · unavailable' : ''}</Text>}
+                          </View>
+                          {active && !disabled && <Ionicons name="checkmark-circle" size={16} color="#FF3B30" />}
+                          {disabled && <Ionicons name="lock-closed" size={14} color="#C7C7CC" />}
                         </TouchableOpacity>
                       );
                     })}
@@ -804,11 +900,17 @@ const styles = StyleSheet.create({
   locChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 50, backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E5E5E5', maxWidth: 220 },
   locChipPickupActive: { backgroundColor: '#e6f9ed', borderColor: '#34C759' },
   locChipDropoffActive: { backgroundColor: '#FFE9E7', borderColor: '#FF3B30' },
+  locChipDisabled: { backgroundColor: '#FAFAFA', borderColor: '#EFEFEF', opacity: 0.6 },
   locChipText: { fontSize: 13, fontWeight: '700', color: '#444' },
   locChipTextActive: { color: '#0a0a0a' },
+  locChipTextDisabled: { color: '#999', textDecorationLine: 'line-through' },
+  locChipCountry: { fontSize: 10, color: '#888', fontWeight: '600', marginTop: 1 },
+  locChipCountryDisabled: { color: '#bbb' },
   locDot: { width: 8, height: 8, borderRadius: 4 },
   locSummary: { gap: 4, paddingVertical: 8, marginVertical: 6, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
   locSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   locSummaryText: { flex: 1, fontSize: 13, color: '#666', fontWeight: '600' },
   locSummaryBold: { color: '#0a0a0a', fontWeight: '800' },
+  sameCountryBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#e6f9ed', borderWidth: 1, borderColor: '#a4e1be', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
+  sameCountryBannerText: { fontSize: 12, color: '#0a5d2b', fontWeight: '700', flex: 1 },
 });
