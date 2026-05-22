@@ -20,6 +20,11 @@ export default function BookingScreen() {
   const [insuranceIncluded, setInsuranceIncluded] = useState(false);
   const [refuelAmount, setRefuelAmount] = useState(0);
   const [refuelOptedIn, setRefuelOptedIn] = useState(false);
+  // Multi-location: customer picks from the allowed pickup/dropoff lists.
+  // Default to the first entry; resets when the car changes.
+  type LocOpt = { name: string; lat: number; lng: number };
+  const [selectedPickup, setSelectedPickup] = useState<LocOpt | null>(null);
+  const [selectedDropoff, setSelectedDropoff] = useState<LocOpt | null>(null);
   // Rental terms state
   const [termsText, setTermsText] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -195,9 +200,28 @@ export default function BookingScreen() {
     })();
   }, []);
 
-  // Tax rate refreshes whenever the car's pickup location changes
+  // When the car loads, default the picker selection to the first allowed
+  // pickup/dropoff (or the legacy singular fields for old data).
   useEffect(() => {
-    const locName = car?.pickup_location?.name;
+    if (!car) return;
+    const pickups: LocOpt[] = (car.pickup_locations && car.pickup_locations.length)
+      ? car.pickup_locations
+      : (car.pickup_location ? [car.pickup_location] : []);
+    const dropoffs: LocOpt[] = (car.dropoff_locations && car.dropoff_locations.length)
+      ? car.dropoff_locations
+      : (car.dropoff_location ? [car.dropoff_location] : []);
+    if (pickups.length && (!selectedPickup || !pickups.some(p => p.name === selectedPickup.name))) {
+      setSelectedPickup(pickups[0]);
+    }
+    if (dropoffs.length && (!selectedDropoff || !dropoffs.some(d => d.name === selectedDropoff.name))) {
+      setSelectedDropoff(dropoffs[0]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [car?.id]);
+
+  // Tax rate refreshes whenever the *selected* pickup location changes
+  useEffect(() => {
+    const locName = selectedPickup?.name;
     if (!locName) return;
     const ctrl = new AbortController();
     (async () => {
@@ -226,7 +250,7 @@ export default function BookingScreen() {
       }
     })();
     return () => ctrl.abort();
-  }, [car?.pickup_location?.name]);
+  }, [selectedPickup?.name]);
 
   const handleBooking = async () => {
     if (!car) return;
@@ -247,8 +271,8 @@ export default function BookingScreen() {
           car_id: carId,
           pickup_date: pickupStr,
           dropoff_date: dropoffStr,
-          pickup_location: car.pickup_location || { name: 'TBD', lat: 0, lng: 0 },
-          dropoff_location: car.dropoff_location || { name: 'TBD', lat: 0, lng: 0 },
+          pickup_location: selectedPickup || car.pickup_location || { name: 'TBD', lat: 0, lng: 0 },
+          dropoff_location: selectedDropoff || car.dropoff_location || { name: 'TBD', lat: 0, lng: 0 },
           payment_method: paymentMethod,
           promo_code: appliedPromo?.code || null,
           refuel_opted_in: refuelOptedIn && refuelAmount > 0,
@@ -351,32 +375,107 @@ export default function BookingScreen() {
           </View>
         </View>
 
-        {(car.pickup_location || car.dropoff_location) && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Locations</Text>
-            {car.pickup_location && (
-              <TouchableOpacity
-                testID="booking-map-btn"
-                style={styles.locationRow}
-                onPress={() => router.push({
-                  pathname: '/map-view',
-                  params: {
-                    pickupLat: car.pickup_location.lat,
-                    pickupLng: car.pickup_location.lng,
-                    pickupName: car.pickup_location.name,
-                    dropoffLat: car.dropoff_location?.lat,
-                    dropoffLng: car.dropoff_location?.lng,
-                    dropoffName: car.dropoff_location?.name,
-                  }
-                })}
-              >
-                <Ionicons name="navigate-outline" size={20} color="#007AFF" />
-                <Text style={styles.locationText}>{tr('pickupLocation')} & GPS</Text>
-                <Ionicons name="chevron-forward" size={16} color="#007AFF" />
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
+        {(() => {
+          const pickups: LocOpt[] = (car.pickup_locations && car.pickup_locations.length)
+            ? car.pickup_locations
+            : (car.pickup_location ? [car.pickup_location] : []);
+          const dropoffs: LocOpt[] = (car.dropoff_locations && car.dropoff_locations.length)
+            ? car.dropoff_locations
+            : (car.dropoff_location ? [car.dropoff_location] : []);
+          if (!pickups.length && !dropoffs.length) return null;
+          return (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>📍 Locations</Text>
+              {/* Pickup picker — visible only when there are 2+ options */}
+              {pickups.length > 1 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={styles.locPickerLabel}>Pickup</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                    {pickups.map((loc) => {
+                      const active = selectedPickup?.name === loc.name;
+                      return (
+                        <TouchableOpacity
+                          key={`pu-${loc.name}`}
+                          testID={`pickup-option-${loc.name}`}
+                          onPress={() => setSelectedPickup(loc)}
+                          activeOpacity={0.7}
+                          style={[styles.locChip, active && styles.locChipPickupActive]}
+                        >
+                          <View style={[styles.locDot, { backgroundColor: '#34C759' }]} />
+                          <Text style={[styles.locChipText, active && styles.locChipTextActive]} numberOfLines={1}>{loc.name}</Text>
+                          {active && <Ionicons name="checkmark-circle" size={16} color="#34C759" />}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+              {/* Dropoff picker — visible only when there are 2+ options */}
+              {dropoffs.length > 1 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={styles.locPickerLabel}>Drop-off</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                    {dropoffs.map((loc) => {
+                      const active = selectedDropoff?.name === loc.name;
+                      return (
+                        <TouchableOpacity
+                          key={`do-${loc.name}`}
+                          testID={`dropoff-option-${loc.name}`}
+                          onPress={() => setSelectedDropoff(loc)}
+                          activeOpacity={0.7}
+                          style={[styles.locChip, active && styles.locChipDropoffActive]}
+                        >
+                          <View style={[styles.locDot, { backgroundColor: '#FF3B30' }]} />
+                          <Text style={[styles.locChipText, active && styles.locChipTextActive]} numberOfLines={1}>{loc.name}</Text>
+                          {active && <Ionicons name="checkmark-circle" size={16} color="#FF3B30" />}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+              {/* Selected summary (always visible, even with single option) */}
+              {(selectedPickup || selectedDropoff) && (
+                <View style={styles.locSummary}>
+                  {selectedPickup && (
+                    <View style={styles.locSummaryRow}>
+                      <View style={[styles.locDot, { backgroundColor: '#34C759' }]} />
+                      <Text style={styles.locSummaryText} numberOfLines={1}>Pickup: <Text style={styles.locSummaryBold}>{selectedPickup.name}</Text></Text>
+                    </View>
+                  )}
+                  {selectedDropoff && (
+                    <View style={styles.locSummaryRow}>
+                      <View style={[styles.locDot, { backgroundColor: '#FF3B30' }]} />
+                      <Text style={styles.locSummaryText} numberOfLines={1}>Drop-off: <Text style={styles.locSummaryBold}>{selectedDropoff.name}</Text></Text>
+                    </View>
+                  )}
+                </View>
+              )}
+              {/* GPS map button */}
+              {selectedPickup && (
+                <TouchableOpacity
+                  testID="booking-map-btn"
+                  style={styles.locationRow}
+                  onPress={() => router.push({
+                    pathname: '/map-view',
+                    params: {
+                      pickupLat: selectedPickup.lat,
+                      pickupLng: selectedPickup.lng,
+                      pickupName: selectedPickup.name,
+                      dropoffLat: selectedDropoff?.lat,
+                      dropoffLng: selectedDropoff?.lng,
+                      dropoffName: selectedDropoff?.name,
+                    }
+                  })}
+                >
+                  <Ionicons name="navigate-outline" size={20} color="#007AFF" />
+                  <Text style={styles.locationText}>{tr('pickupLocation')} & GPS</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#007AFF" />
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        })()}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{tr('paymentMethod')}</Text>
@@ -700,4 +799,16 @@ const styles = StyleSheet.create({
   modalBtnGhostText: { color: '#0A0A0A', fontSize: 15, fontWeight: '700' },
   modalBtnPrimary: { backgroundColor: '#FF3B30' },
   modalBtnPrimaryText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
+  // Multi-location picker chips
+  locPickerLabel: { fontSize: 11, fontWeight: '800', color: '#666', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
+  locChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 50, backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E5E5E5', maxWidth: 220 },
+  locChipPickupActive: { backgroundColor: '#e6f9ed', borderColor: '#34C759' },
+  locChipDropoffActive: { backgroundColor: '#FFE9E7', borderColor: '#FF3B30' },
+  locChipText: { fontSize: 13, fontWeight: '700', color: '#444' },
+  locChipTextActive: { color: '#0a0a0a' },
+  locDot: { width: 8, height: 8, borderRadius: 4 },
+  locSummary: { gap: 4, paddingVertical: 8, marginVertical: 6, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  locSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  locSummaryText: { flex: 1, fontSize: 13, color: '#666', fontWeight: '600' },
+  locSummaryBold: { color: '#0a0a0a', fontWeight: '800' },
 });
