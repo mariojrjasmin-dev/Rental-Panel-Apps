@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
+import BrandLogo from '../../components/BrandLogo';
 import { t } from '../../src/i18n';
 import {
   isBiometricAvailable,
@@ -85,13 +87,13 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <Text style={styles.brand}>DAMS</Text>
-          <Text style={styles.brandSub}>CAR RENTAL</Text>
-          <Text style={styles.subtitle}>{t('signInSub')}</Text>
-        </View>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.header}>
+            <BrandLogo size="large" />
+            <Text style={styles.subtitle}>{t('signInSub')}</Text>
+          </View>
 
         <View style={styles.form}>
           {error ? <Text testID="login-error" style={styles.error}>{error}</Text> : null}
@@ -130,6 +132,15 @@ export default function LoginScreen() {
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{t('signIn')}</Text>}
           </TouchableOpacity>
 
+          <TouchableOpacity
+            testID="forgot-password-link"
+            onPress={() => router.push('/(auth)/forgot-password')}
+            style={styles.forgotBtn}
+            activeOpacity={0.6}
+          >
+            <Text style={styles.forgotText}>{t('forgotPassword')}</Text>
+          </TouchableOpacity>
+
           {bioReady && bioState.available && bioState.enrolled && Platform.OS !== 'web' && (
             <TouchableOpacity testID="biometric-login-btn" style={styles.bioBtn} onPress={handleBiometricLogin} disabled={loading} activeOpacity={0.7}>
               <Ionicons
@@ -166,16 +177,16 @@ export default function LoginScreen() {
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#FFFFFF' },
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24 },
-  header: { marginBottom: 40 },
-  brand: { fontSize: 48, fontWeight: '900', color: '#0A0A0A', letterSpacing: -2 },
-  brandSub: { fontSize: 16, fontWeight: '700', color: '#FF3B30', letterSpacing: 6, marginTop: -4 },
-  subtitle: { fontSize: 16, color: '#666', marginTop: 12 },
+  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 24 },
+  header: { alignItems: 'center', marginBottom: 28 },
+  subtitle: { fontSize: 15, color: '#666', marginTop: 12, textAlign: 'center' },
   form: { gap: 16 },
   error: { color: '#FF3B30', fontSize: 14, textAlign: 'center', backgroundColor: '#FFF0F0', padding: 12, borderRadius: 12 },
   inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 16, paddingHorizontal: 16, borderWidth: 1, borderColor: '#E5E5E5' },
@@ -186,6 +197,8 @@ const styles = StyleSheet.create({
   bioBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF', borderRadius: 50, paddingVertical: 14, borderWidth: 2, borderColor: '#0A0A0A', gap: 10, marginTop: 12 },
   bioBtnText: { color: '#0A0A0A', fontWeight: '700', fontSize: 15 },
   primaryBtnText: { color: '#FFF', fontSize: 17, fontWeight: '700' },
+  forgotBtn: { alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 8 },
+  forgotText: { fontSize: 14, fontWeight: '700', color: '#007AFF' },
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 8 },
   dividerLine: { flex: 1, height: 1, backgroundColor: '#E5E5E5' },
   dividerText: { marginHorizontal: 16, color: '#999', fontSize: 14 },

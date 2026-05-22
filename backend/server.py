@@ -375,10 +375,20 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     name: str
+    phone: Optional[str] = None
+    terms_accepted: bool = False
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
 
 class CarCreate(BaseModel):
     name: str
@@ -568,6 +578,13 @@ api_router = APIRouter(prefix="/api")
 @api_router.post("/auth/register")
 async def register(req: RegisterRequest, response: Response):
     email = req.email.lower().strip()
+    # Terms must be explicitly accepted at signup (required for app store / legal compliance)
+    if not req.terms_accepted:
+        raise HTTPException(status_code=400, detail="You must accept the Rental Terms & Conditions to create an account.")
+    if not req.password or len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if not req.name or not req.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required.")
     existing = await db.users.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -577,8 +594,10 @@ async def register(req: RegisterRequest, response: Response):
         "email": email,
         "password_hash": hashed,
         "name": req.name,
+        "phone": (req.phone or "").strip() or None,
         "role": "user",
-        "created_at": datetime.now(timezone.utc)
+        "terms_accepted_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(timezone.utc),
     }
     result = await db.users.insert_one(user_doc)
     user_id = str(result.inserted_id)
@@ -637,6 +656,119 @@ async def logout(response: Response):
     response.delete_cookie("refresh_token", path="/")
     response.delete_cookie("session_token", path="/")
     return {"message": "Logged out"}
+
+# ==================== PASSWORD RESET (6-DIGIT CODE) ====================
+import secrets as _secrets
+
+PASSWORD_RESET_TTL_MIN = 15  # codes expire after 15 minutes
+PASSWORD_RESET_MAX_ATTEMPTS = 5  # max wrong-code submissions per code
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest):
+    """Send a 6-digit reset code to the user's email via SMTP2GO.
+    Always returns success-shaped response (even if email not found) to avoid email enumeration."""
+    email = (req.email or "").lower().strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+
+    user = await db.users.find_one({"email": email})
+    # We always claim success to prevent attackers enumerating registered emails.
+    response_payload = {"ok": True, "message": "If an account exists for this email, a reset code has been sent."}
+
+    if not user:
+        return response_payload
+
+    # Generate 6-digit numeric code (zero-padded), store hash + expiry.
+    code = f"{_secrets.randbelow(1_000_000):06d}"
+    code_hash = hash_password(code)  # bcrypt-style hash (same helper as user passwords)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_TTL_MIN)
+    await db.password_resets.update_one(
+        {"email": email},
+        {"$set": {
+            "email": email,
+            "code_hash": code_hash,
+            "expires_at": expires_at,
+            "attempts": 0,
+            "used": False,
+            "created_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+
+    # Best-effort email delivery. Logs but does not fail the API if SMTP is down.
+    try:
+        subject = "DAMS Car Rental — Password reset code"
+        html = (
+            f"<div style='font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width:520px; margin:0 auto; padding:24px; color:#0a0a0a;'>"
+            f"<h2 style='margin:0 0 12px;color:#FF3B30'>Password reset</h2>"
+            f"<p>Hi {user.get('name','there')},</p>"
+            f"<p>Use the following 6-digit code to reset your DAMS Car Rental password. It expires in {PASSWORD_RESET_TTL_MIN} minutes.</p>"
+            f"<div style='font-size:36px;font-weight:900;letter-spacing:8px;background:#f5f5f5;padding:16px;text-align:center;border-radius:12px;margin:16px 0'>{code}</div>"
+            f"<p style='color:#666;font-size:13px'>If you didn't request this, you can safely ignore this email.</p>"
+            f"<p style='color:#999;font-size:11px;margin-top:24px'>— DAMS Rent a Car, S.R.L.</p>"
+            f"</div>"
+        )
+        text = f"Your DAMS Car Rental password reset code is {code}. It expires in {PASSWORD_RESET_TTL_MIN} minutes."
+        await send_email(email, subject, html, text)
+    except Exception as e:
+        logger.exception(f"Password reset email failed for {email}: {e}")
+
+    return response_payload
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    """Verify the 6-digit code and update the user's password."""
+    email = (req.email or "").lower().strip()
+    code = (req.code or "").strip()
+    new_password = req.new_password or ""
+
+    if not email or not code or not new_password:
+        raise HTTPException(status_code=400, detail="Email, code and new password are required.")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if not code.isdigit() or len(code) != 6:
+        raise HTTPException(status_code=400, detail="The code must be 6 digits.")
+
+    record = await db.password_resets.find_one({"email": email})
+    if not record or record.get("used"):
+        raise HTTPException(status_code=400, detail="Invalid or expired code. Please request a new one.")
+
+    # Expiry check
+    expires_at = record.get("expires_at")
+    if expires_at and expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        await db.password_resets.delete_one({"email": email})
+        raise HTTPException(status_code=400, detail="This code has expired. Please request a new one.")
+
+    # Attempt-limit check
+    attempts = int(record.get("attempts", 0))
+    if attempts >= PASSWORD_RESET_MAX_ATTEMPTS:
+        await db.password_resets.delete_one({"email": email})
+        raise HTTPException(status_code=429, detail="Too many failed attempts. Please request a new code.")
+
+    # Verify code
+    if not verify_password(code, record.get("code_hash", "")):
+        await db.password_resets.update_one({"email": email}, {"$inc": {"attempts": 1}})
+        raise HTTPException(status_code=400, detail="The code is incorrect. Please double-check and try again.")
+
+    # All good — update the user's password
+    user = await db.users.find_one({"email": email})
+    if not user:
+        # Defensive — should never happen given record exists
+        await db.password_resets.delete_one({"email": email})
+        raise HTTPException(status_code=400, detail="Account not found.")
+
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password_hash": hash_password(new_password), "password_updated_at": datetime.now(timezone.utc)}},
+    )
+    # Single-use: mark consumed (and clear any brute-force lockouts for this email)
+    await db.password_resets.update_one({"email": email}, {"$set": {"used": True}})
+    await db.login_attempts.delete_many({"identifier": {"$regex": f":{email}$"}})
+
+    return {"ok": True, "message": "Password updated successfully. You can now sign in with your new password."}
+
+
 
 
 # ==================== PUSH NOTIFICATION TOKENS ====================

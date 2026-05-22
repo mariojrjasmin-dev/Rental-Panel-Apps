@@ -26,7 +26,7 @@ type AuthContextType = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string, termsAccepted?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (u: User | null) => void;
   locale: AppLocale;
@@ -106,11 +106,11 @@ export default function RootLayout() {
     setUser(data);
   };
 
-  const register = async (name: string, email: string, password: string) => {
+  const register = async (name: string, email: string, password: string, termsAccepted: boolean = false) => {
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, terms_accepted: termsAccepted }),
     });
     if (!res.ok) {
       const err = await res.json();

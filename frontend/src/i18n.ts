@@ -113,6 +113,7 @@ const translations = {
     yes: 'Yes, enable',
     notNow: 'Not now',
     signInWithBiometric: 'Sign in with Face ID / Touch ID',
+    forgotPassword: 'Forgot password?',
     // Type-specific labels
     faceIdTitle: 'Face ID',
     touchIdTitle: 'Touch ID',
@@ -283,6 +284,7 @@ const translations = {
     yes: 'Sí, activar',
     notNow: 'Ahora no',
     signInWithBiometric: 'Iniciar sesión con Face ID / Huella',
+    forgotPassword: '¿Olvidaste tu contraseña?',
     // Type-specific labels
     faceIdTitle: 'Face ID',
     touchIdTitle: 'Touch ID',

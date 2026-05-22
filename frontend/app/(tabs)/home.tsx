@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
 import StarRating from '../../components/StarRating';
 import LegalLinks from '../../components/LegalLinks';
+import BrandLogo from '../../components/BrandLogo';
 import { t as tr } from '../../src/i18n';
 
 import { BACKEND_URL } from '../../src/config';
@@ -144,9 +145,9 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.topBar}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.greeting}>{tr('welcomeNew')}{user?.name ? `, ${user.name}` : ''}</Text>
-          <Text style={styles.title}>DAMS CAR RENTAL</Text>
+          <BrandLogo size="medium" containerStyle={styles.topLogo} />
         </View>
         <TouchableOpacity testID="profile-avatar" style={styles.avatar} onPress={() => router.push('/(tabs)/profile')}>
           <Ionicons name="person-circle" size={40} color="#0A0A0A" />
@@ -273,6 +274,7 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 4 },
   greeting: { fontSize: 14, color: '#666' },
   title: { fontSize: 22, fontWeight: '900', color: '#0A0A0A', letterSpacing: -0.5 },
+  topLogo: { alignItems: 'flex-start', marginTop: 2 },
   avatar: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 16, paddingHorizontal: 16, marginHorizontal: 24, marginTop: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E5E5' },
   searchInput: { flex: 1, fontSize: 16, color: '#0A0A0A', paddingVertical: 14, marginLeft: 10 },
