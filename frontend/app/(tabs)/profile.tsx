@@ -340,7 +340,11 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-  content: { flex: 1, paddingHorizontal: 24, paddingTop: 8 },
+  // ⚠️ Do NOT use `flex: 1` on a ScrollView contentContainerStyle — it constrains
+  // content to viewport height and disables scrolling. Use `flexGrow: 1` so the
+  // content can extend beyond viewport (making scroll actually work) while still
+  // filling the screen when content is short.
+  content: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 8 },
   title: { fontSize: 28, fontWeight: '900', color: '#0A0A0A', letterSpacing: -0.5, marginBottom: 24 },
   profileCard: { alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 24, padding: 32, marginBottom: 24 },
   avatarCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
