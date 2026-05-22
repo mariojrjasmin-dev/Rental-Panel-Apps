@@ -418,6 +418,9 @@ class CarCreate(BaseModel):
     pickup_locations: List[Dict] = []  # Multi-select: list of {name, lat, lng}
     dropoff_locations: List[Dict] = []  # Multi-select: list of {name, lat, lng}
     available: bool = True
+    # Inventory: how many physical units of this car the company owns/offers.
+    # A car is considered bookable when ACTIVE (picked-up) bookings < units_available.
+    units_available: int = 1
     # Mileage & premium features
     unlimited_mileage: bool = True
     mileage_limit: Optional[int] = None  # km/day cap when unlimited_mileage = False
@@ -449,6 +452,7 @@ class CarUpdate(BaseModel):
     pickup_locations: Optional[List[Dict]] = None  # Multi-select list
     dropoff_locations: Optional[List[Dict]] = None  # Multi-select list
     available: Optional[bool] = None
+    units_available: Optional[int] = None
     unlimited_mileage: Optional[bool] = None
     mileage_limit: Optional[int] = None
     min_driver_age: Optional[int] = None
@@ -562,6 +566,7 @@ class LocationCreate(BaseModel):
     min_booking_days: int = 1
     insurance_included: bool = False
     refuel_amount: float = 0.0  # flat fee for pre-paid refuel option (0 = disabled)
+    active: bool = True  # When False, hidden from customers and rejected by /bookings
 
 class LocationUpdate(BaseModel):
     name: Optional[str] = None
@@ -575,6 +580,7 @@ class LocationUpdate(BaseModel):
     min_booking_days: Optional[int] = None
     insurance_included: Optional[bool] = None
     refuel_amount: Optional[float] = None
+    active: Optional[bool] = None
 
 class ReviewCreate(BaseModel):
     car_id: str
@@ -919,7 +925,39 @@ def serialize_car(car):
         car["pickup_location"] = pl[0]
     if not car.get("dropoff_location") and dl:
         car["dropoff_location"] = dl[0]
+    # Inventory backfill: legacy docs without units_available default to 1.
+    # Use explicit None check (0 is a valid value meaning out-of-stock!).
+    if car.get("units_available") is None:
+        car["units_available"] = 1
     return car
+
+
+async def get_car_active_units_count(car_id: str) -> int:
+    """How many physical units of this car are currently picked-up (status='active').
+    Used to determine if at least one unit is still available for new bookings.
+    """
+    try:
+        return await db.bookings.count_documents({"car_id": car_id, "status": "active"})
+    except Exception as _e:
+        logger.warning(f"get_car_active_units_count error for {car_id}: {_e}")
+        return 0
+
+
+async def get_inactive_location_names() -> set:
+    """Returns the lowercased set of location names that are marked active=False.
+    Used to filter cars/bookings to active-only locations for customer flows.
+    """
+    try:
+        cursor = db.locations.find({"active": False}, {"_id": 0, "name": 1})
+        names = set()
+        async for d in cursor:
+            n = (d.get("name") or "").strip().lower()
+            if n:
+                names.add(n)
+        return names
+    except Exception as _e:
+        logger.warning(f"get_inactive_location_names error: {_e}")
+        return set()
 
 async def enrich_car_with_rating(car):
     """Add avg_rating and review_count to a car dict."""
@@ -972,10 +1010,41 @@ async def get_cars(category: Optional[str] = None, search: Optional[str] = None,
             query["$and"] = []
         query["$and"].append({"$or": city_conditions})
     cars = await db.cars.find(query).to_list(100)
+    # Inventory + active-location filter (customer-facing).
+    inactive_loc_names = await get_inactive_location_names()
     result = []
     for c in cars:
         c = serialize_car(c)
         c = await enrich_car_with_rating(c)
+        # Compute units_left = units_available - active(picked-up) bookings.
+        try:
+            active_count = await get_car_active_units_count(c["id"])
+        except Exception:
+            active_count = 0
+        _u = c.get("units_available")
+        units_total = int(_u) if _u is not None else 1
+        units_left = max(units_total - active_count, 0)
+        c["units_available"] = units_total
+        c["units_left"] = units_left
+        c["is_available"] = units_left > 0
+        # Hide if every unit is currently picked up.
+        if units_left <= 0:
+            continue
+        # Hide if EVERY pickup location is currently inactive.
+        if inactive_loc_names:
+            pl_names = [(p.get("name") or "").strip().lower() for p in (c.get("pickup_locations") or [])]
+            pl_names = [n for n in pl_names if n]
+            if pl_names and all(n in inactive_loc_names for n in pl_names):
+                continue
+            # Filter out the inactive picks/dropoffs from the arrays so the
+            # mobile picker only shows usable options.
+            c["pickup_locations"] = [p for p in (c.get("pickup_locations") or []) if (p.get("name") or "").strip().lower() not in inactive_loc_names]
+            c["dropoff_locations"] = [d for d in (c.get("dropoff_locations") or []) if (d.get("name") or "").strip().lower() not in inactive_loc_names]
+            # Refresh singular fallbacks
+            if c["pickup_locations"]:
+                c["pickup_location"] = c["pickup_locations"][0]
+            if c["dropoff_locations"]:
+                c["dropoff_location"] = c["dropoff_locations"][0]
         result.append(c)
     return result
 
@@ -994,6 +1063,25 @@ async def get_car(car_id: str):
         raise HTTPException(status_code=404, detail="Car not found")
     car = serialize_car(car)
     car = await enrich_car_with_rating(car)
+    # Inventory enrichment so the booking screen can show "Out of stock" or count.
+    try:
+        active_count = await get_car_active_units_count(car["id"])
+    except Exception:
+        active_count = 0
+    _u = car.get("units_available")
+    units_total = int(_u) if _u is not None else 1
+    car["units_available"] = units_total
+    car["units_left"] = max(units_total - active_count, 0)
+    car["is_available"] = car["units_left"] > 0
+    # Strip out inactive locations from the picker arrays.
+    inactive_loc_names = await get_inactive_location_names()
+    if inactive_loc_names:
+        car["pickup_locations"] = [p for p in (car.get("pickup_locations") or []) if (p.get("name") or "").strip().lower() not in inactive_loc_names]
+        car["dropoff_locations"] = [d for d in (car.get("dropoff_locations") or []) if (d.get("name") or "").strip().lower() not in inactive_loc_names]
+        if car["pickup_locations"]:
+            car["pickup_location"] = car["pickup_locations"][0]
+        if car["dropoff_locations"]:
+            car["dropoff_location"] = car["dropoff_locations"][0]
     # Include recent reviews
     reviews = await db.reviews.find({"car_id": car_id}).sort("created_at", -1).to_list(20)
     car["reviews"] = [serialize_review(r) for r in reviews]
@@ -1098,7 +1186,22 @@ async def create_booking(booking: BookingCreate, request: Request):
     car = await db.cars.find_one({"_id": ObjectId(booking.car_id)})
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
-    
+
+    # ---- Inventory guard: car must have at least one unit not currently picked up ----
+    # Customer 'pending' bookings do NOT reserve a unit; only status='active'
+    # (admin has confirmed pickup) consumes a physical car.
+    try:
+        active_count = await get_car_active_units_count(booking.car_id)
+    except Exception:
+        active_count = 0
+    _units_raw = car.get("units_available")
+    units_total = int(_units_raw) if _units_raw is not None else 1
+    if (units_total - active_count) <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="This vehicle is currently not available. All units are checked out. Please choose another car or pick a different date.",
+        )
+
     # Calculate total
     pickup = datetime.fromisoformat(booking.pickup_date)
     dropoff = datetime.fromisoformat(booking.dropoff_date)
@@ -1110,18 +1213,20 @@ async def create_booking(booking: BookingCreate, request: Request):
     tax_rate = 0.0
     min_days = 1
     pickup_country = ""
+    pickup_active = True
     pickup_loc_name = (booking.pickup_location.get("name", "") or "").strip()
     if pickup_loc_name:
         import re
         escaped = re.escape(pickup_loc_name)
         loc = await db.locations.find_one(
             {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
-            {"_id": 0, "tax_rate": 1, "name": 1, "min_booking_days": 1, "country": 1},
+            {"_id": 0, "tax_rate": 1, "name": 1, "min_booking_days": 1, "country": 1, "active": 1},
         )
         if loc:
             tax_rate = float(loc.get("tax_rate") or 0)
             min_days = int(loc.get("min_booking_days") or 1)
             pickup_country = (loc.get("country") or "").strip()
+            pickup_active = bool(loc.get("active", True))
         else:
             logger.warning(f"No location matched name={pickup_loc_name!r} for tax/min-days lookup")
 
@@ -1130,14 +1235,28 @@ async def create_booking(booking: BookingCreate, request: Request):
     # case-insensitive match). If both countries resolve and differ → reject.
     dropoff_loc_name = (booking.dropoff_location.get("name", "") or "").strip() if isinstance(booking.dropoff_location, dict) else ""
     dropoff_country = ""
+    dropoff_active = True
     if dropoff_loc_name:
         import re as _re_do
         do_loc = await db.locations.find_one(
             {"name": {"$regex": f"^{_re_do.escape(dropoff_loc_name)}$", "$options": "i"}},
-            {"_id": 0, "country": 1},
+            {"_id": 0, "country": 1, "active": 1},
         )
         if do_loc:
             dropoff_country = (do_loc.get("country") or "").strip()
+            dropoff_active = bool(do_loc.get("active", True))
+
+    # ---- Mandatory: both locations must be active for booking ----
+    if not pickup_active:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The pick-up location '{pickup_loc_name}' is not currently active for bookings. Please choose another location.",
+        )
+    if not dropoff_active:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The drop-off location '{dropoff_loc_name}' is not currently active for bookings. Please choose another location.",
+        )
 
     if pickup_country and dropoff_country and pickup_country.lower() != dropoff_country.lower():
         raise HTTPException(
@@ -2174,8 +2293,15 @@ def serialize_location(loc):
     return loc
 
 @api_router.get("/locations")
-async def get_locations(city: Optional[str] = None, type: Optional[str] = None):
+async def get_locations(city: Optional[str] = None, type: Optional[str] = None, include_inactive: bool = False):
+    """List locations.
+    By default only ACTIVE locations are returned (used by mobile app).
+    Pass include_inactive=true to also receive deactivated ones (admin view).
+    """
     query = {}
+    if not include_inactive:
+        # active != False captures legacy docs missing the field (default = True)
+        query["active"] = {"$ne": False}
     if city:
         query["city"] = {"$regex": city, "$options": "i"}
     if type and type != "both":
@@ -2185,7 +2311,8 @@ async def get_locations(city: Optional[str] = None, type: Optional[str] = None):
 
 @api_router.get("/locations/cities/list")
 async def get_location_cities():
-    cities = await db.locations.distinct("city")
+    # Active-only for customer-facing city pickers.
+    cities = await db.locations.distinct("city", {"active": {"$ne": False}})
     return cities
 
 @api_router.get("/locations/tax-by-name")
