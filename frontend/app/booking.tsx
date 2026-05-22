@@ -225,7 +225,8 @@ export default function BookingScreen() {
   }, []);
 
   // When the car loads, default the picker selection to the first allowed
-  // pickup/dropoff (or the legacy singular fields for old data).
+  // pickup/dropoff (or the legacy singular fields for old data). Prefer pickup
+  // locations that actually have stock available — never default to a 0-stock one.
   useEffect(() => {
     if (!car) return;
     const pickups: LocOpt[] = (car.pickup_locations && car.pickup_locations.length)
@@ -234,8 +235,17 @@ export default function BookingScreen() {
     const dropoffs: LocOpt[] = (car.dropoff_locations && car.dropoff_locations.length)
       ? car.dropoff_locations
       : (car.dropoff_location ? [car.dropoff_location] : []);
-    if (pickups.length && (!selectedPickup || !pickups.some(p => p.name === selectedPickup.name))) {
-      setSelectedPickup(pickups[0]);
+    // Helper that reads car.stock without needing the closure-captured one
+    const _stockOf = (n?: string) => {
+      if (!n) return 0;
+      const s = car?.stock;
+      if (!s || typeof s !== 'object') return Number(car.units_available ?? 0) || 0;
+      return Math.max(0, Number(s[n] ?? 0) || 0);
+    };
+    if (pickups.length && (!selectedPickup || !pickups.some(p => p.name === selectedPickup.name) || _stockOf(selectedPickup.name) <= 0)) {
+      // Prefer the first pickup with stock > 0; fall back to first if none.
+      const withStock = pickups.find(p => _stockOf(p.name) > 0);
+      setSelectedPickup(withStock || pickups[0]);
     }
     if (dropoffs.length && (!selectedDropoff || !dropoffs.some(d => d.name === selectedDropoff.name))) {
       setSelectedDropoff(dropoffs[0]);
@@ -248,6 +258,21 @@ export default function BookingScreen() {
     if (!name) return '';
     return (countryByName[name.toLowerCase()] || '').trim();
   };
+
+  // Helper: how many physical units of THIS car are available at the given pickup location.
+  // Reads from car.stock (per-location map) returned by GET /api/cars/{id}. Returns 0 if unknown.
+  const stockFor = (name?: string): number => {
+    if (!name || !car) return 0;
+    const s = car.stock;
+    if (!s || typeof s !== 'object') {
+      // Legacy car without stock map: fall back to the total `units_available`.
+      return Number(car.units_available ?? 0) || 0;
+    }
+    return Math.max(0, Number(s[name] ?? 0) || 0);
+  };
+
+  // Low-stock threshold below which we show a warning banner on the booking screen.
+  const LOW_STOCK_THRESHOLD = 2;
 
   // Whenever pickupCountry resolves (or changes), make sure the currently
   // selected dropoff is in the same country. If not, auto-fix to the first
@@ -324,6 +349,15 @@ export default function BookingScreen() {
       Alert.alert(
         'Different country',
         `Pick-up is in ${pCo} but drop-off is in ${dCo}. Rentals are only allowed within the same country.`
+      );
+      return;
+    }
+    // Per-location stock guard (client-side; server enforces the same rule).
+    const stockLeft = stockFor(selectedPickup?.name);
+    if (selectedPickup?.name && stockLeft <= 0) {
+      Alert.alert(
+        'Out of stock',
+        `This vehicle is currently out of stock at ${selectedPickup.name}. Please choose a different pickup location.`
       );
       return;
     }
@@ -462,6 +496,31 @@ export default function BookingScreen() {
                   Pick-up and drop-off must be in the same country.
                 </Text>
               </View>
+              {/* Low-stock warning for the currently selected pickup */}
+              {selectedPickup && (() => {
+                const left = stockFor(selectedPickup.name);
+                if (left === 0) {
+                  return (
+                    <View style={[styles.sameCountryBanner, { backgroundColor: '#ffe9e7', borderColor: '#ffb4ad' }]}>
+                      <Ionicons name="alert-circle" size={14} color="#d70015" />
+                      <Text style={[styles.sameCountryBannerText, { color: '#d70015' }]}>
+                        This vehicle is out of stock at {selectedPickup.name}.
+                      </Text>
+                    </View>
+                  );
+                }
+                if (left <= LOW_STOCK_THRESHOLD) {
+                  return (
+                    <View style={[styles.sameCountryBanner, { backgroundColor: '#fff5e6', borderColor: '#ffd48a' }]}>
+                      <Ionicons name="flame" size={14} color="#a05a00" />
+                      <Text style={[styles.sameCountryBannerText, { color: '#a05a00' }]}>
+                        🔥 Only {left} {left === 1 ? 'unit' : 'units'} left at {selectedPickup.name} — book soon!
+                      </Text>
+                    </View>
+                  );
+                }
+                return null;
+              })()}
               {/* Pickup picker — visible only when there are 2+ options */}
               {pickups.length > 1 && (
                 <View style={{ marginBottom: 8 }}>
@@ -470,20 +529,39 @@ export default function BookingScreen() {
                     {pickups.map((loc) => {
                       const active = selectedPickup?.name === loc.name;
                       const co = countryFor(loc.name);
+                      const left = stockFor(loc.name);
+                      const outOfStock = left <= 0;
+                      const sublabelParts: string[] = [];
+                      if (co) sublabelParts.push(co);
+                      if (outOfStock) sublabelParts.push('out of stock');
+                      else if (left <= LOW_STOCK_THRESHOLD) sublabelParts.push(`only ${left} left`);
+                      else sublabelParts.push(`${left} left`);
                       return (
                         <TouchableOpacity
                           key={`pu-${loc.name}`}
                           testID={`pickup-option-${loc.name}`}
-                          onPress={() => setSelectedPickup(loc)}
+                          onPress={() => {
+                            if (outOfStock) {
+                              Alert.alert(
+                                'Out of stock',
+                                `This vehicle is currently out of stock at ${loc.name}. Please choose another pickup location.`
+                              );
+                              return;
+                            }
+                            setSelectedPickup(loc);
+                          }}
                           activeOpacity={0.7}
-                          style={[styles.locChip, active && styles.locChipPickupActive]}
+                          style={[styles.locChip, active && !outOfStock && styles.locChipPickupActive, outOfStock && styles.locChipDisabled]}
                         >
-                          <View style={[styles.locDot, { backgroundColor: '#34C759' }]} />
+                          <View style={[styles.locDot, { backgroundColor: outOfStock ? '#C7C7CC' : '#34C759' }]} />
                           <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text style={[styles.locChipText, active && styles.locChipTextActive]} numberOfLines={1}>{loc.name}</Text>
-                            {!!co && <Text style={styles.locChipCountry} numberOfLines={1}>{co}</Text>}
+                            <Text style={[styles.locChipText, active && !outOfStock && styles.locChipTextActive, outOfStock && styles.locChipTextDisabled]} numberOfLines={1}>{loc.name}</Text>
+                            <Text style={[styles.locChipCountry, outOfStock && styles.locChipCountryDisabled, !outOfStock && left <= LOW_STOCK_THRESHOLD && { color: '#a05a00', fontWeight: '800' }]} numberOfLines={1}>
+                              {sublabelParts.join(' · ')}
+                            </Text>
                           </View>
-                          {active && <Ionicons name="checkmark-circle" size={16} color="#34C759" />}
+                          {active && !outOfStock && <Ionicons name="checkmark-circle" size={16} color="#34C759" />}
+                          {outOfStock && <Ionicons name="lock-closed" size={14} color="#C7C7CC" />}
                         </TouchableOpacity>
                       );
                     })}

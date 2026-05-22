@@ -391,6 +391,18 @@ frontend:
           agent: "main"
           comment: "✅ END-TO-END VERIFIED on mobile viewport (390x844). Test setup: updated 'Mercedes Benz' (id=69dd1f06a11b586d32ab7a31) with 3 pickup_locations (Punta Cana Airport, Las Americas Airport SDQ, Santo Domingo Downtown) and 2 dropoff_locations (Punta Cana Airport, Bavaro Beach Hub). VERIFIED: (1) '📍 LOCATIONS' section renders chips in horizontal ScrollView with green dot for pickup, red dot for dropoff, active state shows colored border + checkmark. (2) testIDs `pickup-option-<name>` and `dropoff-option-<name>` work — pickup-option-Las Americas Airport SDQ click changed visual selection and updated the summary line to 'Pickup: Las Americas Airport SDQ'. (3) Tax/min_days useEffect refetches on selectedPickup change — when chose Santo Domingo Downtown (18% tax, 5 min days) banner showed 'Minimum rental: 5 days'. (4) Network payload to POST /api/bookings contained the EXACTLY selected location objects with name/lat/lng/address: pickup_location={name:'Santo Domingo Downtown',lat:18.4722,lng:-69.883,…}, dropoff_location={name:'Bavaro Beach Hub',lat:18.6871,lng:-68.4484,…}. (5) Booking created successfully (id=6a10b3dad9b7e8b898a3fa14), tax computed correctly at 18%, redirected to /booking-success showing Total $1764.10. (6) Pickup Location & GPS button uses selectedPickup/selectedDropoff coordinates for map navigation. Single-location cars and legacy cars (with singular pickup_location field) still work via fallback at lines 207-218 of booking.tsx."
 
+  - task: "Mobile booking screen mirrors per-location stock (low-stock banner, out-of-stock chips)"
+    implemented: true
+    working: true
+    file: "frontend/app/booking.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "✅ END-TO-END VERIFIED. (1) New helper `stockFor(name)` reads car.stock (per-location dict from /api/cars/{id}); falls back to units_available for legacy cars. (2) New constant LOW_STOCK_THRESHOLD=2. (3) Default-pickup useEffect now prefers a pickup location with stock>0 (skips 0-stock defaults so customers never start on an unbookable option). (4) Pickup chips now display 'Country · X left' under the location name. Chips with stock=0 are visually DISABLED (greyed bg, strikethrough text, lock icon, 'out of stock' label) and tapping them surfaces Alert.alert('Out of stock', …) without changing selection. Chips with 1-2 stock show the count in BOLD ORANGE. (5) New low-stock banner appears at the top of the Locations section when the currently-selected pickup has ≤2 stock: '🔥 Only X unit(s) left at <name> — book soon!' Orange-warning styled. If 0 stock, it's a red 'out of stock' banner. (6) handleBooking() adds a client-side stock guard before POSTing. Defense-in-depth — server is still the source of truth. VERIFIED on iPhone-sized viewport (390x844): default state shows Punta Cana 'Dominican Republic · 5 left'; tapping Las Americas (1 left) shows the orange low-stock banner; tapping Santo Domingo (0) shows the disabled chip styling AND fires the 'Out of stock' alert. Screenshots: /tmp/booking-stock-default.png, /tmp/booking-stock-low.png, /tmp/booking-stock-disabled-tap.png."
+
   - task: "Per-location stock + Admin Pickups & Drop-offs window with auto stock adjust"
     implemented: true
     working: true
