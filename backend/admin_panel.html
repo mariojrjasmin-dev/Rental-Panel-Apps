@@ -105,6 +105,7 @@ async function showDashboard() {
         <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
+          <button class="btn btn-sm" style="background:#34c759;color:#fff" onclick="showOperations()">🔑 Pickups &amp; Drop-offs</button>
           <button class="btn btn-sm btn-gray" onclick="showLocations()">Locations</button>
           <button class="btn btn-sm" style="background:#5856d6;color:#fff" onclick="showAnalytics()">📊 Analytics</button>
           <button class="btn btn-sm" style="background:#ff9500;color:#fff" onclick="showNotifications()">📣 Notify</button>
@@ -603,16 +604,23 @@ async function deletePromo(id, code) {
 
 
 function carCard(c) {
-  // Inventory badge: green when units > 0, red when 0 (hidden from customers).
-  const units = (c.units_available ?? 1);
-  const unitsBadge = units === 0
+  // Inventory badge: green when total stock > 0, red when 0 (hidden from customers).
+  const stockMap = c.stock || {};
+  const total = Object.values(stockMap).reduce((s, v) => s + (parseInt(v,10) || 0), 0);
+  const hasStock = total > 0;
+  const stockBreakdown = Object.entries(stockMap)
+    .filter(([k, v]) => (parseInt(v, 10) || 0) > 0)
+    .map(([k, v]) => k + ': ' + v)
+    .join(' · ');
+  const unitsBadge = !hasStock
     ? '<span style="display:inline-block;background:#ffe9e7;color:#d70015;font-weight:800;font-size:10px;padding:3px 8px;border-radius:8px;margin-left:6px;letter-spacing:0.5px">⚠️ HIDDEN · 0 UNITS</span>'
-    : '<span style="display:inline-block;background:#e6f9ed;color:#0a5d2b;font-weight:800;font-size:10px;padding:3px 8px;border-radius:8px;margin-left:6px;letter-spacing:0.5px">'+units+' UNIT'+(units===1?'':'S')+'</span>';
-  return `<div class="card" style="${units===0?'opacity:0.7':''}">
+    : '<span title="' + stockBreakdown.replace(/"/g,'&quot;') + '" style="display:inline-block;background:#e6f9ed;color:#0a5d2b;font-weight:800;font-size:10px;padding:3px 8px;border-radius:8px;margin-left:6px;letter-spacing:0.5px;cursor:help">📦 '+total+' UNIT'+(total===1?'':'S')+'</span>';
+  return `<div class="card" style="${hasStock?'':'opacity:0.7'}">
     <img src="${c.image_url || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'}" onerror="this.style.background='#f0f0f0'">
     <div class="card-info">
       <h3>${c.name}${unitsBadge}</h3>
       <p>${c.category} · $${c.price_per_day}/day · ${c.seats} seats</p>
+      ${stockBreakdown ? '<p style="color:#0a5d2b;font-size:11px;font-weight:600">📦 '+stockBreakdown+'</p>' : ''}
       ${(() => {
         const pls = (c.pickup_locations && c.pickup_locations.length) ? c.pickup_locations : (c.pickup_location ? [c.pickup_location] : []);
         if (!pls.length) return '';
@@ -663,11 +671,6 @@ async function showCarForm(id) {
           <div class="form-group"><label>Price/Day ($) *</label><input class="input" id="f-price" type="number" step="0.01" value="${car.price_per_day||0}"></div>
           <div class="form-group"><label>Transmission</label><input class="input" id="f-trans" value="${car.transmission||'Automatic'}"></div>
           <div class="form-group"><label>Fuel</label><input class="input" id="f-fuel" value="${car.fuel_type||'Gasoline'}"></div>
-          <div class="form-group">
-            <label>Units available *</label>
-            <input class="input" id="f-units" type="number" min="0" step="1" value="${car.units_available ?? 1}" title="How many physical units of this vehicle can be rented at the same time. Set to 0 to hide from customers." />
-            <div style="font-size:11px;color:#888;margin-top:4px;font-weight:600">0 = hidden from customers</div>
-          </div>
         </div>
         <div class="form-group"><label>Description</label><textarea class="input" id="f-desc" rows="2">${car.description||''}</textarea></div>
 
@@ -725,6 +728,9 @@ async function showCarForm(id) {
           return `<span class="loc-pill ${selected?'active-red':''}" data-loc-type="dropoff" data-loc-name="${l.name.replace(/"/g,'&quot;')}" onclick="toggleLoc('dropoff','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`;
         }).join('')}</div>
         <input type="hidden" id="f-dropoffs" value='${JSON.stringify((car.dropoff_locations && car.dropoff_locations.length) ? car.dropoff_locations : (car.dropoff_location ? [car.dropoff_location] : []))}'>
+        <input type="hidden" id="f-stock" value='${JSON.stringify(car.stock || {})}'>
+        <div class="section-title" style="margin-top:14px">📦 Stock per pickup location <span style="color:#666;font-size:11px;font-weight:600;margin-left:6px">(units available at each pickup point)</span></div>
+        <div id="stock-inputs" style="display:flex;flex-direction:column;gap:8px"></div>
         <div style="background:#fff5e6;border:1px solid #ffd48a;border-radius:10px;padding:10px 12px;margin-top:10px;font-size:12px;color:#a05a00;font-weight:600">
           ⚠️ Select <strong>one or more</strong> Pickup AND <strong>one or more</strong> Drop-off locations. Customers will choose from your selection at checkout. Cars without locations cannot be booked.
         </div>
@@ -735,7 +741,7 @@ async function showCarForm(id) {
       </div>
     </div>`;
   // Render existing photo gallery for the edit view
-  setTimeout(renderGallery, 0);
+  setTimeout(() => { renderGallery(); renderStockInputs(); }, 0);
 }
 
 // Multi-select location toggle: adds/removes the location from the hidden
@@ -758,11 +764,49 @@ function toggleLoc(type, name, lat, lng) {
   input.value = JSON.stringify(arr);
   const counter = document.getElementById(type+'-count');
   if (counter) counter.textContent = arr.length ? '(' + arr.length + ' selected)' : '';
+  // Pickup changes may affect the stock inputs.
+  if (type === 'pickup') renderStockInputs();
+}
+
+// Build a numeric input per selected pickup location so the admin can set
+// the initial inventory per physical location.
+function renderStockInputs() {
+  const container = document.getElementById('stock-inputs');
+  if (!container) return;
+  // First, capture any current edits so we don't lose them when re-rendering.
+  const current = {};
+  container.querySelectorAll('input[data-stock-key]').forEach(inp => {
+    current[inp.getAttribute('data-stock-key')] = parseInt(inp.value, 10) || 0;
+  });
+  // Stored stock from the hidden input (or initial value).
+  let stored = {};
+  try { stored = JSON.parse(document.getElementById('f-stock').value || '{}'); } catch(e) { stored = {}; }
+  // Compute pickup names from the f-pickups hidden array.
+  let pickups = [];
+  try { pickups = JSON.parse(document.getElementById('f-pickups').value || '[]'); } catch(e) { pickups = []; }
+  if (!pickups.length) {
+    container.innerHTML = '<div style="padding:12px;background:#fafafa;border-radius:10px;color:#999;font-size:13px;text-align:center">Select one or more Pickup locations above to set their initial stock.</div>';
+    return;
+  }
+  container.innerHTML = pickups.map(p => {
+    const key = p.name;
+    const val = key in current ? current[key] : (stored[key] ?? 0);
+    return '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fafafa;border-radius:10px;border:1px solid #e5e5e5">'
+      + '<div style="width:8px;height:8px;border-radius:4px;background:#34C759"></div>'
+      + '<div style="flex:1;font-weight:700;font-size:14px;color:#0a0a0a">' + (key||'').replace(/</g,'&lt;') + '</div>'
+      + '<input type="number" min="0" step="1" data-stock-key="' + (key||'').replace(/"/g,'&quot;') + '" value="' + val + '" style="width:90px;padding:8px 10px;border:1px solid #ddd;border-radius:8px;text-align:right;font-weight:700;font-size:14px" />'
+      + '</label>';
+  }).join('');
 }
 
 async function saveCar(id) {
   const unlim = document.getElementById('f-unlimited').checked;
   const mileageVal = parseInt(document.getElementById('f-mileage').value);
+  // Build stock map from the per-location number inputs.
+  const stock = {};
+  document.querySelectorAll('#stock-inputs input[data-stock-key]').forEach(inp => {
+    stock[inp.getAttribute('data-stock-key')] = Math.max(0, parseInt(inp.value, 10) || 0);
+  });
   const body = {
     name: document.getElementById('f-name').value,
     brand: document.getElementById('f-brand').value,
@@ -774,7 +818,7 @@ async function saveCar(id) {
     bags: parseInt(document.getElementById('f-bags').value) || 0,
     transmission: document.getElementById('f-trans').value,
     fuel_type: document.getElementById('f-fuel').value,
-    units_available: Math.max(0, parseInt(document.getElementById('f-units').value || '1', 10) || 0),
+    stock: stock,
     description: document.getElementById('f-desc').value,
     image_url: document.getElementById('f-img').value,
     images: (() => { try { return JSON.parse(document.getElementById('f-images').value || '[]'); } catch(e) { return []; } })(),
@@ -906,8 +950,91 @@ function compressImage(file, maxSize, quality) {
 }
 
 // LOCATIONS
+async function showOperations() {
+  // Fetch all bookings; partition client-side into "awaiting pickup" and "awaiting drop-off".
+  let bookings = [];
+  try {
+    bookings = await api('/admin/bookings');
+  } catch (e) { alert(e.message); return; }
+  const pendingPickup = bookings.filter(b => ['pending','pending_payment','confirmed'].includes(b.status));
+  const awaitingDropoff = bookings.filter(b => b.status === 'active');
+  pendingPickup.sort((a,b) => (a.pickup_date||'').localeCompare(b.pickup_date||''));
+  awaitingDropoff.sort((a,b) => (a.dropoff_date||'').localeCompare(b.dropoff_date||''));
+
+  function rowHtml(b, action) {
+    const locName = action === 'pickup'
+      ? ((b.pickup_location && b.pickup_location.name) || '—')
+      : ((b.dropoff_location && b.dropoff_location.name) || '—');
+    const dateStr = action === 'pickup' ? (b.pickup_date || '—') : (b.dropoff_date || '—');
+    const statusBadge = '<span style="display:inline-block;background:#f0f0f5;color:#333;font-weight:700;font-size:10px;padding:3px 8px;border-radius:6px;letter-spacing:0.5px">'+(b.status||'').toUpperCase()+'</span>';
+    const payBadge = b.payment_status === 'paid'
+      ? '<span style="display:inline-block;background:#e6f9ed;color:#0a5d2b;font-weight:700;font-size:10px;padding:3px 8px;border-radius:6px;letter-spacing:0.5px">PAID</span>'
+      : '<span style="display:inline-block;background:#fff5e6;color:#a05a00;font-weight:700;font-size:10px;padding:3px 8px;border-radius:6px;letter-spacing:0.5px">'+((b.payment_status||'unpaid')||'').toUpperCase()+'</span>';
+    const btnLabel = action === 'pickup' ? '✓ Confirm Pickup' : '✓ Confirm Drop-off';
+    const btnColor = action === 'pickup' ? '#34c759' : '#0a84ff';
+    const newStatus = action === 'pickup' ? 'active' : 'completed';
+    return `<div style="background:#fff;border:1px solid #eee;border-radius:14px;padding:14px 16px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <div style="font-weight:800;font-size:15px;color:#0a0a0a">${(b.car_name||'Car')}</div>
+            ${statusBadge} ${payBadge}
+          </div>
+          <div style="margin-top:4px;color:#666;font-size:13px;font-weight:600">${(b.user_name||'')} · ${(b.user_email||'')}</div>
+          <div style="margin-top:4px;color:#333;font-size:12px">📍 ${locName} · 📅 ${dateStr} · 💰 $${(b.total_price||0).toFixed?b.total_price.toFixed(2):b.total_price}</div>
+        </div>
+        <button class="btn btn-sm" style="background:${btnColor};color:#fff;font-weight:800;white-space:nowrap" onclick="confirmOp('${b.id}','${newStatus}','${action}')">${btnLabel}</button>
+      </div>
+    </div>`;
+  }
+
+  render(`
+    <div class="header">
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+        <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
+        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+    <div class="container">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="font-size:20px;font-weight:800">🔑 Pickups &amp; Drop-offs</h2>
+        <button class="btn btn-sm btn-gray" onclick="showOperations()">↻ Refresh</button>
+      </div>
+      <div style="background:#e6f9ed;border:1px solid #a4e1be;border-radius:12px;padding:12px 14px;margin-bottom:18px;font-size:13px;color:#0a5d2b;font-weight:600">
+        ℹ️ Confirming a <strong>Pickup</strong> sets the booking to ACTIVE and <strong>decreases</strong> the car's stock at the pickup location by 1. Confirming a <strong>Drop-off</strong> sets it to COMPLETED and <strong>increases</strong> stock at the drop-off location by 1.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+        <div>
+          <h3 style="font-size:14px;font-weight:800;letter-spacing:1px;color:#0a5d2b;text-transform:uppercase;margin-bottom:10px">
+            🚗 Awaiting pickup
+            <span style="background:#34c759;color:#fff;padding:2px 8px;border-radius:8px;margin-left:4px;font-size:11px">${pendingPickup.length}</span>
+          </h3>
+          ${pendingPickup.length ? pendingPickup.map(b => rowHtml(b,'pickup')).join('') : '<div style="padding:24px;text-align:center;color:#999;background:#fafafa;border-radius:12px;font-size:13px">No bookings awaiting pickup.</div>'}
+        </div>
+        <div>
+          <h3 style="font-size:14px;font-weight:800;letter-spacing:1px;color:#0a3d80;text-transform:uppercase;margin-bottom:10px">
+            🔄 Awaiting drop-off
+            <span style="background:#0a84ff;color:#fff;padding:2px 8px;border-radius:8px;margin-left:4px;font-size:11px">${awaitingDropoff.length}</span>
+          </h3>
+          ${awaitingDropoff.length ? awaitingDropoff.map(b => rowHtml(b,'dropoff')).join('') : '<div style="padding:24px;text-align:center;color:#999;background:#fafafa;border-radius:12px;font-size:13px">No active rentals awaiting drop-off.</div>'}
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function confirmOp(bookingId, newStatus, action) {
+  const label = action === 'pickup' ? 'pickup' : 'drop-off';
+  if (!confirm('Confirm '+label+'? The vehicle stock will be auto-adjusted.')) return;
+  try {
+    await api('/admin/bookings/'+bookingId+'/status', { method:'PUT', body: JSON.stringify({ status: newStatus }) });
+    showOperations();
+  } catch (e) { alert(e.message); }
+}
+
 async function showLocations() {
-  const locs = await api('/locations?include_inactive=true');
   render(`
     <div class="header">
       <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>

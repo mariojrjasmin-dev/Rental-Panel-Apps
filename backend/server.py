@@ -420,7 +420,14 @@ class CarCreate(BaseModel):
     available: bool = True
     # Inventory: how many physical units of this car the company owns/offers.
     # A car is considered bookable when ACTIVE (picked-up) bookings < units_available.
+    # DEPRECATED in favour of per-location `stock`. Kept for read backward-compat.
     units_available: int = 1
+    # Per-location stock map. Keys are location names, values are unit counts.
+    # Example: {"Punta Cana Airport": 3, "Bavaro Beach Hub": 2}
+    # A car is bookable AT a pickup location when stock[locationName] > 0.
+    # On admin-confirmed PICKUP we decrement stock[pickup_location]; on admin-confirmed
+    # DROP-OFF we increment stock[dropoff_location] — so the inventory follows the car.
+    stock: Dict[str, int] = {}
     # Mileage & premium features
     unlimited_mileage: bool = True
     mileage_limit: Optional[int] = None  # km/day cap when unlimited_mileage = False
@@ -453,6 +460,7 @@ class CarUpdate(BaseModel):
     dropoff_locations: Optional[List[Dict]] = None  # Multi-select list
     available: Optional[bool] = None
     units_available: Optional[int] = None
+    stock: Optional[Dict[str, int]] = None
     unlimited_mileage: Optional[bool] = None
     mileage_limit: Optional[int] = None
     min_driver_age: Optional[int] = None
@@ -926,15 +934,52 @@ def serialize_car(car):
     if not car.get("dropoff_location") and dl:
         car["dropoff_location"] = dl[0]
     # Inventory backfill: legacy docs without units_available default to 1.
-    # Use explicit None check (0 is a valid value meaning out-of-stock!).
     if car.get("units_available") is None:
         car["units_available"] = 1
+    # ---- Per-location stock ----
+    # If the car has no `stock` map, auto-migrate: put all units at the FIRST
+    # pickup location, 0 at the rest. This preserves existing inventory totals.
+    raw_stock = car.get("stock") if isinstance(car.get("stock"), dict) else None
+    if not raw_stock:
+        raw_stock = {}
+        if pl:
+            raw_stock[pl[0]["name"]] = int(car.get("units_available") or 1)
+            for extra in pl[1:]:
+                raw_stock.setdefault(extra["name"], 0)
+        for d in dl:  # ensure dropoff names exist as keys too (so $inc works)
+            raw_stock.setdefault(d["name"], raw_stock.get(d["name"], 0))
+    # Coerce to ints; drop any orphan keys not in the current pickup/dropoff lists
+    valid_names = {p["name"] for p in pl} | {d["name"] for d in dl}
+    clean_stock: Dict[str, int] = {}
+    for n in valid_names:
+        clean_stock[n] = max(0, int(raw_stock.get(n) or 0))
+    car["stock"] = clean_stock
     return car
+
+
+def car_total_units(car: dict) -> int:
+    """Total stock across all locations (sum of stock values)."""
+    s = car.get("stock") if isinstance(car.get("stock"), dict) else {}
+    try:
+        return sum(int(v or 0) for v in s.values())
+    except Exception:
+        return 0
+
+
+def car_stock_at(car: dict, location_name: Optional[str]) -> int:
+    """Stock for a given pickup location (case-sensitive match on name)."""
+    if not location_name:
+        return 0
+    s = car.get("stock") if isinstance(car.get("stock"), dict) else {}
+    try:
+        return int(s.get(location_name) or 0)
+    except Exception:
+        return 0
 
 
 async def get_car_active_units_count(car_id: str) -> int:
     """How many physical units of this car are currently picked-up (status='active').
-    Used to determine if at least one unit is still available for new bookings.
+    Kept for backward compat; per-location stock is now the source of truth.
     """
     try:
         return await db.bookings.count_documents({"car_id": car_id, "status": "active"})
@@ -1010,41 +1055,29 @@ async def get_cars(category: Optional[str] = None, search: Optional[str] = None,
             query["$and"] = []
         query["$and"].append({"$or": city_conditions})
     cars = await db.cars.find(query).to_list(100)
-    # Inventory + active-location filter (customer-facing).
+    # Per-location stock + active-location filter (customer-facing).
     inactive_loc_names = await get_inactive_location_names()
     result = []
     for c in cars:
         c = serialize_car(c)
         c = await enrich_car_with_rating(c)
-        # Compute units_left = units_available - active(picked-up) bookings.
-        try:
-            active_count = await get_car_active_units_count(c["id"])
-        except Exception:
-            active_count = 0
-        _u = c.get("units_available")
-        units_total = int(_u) if _u is not None else 1
-        units_left = max(units_total - active_count, 0)
-        c["units_available"] = units_total
-        c["units_left"] = units_left
-        c["is_available"] = units_left > 0
-        # Hide if every unit is currently picked up.
-        if units_left <= 0:
-            continue
-        # Hide if EVERY pickup location is currently inactive.
+        # Strip inactive pickup/dropoff entries from the picker arrays.
         if inactive_loc_names:
-            pl_names = [(p.get("name") or "").strip().lower() for p in (c.get("pickup_locations") or [])]
-            pl_names = [n for n in pl_names if n]
-            if pl_names and all(n in inactive_loc_names for n in pl_names):
-                continue
-            # Filter out the inactive picks/dropoffs from the arrays so the
-            # mobile picker only shows usable options.
             c["pickup_locations"] = [p for p in (c.get("pickup_locations") or []) if (p.get("name") or "").strip().lower() not in inactive_loc_names]
             c["dropoff_locations"] = [d for d in (c.get("dropoff_locations") or []) if (d.get("name") or "").strip().lower() not in inactive_loc_names]
-            # Refresh singular fallbacks
             if c["pickup_locations"]:
                 c["pickup_location"] = c["pickup_locations"][0]
             if c["dropoff_locations"]:
                 c["dropoff_location"] = c["dropoff_locations"][0]
+        # Compute available pickup locations: those with stock > 0
+        available_pickups = [p for p in (c.get("pickup_locations") or []) if car_stock_at(c, p.get("name")) > 0]
+        units_total = car_total_units(c)
+        c["units_available"] = units_total  # kept for legacy clients (total)
+        c["units_left"] = units_total       # alias
+        c["is_available"] = len(available_pickups) > 0
+        # Hide if NO pickup location has stock left.
+        if not available_pickups:
+            continue
         result.append(c)
     return result
 
@@ -1063,16 +1096,6 @@ async def get_car(car_id: str):
         raise HTTPException(status_code=404, detail="Car not found")
     car = serialize_car(car)
     car = await enrich_car_with_rating(car)
-    # Inventory enrichment so the booking screen can show "Out of stock" or count.
-    try:
-        active_count = await get_car_active_units_count(car["id"])
-    except Exception:
-        active_count = 0
-    _u = car.get("units_available")
-    units_total = int(_u) if _u is not None else 1
-    car["units_available"] = units_total
-    car["units_left"] = max(units_total - active_count, 0)
-    car["is_available"] = car["units_left"] > 0
     # Strip out inactive locations from the picker arrays.
     inactive_loc_names = await get_inactive_location_names()
     if inactive_loc_names:
@@ -1082,6 +1105,12 @@ async def get_car(car_id: str):
             car["pickup_location"] = car["pickup_locations"][0]
         if car["dropoff_locations"]:
             car["dropoff_location"] = car["dropoff_locations"][0]
+    # Per-location stock summary
+    units_total = car_total_units(car)
+    available_pickups = [p for p in (car.get("pickup_locations") or []) if car_stock_at(car, p.get("name")) > 0]
+    car["units_available"] = units_total
+    car["units_left"] = units_total
+    car["is_available"] = len(available_pickups) > 0
     # Include recent reviews
     reviews = await db.reviews.find({"car_id": car_id}).sort("created_at", -1).to_list(20)
     car["reviews"] = [serialize_review(r) for r in reviews]
@@ -1187,19 +1216,18 @@ async def create_booking(booking: BookingCreate, request: Request):
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
 
-    # ---- Inventory guard: car must have at least one unit not currently picked up ----
-    # Customer 'pending' bookings do NOT reserve a unit; only status='active'
-    # (admin has confirmed pickup) consumes a physical car.
-    try:
-        active_count = await get_car_active_units_count(booking.car_id)
-    except Exception:
-        active_count = 0
-    _units_raw = car.get("units_available")
-    units_total = int(_units_raw) if _units_raw is not None else 1
-    if (units_total - active_count) <= 0:
+    # ---- Per-location stock guard ----
+    # Customer 'pending' bookings do NOT reserve a unit; only an admin-confirmed
+    # pickup decrements stock. So at booking-creation time, the relevant check
+    # is: does the pickup location currently have any units? If yes, allow the
+    # booking; the admin will decrement when they confirm pickup.
+    serialized_for_stock = serialize_car({**car, "_id": car["_id"]})
+    pickup_name_for_stock = (booking.pickup_location.get("name", "") or "").strip()
+    stock_here = car_stock_at(serialized_for_stock, pickup_name_for_stock)
+    if pickup_name_for_stock and stock_here <= 0:
         raise HTTPException(
             status_code=400,
-            detail="This vehicle is currently not available. All units are checked out. Please choose another car or pick a different date.",
+            detail=f"This vehicle is currently out of stock at '{pickup_name_for_stock}'. Please pick a different car or location.",
         )
 
     # Calculate total
@@ -1509,10 +1537,52 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    # Fetch BEFORE doing the status update so we can detect transitions.
+    booking_before = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+    old_status = (booking_before or {}).get("status") if booking_before else None
+
     res = await db.bookings.update_one({"_id": ObjectId(booking_id)}, {"$set": update_data})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found")
     booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+
+    # ---- Auto stock adjustment on status transitions ----
+    # Transition INTO 'active' (admin confirms pickup) → -1 at pickup_location
+    # Transition INTO 'completed' (admin confirms drop-off) → +1 at dropoff_location
+    # Each transition is applied at most once per booking via the
+    # `stock_adjustments` audit trail to avoid double counting.
+    try:
+        new_status_for_stock = update_data.get("status")
+        car_id = (booking or {}).get("car_id")
+        if car_id and new_status_for_stock and new_status_for_stock != old_status:
+            adjustments = (booking or {}).get("stock_adjustments") or {}
+            if new_status_for_stock == "active" and not adjustments.get("pickup_decremented"):
+                pickup_name = (((booking or {}).get("pickup_location") or {}).get("name") or "").strip()
+                if pickup_name:
+                    await db.cars.update_one(
+                        {"_id": ObjectId(car_id)},
+                        {"$inc": {f"stock.{pickup_name}": -1}},
+                    )
+                    await db.bookings.update_one(
+                        {"_id": ObjectId(booking_id)},
+                        {"$set": {"stock_adjustments.pickup_decremented": True, "stock_adjustments.pickup_at": datetime.now(timezone.utc)}},
+                    )
+            elif new_status_for_stock == "completed" and not adjustments.get("dropoff_incremented"):
+                dropoff_name = (((booking or {}).get("dropoff_location") or {}).get("name") or "").strip()
+                if dropoff_name:
+                    await db.cars.update_one(
+                        {"_id": ObjectId(car_id)},
+                        {"$inc": {f"stock.{dropoff_name}": 1}},
+                    )
+                    await db.bookings.update_one(
+                        {"_id": ObjectId(booking_id)},
+                        {"$set": {"stock_adjustments.dropoff_incremented": True, "stock_adjustments.dropoff_at": datetime.now(timezone.utc)}},
+                    )
+            # Re-read to include the freshly-set stock_adjustments in the response payload
+            booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+    except Exception as _e:
+        logger.exception(f"Stock auto-adjust error for booking {booking_id}: {_e}")
+
     booking_payload = serialize_booking(booking)  # serialize once; serialize_booking mutates the dict
 
     # Send push notification to the customer about the status change
