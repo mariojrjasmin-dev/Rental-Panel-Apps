@@ -693,14 +693,17 @@ async function showCarForm(id) {
           </label>
         </div>
 
-        <div class="section-title">Pickup Location</div>
+        <div class="section-title">Pickup Location <span style="color:#FF3B30">*</span></div>
         ${car.pickup_location?.name ? `<div class="selected-loc"><span class="dot" style="background:#34c759"></span>${car.pickup_location.name}<span class="clear" onclick="document.getElementById('f-pickup').value='';this.parentNode.remove()">✕</span></div>` : ''}
-        <div class="loc-pills" id="pickup-pills">${locations.map(l=>`<span class="loc-pill ${car.pickup_location?.name===l.name?'active-green':''}" onclick="selectLoc('pickup','${l.id}','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
+        <div class="loc-pills" id="pickup-pills">${locations.map(l=>`<span class="loc-pill ${car.pickup_location?.name===l.name?'active-green':''}" onclick="selectLoc('pickup','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
         <input type="hidden" id="f-pickup" value='${JSON.stringify(car.pickup_location||{})}'>
-        <div class="section-title">Drop-off Location</div>
+        <div class="section-title">Drop-off Location <span style="color:#FF3B30">*</span></div>
         ${car.dropoff_location?.name ? `<div class="selected-loc"><span class="dot" style="background:#ff3b30"></span>${car.dropoff_location.name}<span class="clear" onclick="document.getElementById('f-dropoff').value='';this.parentNode.remove()">✕</span></div>` : ''}
-        <div class="loc-pills" id="dropoff-pills">${locations.map(l=>`<span class="loc-pill ${car.dropoff_location?.name===l.name?'active-red':''}" onclick="selectLoc('dropoff','${l.id}','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
+        <div class="loc-pills" id="dropoff-pills">${locations.map(l=>`<span class="loc-pill ${car.dropoff_location?.name===l.name?'active-red':''}" onclick="selectLoc('dropoff','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`).join('')}</div>
         <input type="hidden" id="f-dropoff" value='${JSON.stringify(car.dropoff_location||{})}'>
+        <div style="background:#fff5e6;border:1px solid #ffd48a;border-radius:10px;padding:10px 12px;margin-top:10px;font-size:12px;color:#a05a00;font-weight:600">
+          ⚠️ You must select <strong>both</strong> a Pickup and a Drop-off location before saving. Cars without locations cannot be booked.
+        </div>
         <div style="display:flex;gap:10px;margin-top:24px">
           <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
           <button class="btn btn-red" style="flex:1" onclick="saveCar('${id||''}')">Save</button>
@@ -749,6 +752,8 @@ async function saveCar(id) {
   try { body.pickup_location = JSON.parse(document.getElementById('f-pickup').value); } catch(e) { body.pickup_location = {name:'',lat:0,lng:0}; }
   try { body.dropoff_location = JSON.parse(document.getElementById('f-dropoff').value); } catch(e) { body.dropoff_location = {name:'',lat:0,lng:0}; }
   if (!body.name||!body.brand||!body.price_per_day) { alert('Name, brand and price required'); return; }
+  if (!body.pickup_location?.name) { alert('❌ Please select a Pickup Location before saving the vehicle.'); return; }
+  if (!body.dropoff_location?.name) { alert('❌ Please select a Drop-off Location before saving the vehicle.'); return; }
   try {
     await api(id?'/cars/'+id:'/cars', {method:id?'PUT':'POST', body:JSON.stringify(body)});
     closeModal(); showDashboard();

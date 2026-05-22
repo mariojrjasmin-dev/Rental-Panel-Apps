@@ -974,6 +974,15 @@ async def create_car(car: CarCreate, request: Request):
     user = await get_authenticated_user(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
+    # Pickup & drop-off locations are REQUIRED so that the car can actually be
+    # booked, taxed (per-location tax_rate), and routed in maps. Reject the
+    # request explicitly so admins can't accidentally create un-bookable cars.
+    p = car.pickup_location or {}
+    d = car.dropoff_location or {}
+    if not (p.get("name") or "").strip():
+        raise HTTPException(status_code=400, detail="Pickup location is required. Please select one from the list.")
+    if not (d.get("name") or "").strip():
+        raise HTTPException(status_code=400, detail="Drop-off location is required. Please select one from the list.")
     car_dict = car.dict()
     car_dict["created_at"] = datetime.now(timezone.utc)
     result = await db.cars.insert_one(car_dict)
@@ -989,6 +998,15 @@ async def update_car(car_id: str, car: CarUpdate, request: Request):
     update_data = {k: v for k, v in car.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+    # If pickup/dropoff location is being updated, it must still be non-empty.
+    if "pickup_location" in update_data:
+        p = update_data["pickup_location"] or {}
+        if not (p.get("name") or "").strip():
+            raise HTTPException(status_code=400, detail="Pickup location cannot be empty. Please select one from the list.")
+    if "dropoff_location" in update_data:
+        d = update_data["dropoff_location"] or {}
+        if not (d.get("name") or "").strip():
+            raise HTTPException(status_code=400, detail="Drop-off location cannot be empty. Please select one from the list.")
     result = await db.cars.update_one({"_id": ObjectId(car_id)}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Car not found")

@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Switch,
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../_layout';
 import { t } from '../../src/i18n';
 import { isBiometricAvailable, isBiometricEnabled, disableBiometricLogin, enableBiometricLogin, type BiometricCheck } from '../../src/biometric';
@@ -13,10 +14,10 @@ export default function ProfileScreen() {
   const { user, logout, locale, changeLocale } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  // Tab bar overlays the bottom of the ScrollView. Pad enough so the Logout
-  // button is always above the tab bar + iOS home indicator on mobile.
-  const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 49 : 60;
-  const bottomPad = TAB_BAR_HEIGHT + insets.bottom + 24;
+  // React Navigation's hook returns the actual tab bar height including iOS
+  // home-indicator safe inset, so the Logout button always lands above it.
+  const tabBarHeight = useBottomTabBarHeight();
+  const bottomPad = tabBarHeight + 32;
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [bioState, setBioState] = useState<BiometricCheck>({ available: false, enrolled: false, type: 'none' });
