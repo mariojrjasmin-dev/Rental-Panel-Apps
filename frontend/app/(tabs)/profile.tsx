@@ -1,9 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useContext } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Switch, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../_layout';
 import { t } from '../../src/i18n';
 import { isBiometricAvailable, isBiometricEnabled, disableBiometricLogin, enableBiometricLogin, type BiometricCheck } from '../../src/biometric';
@@ -14,9 +14,9 @@ export default function ProfileScreen() {
   const { user, logout, locale, changeLocale } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  // React Navigation's hook returns the actual tab bar height including iOS
-  // home-indicator safe inset, so the Logout button always lands above it.
-  const tabBarHeight = useBottomTabBarHeight();
+  // Safer than useBottomTabBarHeight() which throws on web / non-tab screens.
+  // Falls back to a sane default that matches the iOS tab bar + home indicator.
+  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? (64 + (insets.bottom || 0));
   const bottomPad = tabBarHeight + 32;
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);

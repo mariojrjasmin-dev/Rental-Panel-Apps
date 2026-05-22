@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useContext } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, Image, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../_layout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { t as tr } from '../../src/i18n';
@@ -51,7 +51,9 @@ export default function BookingsScreen() {
   const router = useRouter();
   // Pad list bottom by the actual tab bar height (incl. iOS home indicator)
   // so the last booking card is not hidden behind the bottom tab bar.
-  const tabBarHeight = useBottomTabBarHeight();
+  // useContext is safer than useBottomTabBarHeight() (which throws on web /
+  // non-tab screens). Falls back to 80px when context isn't present.
+  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 80;
 
   const fetchBookings = useCallback(async () => {
     try {

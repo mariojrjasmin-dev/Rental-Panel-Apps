@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useContext } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image, ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +7,7 @@ import { useAuth } from '../_layout';
 import StarRating from '../../components/StarRating';
 import LegalLinks from '../../components/LegalLinks';
 import BrandLogo from '../../components/BrandLogo';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
 import { t as tr } from '../../src/i18n';
 
 import { BACKEND_URL } from '../../src/config';
@@ -52,7 +52,9 @@ export default function HomeScreen() {
   const router = useRouter();
   // Reserve space at the bottom of the car FlatList so the LegalLinks footer
   // (and last car card) is never hidden behind the bottom tab bar.
-  const tabBarHeight = useBottomTabBarHeight();
+  // useContext is safer than useBottomTabBarHeight() (which throws on web /
+  // any non-tab screen). Falls back to 80px when context isn't present.
+  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 80;
 
   // Derive unique cities from locations
   const cities = [...new Set(locations.map(l => l.city))];
