@@ -109,6 +109,7 @@ async function showDashboard() {
           <button class="btn btn-sm" style="background:#ff9500;color:#fff" onclick="showNotifications()">📣 Notify</button>
           <button class="btn btn-sm" style="background:#ff2d92;color:#fff" onclick="showPromos()">🎟️ Promos</button>
           <button class="btn btn-sm" style="background:#34c759;color:#fff" onclick="showTerms()">📜 Terms</button>
+          <button class="btn btn-sm" style="background:#5856d6;color:#fff" onclick="showPrivacy()">🔒 Privacy</button>
           <button class="btn btn-sm btn-blue" onclick="showMigration()">Import/Export</button>
           <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
         </div>
@@ -982,6 +983,54 @@ async function saveTerms() {
   try {
     await api('/admin/settings/rental-terms', { method:'PUT', body: JSON.stringify({ terms: text }) });
     alert('✅ Rental terms saved successfully.');
+  } catch(e) { alert('Failed to save: ' + e.message); }
+}
+
+// ==================== PRIVACY POLICY ====================
+async function showPrivacy() {
+  let txt = '';
+  let updated = '';
+  try {
+    const r = await api('/settings/privacy-policy');
+    txt = (r && r.text) || '';
+    if (r && r.updated_at) updated = new Date(r.updated_at).toLocaleString();
+  } catch(e){}
+  render(`
+    <div class="header">
+      <div><h1>DAMS <span>CAR RENTAL</span></h1></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+    <div class="container">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+        <h2 style="font-size:20px;font-weight:800">🔒 Privacy Policy</h2>
+        <span id="priv-count" style="color:#666;font-size:13px;font-weight:600"></span>
+      </div>
+      <div style="background:#eef4ff;border:1px solid #cfd9ff;border-radius:12px;padding:14px;margin-bottom:16px;color:#3b3f8a;font-size:13px;line-height:1.5">
+        ℹ️ This text is displayed on the public website footer link (<code>/api/legal/privacy</code>) and inside the mobile app's Privacy screen. Customers see it when they tap "Privacy" in either the Home tab footer or the Profile tab "Legal" section. Recommended max length: 100,000 characters.${updated ? ' <br>Last updated: <strong>' + updated + '</strong>' : ''}
+      </div>
+      <textarea id="priv-text" style="width:100%;min-height:520px;padding:16px;border:1px solid #e5e5e5;border-radius:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;color:#0a0a0a;background:#fafafa;resize:vertical" oninput="document.getElementById('priv-count').textContent=this.value.length+' chars'">${txt.replace(/</g,'&lt;')}</textarea>
+      <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end">
+        <button class="btn btn-gray" onclick="showDashboard()">Cancel</button>
+        <button class="btn" style="background:#5856d6;color:#fff" onclick="window.open('/api/legal/privacy','_blank')">👁 Preview</button>
+        <button class="btn btn-red" onclick="savePrivacy()">💾 Save Privacy</button>
+      </div>
+    </div>
+    <div id="modal-root"></div>
+  `);
+  const ta = document.getElementById('priv-text');
+  document.getElementById('priv-count').textContent = (ta.value || '').length + ' chars';
+}
+
+async function savePrivacy() {
+  const text = document.getElementById('priv-text').value || '';
+  if (text.trim().length < 10) { alert('Privacy text is too short (min 10 chars).'); return; }
+  if (text.length > 100000) { alert('Privacy text is too long (max 100,000 chars).'); return; }
+  try {
+    await api('/admin/settings/privacy-policy', { method:'PUT', body: JSON.stringify({ text }) });
+    alert('✅ Privacy policy saved successfully. The public /api/legal/privacy page will reflect within 5 minutes (cache).');
   } catch(e) { alert('Failed to save: ' + e.message); }
 }
 

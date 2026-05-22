@@ -1,11 +1,41 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BACKEND_URL } from '../src/config';
 import { PRIVACY_POLICY_TEXT, PRIVACY_UPDATED_AT } from '../src/privacy';
 
 export default function PrivacyScreen() {
   const router = useRouter();
+  const [text, setText] = useState<string>('');
+  const [updated, setUpdated] = useState<string>(PRIVACY_UPDATED_AT);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let aborted = false;
+    (async () => {
+      try {
+        const r = await fetch(`${BACKEND_URL}/api/settings/privacy-policy`);
+        if (r.ok) {
+          const data = await r.json();
+          if (!aborted) {
+            setText(data?.text || PRIVACY_POLICY_TEXT);
+            if (data?.updated_at) {
+              try { setUpdated(new Date(data.updated_at).toLocaleDateString()); } catch {}
+            }
+          }
+        } else {
+          if (!aborted) setText(PRIVACY_POLICY_TEXT);
+        }
+      } catch {
+        if (!aborted) setText(PRIVACY_POLICY_TEXT);
+      }
+      if (!aborted) setLoading(false);
+    })();
+    return () => { aborted = true; };
+  }, []);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -16,17 +46,23 @@ export default function PrivacyScreen() {
         <View style={{ width: 44 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={true}>
-        <View style={styles.intro}>
-          <Ionicons name="shield-checkmark" size={18} color="#0a5d2b" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.introTitle}>Your privacy matters to us</Text>
-            <Text style={styles.introSub}>Last updated: {PRIVACY_UPDATED_AT}</Text>
-          </View>
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#FF3B30" />
         </View>
-        <Text style={styles.bodyText} testID="privacy-text">{PRIVACY_POLICY_TEXT}</Text>
-        <Text style={styles.footnote}>© Dams Rent a Car · info@damsrentacar.com</Text>
-      </ScrollView>
+      ) : (
+        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={true}>
+          <View style={styles.intro}>
+            <Ionicons name="shield-checkmark" size={18} color="#0a5d2b" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.introTitle}>Your privacy matters to us</Text>
+              <Text style={styles.introSub}>Last updated: {updated}</Text>
+            </View>
+          </View>
+          <Text style={styles.bodyText} testID="privacy-text">{text}</Text>
+          <Text style={styles.footnote}>© Dams Rent a Car · info@damsrentacar.com</Text>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -36,6 +72,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
   title: { fontSize: 17, fontWeight: '800', color: '#0A0A0A', flex: 1, textAlign: 'center', marginHorizontal: 8 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   body: { padding: 20, paddingBottom: 40 },
   intro: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#e6f9ed', borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#bce7c8' },
   introTitle: { fontSize: 13, fontWeight: '800', color: '#0a5d2b' },

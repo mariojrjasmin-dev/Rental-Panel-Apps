@@ -1826,6 +1826,48 @@ async def update_rental_terms(body: RentalTermsUpdate, request: Request):
     return {"ok": True, "length": len(text)}
 
 
+# ==================== PRIVACY POLICY (admin-editable settings) ====================
+class PrivacyPolicyUpdate(BaseModel):
+    text: str
+
+def _load_default_privacy() -> str:
+    """Load the bundled fallback privacy text from disk."""
+    try:
+        path = _Path(__file__).parent / "legal" / "privacy.txt"
+        return path.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.exception(f"Could not load default privacy.txt: {e}")
+        return "Privacy policy is being updated. Please contact info@damsrentacar.com."
+
+
+@api_router.get("/settings/privacy-policy")
+async def get_privacy_policy():
+    """Public: return the current privacy policy text. Falls back to bundled default if admin hasn't customised it."""
+    doc = await db.settings.find_one({"key": "privacy_policy"})
+    text = (doc or {}).get("value") or _load_default_privacy()
+    return {"text": text, "updated_at": (doc or {}).get("updated_at")}
+
+
+@api_router.put("/admin/settings/privacy-policy")
+async def update_privacy_policy(body: PrivacyPolicyUpdate, request: Request):
+    """Admin: update the privacy policy text. Stored in settings collection (singleton)."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    text = (body.text or "").strip()
+    if not text or len(text) < 10:
+        raise HTTPException(status_code=400, detail="Privacy policy text is too short (min 10 chars)")
+    if len(text) > 100000:
+        raise HTTPException(status_code=400, detail="Privacy policy text is too long (max 100,000 chars)")
+    await db.settings.update_one(
+        {"key": "privacy_policy"},
+        {"$set": {"key": "privacy_policy", "value": text, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"ok": True, "length": len(text)}
+
+
+
 
 
 @api_router.get("/admin/analytics")
@@ -2835,11 +2877,15 @@ async def legal_terms_html():
 @app.get("/api/legal/privacy", response_class=HTMLResponse)
 async def legal_privacy_html():
     """Public, branded HTML rendering of the Privacy Policy for the customer-facing website footer link."""
-    try:
-        privacy_text = _PRIVACY_TXT_PATH.read_text(encoding="utf-8")
-    except Exception as e:
-        logger.exception(f"Could not read privacy.txt: {e}")
-        privacy_text = "Privacy policy not available. Please contact info@damsrentacar.com."
+    # First check admin-customised version in db.settings; fall back to bundled default.
+    setting = await db.settings.find_one({"key": "privacy_policy"})
+    privacy_text = (setting or {}).get("value")
+    if not privacy_text:
+        try:
+            privacy_text = _PRIVACY_TXT_PATH.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.exception(f"Could not read privacy.txt: {e}")
+            privacy_text = "Privacy policy not available. Please contact info@damsrentacar.com."
     body = f"""
       <div class="notice privacy"><span>🔒</span><div><strong>Your privacy matters to us.</strong> &nbsp;Last updated: {PRIVACY_UPDATED_AT}</div></div>
       <div class="card"><pre>{_esc(privacy_text)}</pre></div>
