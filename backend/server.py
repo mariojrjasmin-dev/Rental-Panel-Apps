@@ -2914,6 +2914,116 @@ async def legal_privacy_html():
 
 app.include_router(api_router)
 
+
+# ==================== ADMIN: CUSTOMERS ====================
+# These are registered directly on `app` so they sit after include_router.
+
+@app.get("/api/admin/customers")
+async def admin_list_customers(request: Request, q: Optional[str] = None, role: Optional[str] = None, page: int = 1, limit: int = 50):
+    """List all registered customers/users for the admin panel.
+    Supports search by name/email/phone (case-insensitive), optional role filter, and pagination."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    page = max(1, int(page or 1))
+    limit = max(1, min(200, int(limit or 50)))
+    skip = (page - 1) * limit
+
+    query: Dict[str, Any] = {}
+    if role and role in ("user", "admin"):
+        query["role"] = role
+    if q and q.strip():
+        rx = {"$regex": q.strip(), "$options": "i"}
+        query["$or"] = [{"name": rx}, {"email": rx}, {"phone": rx}]
+
+    total = await db.users.count_documents(query)
+    cursor = db.users.find(query).sort("created_at", -1).skip(skip).limit(limit)
+    users_list = await cursor.to_list(length=limit)
+
+    # Batch fetch booking counts for the returned users for performance.
+    user_ids = [str(u.get("_id")) for u in users_list]
+    counts_pipeline = [
+        {"$match": {"user_id": {"$in": user_ids}}},
+        {"$group": {"_id": "$user_id", "count": {"$sum": 1}, "total_spent": {"$sum": {"$ifNull": ["$total_price", 0]}}}},
+    ]
+    counts_map: Dict[str, Dict[str, Any]] = {}
+    async for row in db.bookings.aggregate(counts_pipeline):
+        counts_map[row["_id"]] = {"count": row.get("count", 0), "total_spent": row.get("total_spent", 0)}
+
+    items = []
+    for u in users_list:
+        uid = str(u.get("_id"))
+        stats = counts_map.get(uid, {"count": 0, "total_spent": 0})
+        created_at = u.get("created_at")
+        terms_at = u.get("terms_accepted_at")
+        items.append({
+            "id": uid,
+            "name": u.get("name") or "",
+            "email": u.get("email") or "",
+            "phone": u.get("phone") or "",
+            "role": u.get("role") or "user",
+            "created_at": created_at.isoformat() if isinstance(created_at, datetime) else None,
+            "terms_accepted_at": terms_at.isoformat() if isinstance(terms_at, datetime) else None,
+            "bookings_count": stats["count"],
+            "total_spent": round(float(stats.get("total_spent") or 0), 2),
+        })
+    return {"items": items, "total": total, "page": page, "limit": limit, "pages": (total + limit - 1) // limit}
+
+
+@app.get("/api/admin/customers/{customer_id}")
+async def admin_customer_detail(customer_id: str, request: Request):
+    """Full profile + booking history of a single customer."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    try:
+        oid = ObjectId(customer_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid customer id")
+    u = await db.users.find_one({"_id": oid})
+    if not u:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    bookings_cursor = db.bookings.find({"user_id": str(u.get("_id"))}).sort("created_at", -1).limit(100)
+    bookings_list = []
+    total_spent = 0.0
+    async for b in bookings_cursor:
+        car = await db.cars.find_one({"_id": ObjectId(b.get("car_id"))}) if b.get("car_id") else None
+        created = b.get("created_at")
+        pickup = b.get("pickup_date")
+        dropoff = b.get("dropoff_date")
+        bookings_list.append({
+            "id": str(b.get("_id")),
+            "car_name": (car.get("name") if car else None) or "(deleted car)",
+            "car_brand": (car.get("brand") if car else None) or "",
+            "pickup_date": pickup.isoformat() if isinstance(pickup, datetime) else pickup,
+            "dropoff_date": dropoff.isoformat() if isinstance(dropoff, datetime) else dropoff,
+            "status": b.get("status") or "pending",
+            "payment_status": b.get("payment_status") or "unpaid",
+            "payment_method": b.get("payment_method") or "",
+            "total_price": float(b.get("total_price") or 0),
+            "created_at": created.isoformat() if isinstance(created, datetime) else None,
+        })
+        total_spent += float(b.get("total_price") or 0)
+
+    created_at = u.get("created_at")
+    terms_at = u.get("terms_accepted_at")
+    pwd_at = u.get("password_updated_at")
+    return {
+        "id": str(u.get("_id")),
+        "name": u.get("name") or "",
+        "email": u.get("email") or "",
+        "phone": u.get("phone") or "",
+        "role": u.get("role") or "user",
+        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else None,
+        "terms_accepted_at": terms_at.isoformat() if isinstance(terms_at, datetime) else None,
+        "password_updated_at": pwd_at.isoformat() if isinstance(pwd_at, datetime) else None,
+        "bookings": bookings_list,
+        "bookings_count": len(bookings_list),
+        "total_spent": round(total_spent, 2),
+    }
+
 # Serve admin panel HTML
 ADMIN_HTML = _Path(__file__).parent / "admin_panel.html"
 
@@ -2928,7 +3038,24 @@ app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Explicit origins are required when allow_credentials=True (the CORS spec
+    # forbids wildcard "*" with credentials). We allow:
+    #   - the customer marketing website damsrentacar.com (+ www) so it can do
+    #     full booking flow with cookies/JWT.
+    #   - the Expo packager preview URL and the production deploy host.
+    # Anything else (third-party tools, dev tunnels, etc.) is matched by the
+    # regex below so the Expo Go QR-code session and any Emergent preview URL
+    # work out-of-the-box.
+    allow_origins=[
+        "https://damsrentacar.com",
+        "https://www.damsrentacar.com",
+        "https://rental-routes.emergent.host",
+        "https://rental-routes.preview.emergentagent.com",
+        "http://localhost:3000",
+        "http://localhost:19006",
+        "http://localhost:8081",
+    ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|[\w-]+\.preview\.emergentagent\.com|[\w-]+\.emergent\.host|[\w-]+\.exp\.direct|[\w-]+\.expo\.dev|[\w-]+\.damsrentacar\.com):?\d*$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
