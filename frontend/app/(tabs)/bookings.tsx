@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, FlatList, Image, ActivityIndi
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../_layout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { t as tr } from '../../src/i18n';
@@ -48,6 +49,9 @@ export default function BookingsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
+  // Pad list bottom by the actual tab bar height (incl. iOS home indicator)
+  // so the last booking card is not hidden behind the bottom tab bar.
+  const tabBarHeight = useBottomTabBarHeight();
 
   const fetchBookings = useCallback(async () => {
     try {
@@ -162,7 +166,7 @@ export default function BookingsScreen() {
           data={bookings}
           keyExtractor={(item) => item.id}
           renderItem={renderBooking}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: tabBarHeight + 24 }]}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF3B30" />}
         />

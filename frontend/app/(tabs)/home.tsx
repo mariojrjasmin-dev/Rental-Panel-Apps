@@ -7,6 +7,7 @@ import { useAuth } from '../_layout';
 import StarRating from '../../components/StarRating';
 import LegalLinks from '../../components/LegalLinks';
 import BrandLogo from '../../components/BrandLogo';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { t as tr } from '../../src/i18n';
 
 import { BACKEND_URL } from '../../src/config';
@@ -49,6 +50,9 @@ export default function HomeScreen() {
   const [activeCity, setActiveCity] = useState('');
   const { user } = useAuth();
   const router = useRouter();
+  // Reserve space at the bottom of the car FlatList so the LegalLinks footer
+  // (and last car card) is never hidden behind the bottom tab bar.
+  const tabBarHeight = useBottomTabBarHeight();
 
   // Derive unique cities from locations
   const cities = [...new Set(locations.map(l => l.city))];
@@ -259,7 +263,7 @@ export default function HomeScreen() {
           data={cars}
           keyExtractor={(item) => item.id}
           renderItem={renderCar}
-          contentContainerStyle={styles.carList}
+          contentContainerStyle={[styles.carList, { paddingBottom: tabBarHeight + 24 }]}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF3B30" />}
           ListFooterComponent={<LegalLinks />}
