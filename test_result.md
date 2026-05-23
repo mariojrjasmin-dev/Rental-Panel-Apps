@@ -526,8 +526,7 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Optimized tax backfill endpoint (POST /api/admin/backfill-booking-taxes)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
