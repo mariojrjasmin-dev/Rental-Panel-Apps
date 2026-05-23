@@ -1703,6 +1703,57 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
     return booking_payload
 
 
+@api_router.post("/admin/bookings/cancel-pending-pickups")
+async def admin_cancel_pending_pickups(request: Request):
+    """Bulk-cancel every booking that is still awaiting pickup.
+
+    A booking is considered "awaiting pickup" when its status is one of:
+      - pending
+      - pending_payment
+      - confirmed
+
+    The operation:
+      - Sets status='cancelled' for all matching bookings (keeps them in the DB for audit).
+      - Records the cancellation timestamp on each.
+      - Does NOT touch stock (no pickup ever happened so stock was never decremented).
+      - Returns the count of bookings affected and a small sample list for confirmation.
+    """
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    query = {"status": {"$in": ["pending", "pending_payment", "confirmed"]}}
+    # Sample a few before the update so we can show the admin what was cleared.
+    sample = []
+    async for b in db.bookings.find(query).limit(10):
+        sample.append({
+            "id": str(b.get("_id")),
+            "car_name": b.get("car_name") or "",
+            "user_email": b.get("user_email") or "",
+            "pickup_date": b.get("pickup_date").isoformat() if isinstance(b.get("pickup_date"), datetime) else b.get("pickup_date"),
+            "status_before": b.get("status"),
+        })
+
+    now = datetime.now(timezone.utc)
+    res = await db.bookings.update_many(
+        query,
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": now,
+            "cancelled_by": "admin_bulk",
+            "cancelled_reason": "Bulk cleanup of pending pickups by admin",
+        }},
+    )
+    logger.info(
+        f"Admin {user.get('email')} bulk-cancelled {res.modified_count} pending-pickup bookings."
+    )
+    return {
+        "cancelled_count": res.modified_count,
+        "matched_count": res.matched_count,
+        "sample": sample,
+    }
+
+
 @api_router.get("/bookings/{booking_id}/receipt.pdf")
 async def get_booking_receipt(booking_id: str, request: Request):
     """Returns a PDF receipt for the booking. Accessible by the booking owner or an admin."""

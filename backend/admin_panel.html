@@ -1084,17 +1084,23 @@ async function showOperations() {
 
   render(`
     <div class="header">
-      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/>
+        <span class="admin-id-pill"><span class="dot"></span>Pickups</span>
+      </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
-        <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
-        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+        <button class="nav-btn ghost" onclick="showDashboard()">← Back to Cars</button>
+        <button class="nav-btn ghost" onclick="showBookings()">Bookings</button>
+        <button class="nav-btn danger-ghost" onclick="doLogout()">⎋ Logout</button>
       </div>
     </div>
     <div class="container">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <h2 style="font-size:20px;font-weight:800">🔑 Pickups &amp; Drop-offs</h2>
-        <button class="btn btn-sm btn-gray" onclick="showOperations()">↻ Refresh</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <h2 style="font-size:22px;font-weight:900">🔑 Pickups &amp; Drop-offs</h2>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          ${pendingPickup.length ? `<button class="btn btn-sm" style="background:#ff3b30;color:#fff;font-weight:800" onclick="bulkCancelPendingPickups()">🗑 Bulk cancel all pending (${pendingPickup.length})</button>` : ''}
+          <button class="btn btn-sm btn-gray" onclick="showOperations()">↻ Refresh</button>
+        </div>
       </div>
       <div style="background:#e6f9ed;border:1px solid #a4e1be;border-radius:12px;padding:12px 14px;margin-bottom:18px;font-size:13px;color:#0a5d2b;font-weight:600">
         ℹ️ Confirming a <strong>Pickup</strong> sets the booking to ACTIVE and <strong>decreases</strong> the car's stock at the pickup location by 1. Confirming a <strong>Drop-off</strong> sets it to COMPLETED and <strong>increases</strong> stock at the drop-off location by 1.
@@ -1117,6 +1123,27 @@ async function showOperations() {
       </div>
     </div>
   `);
+}
+
+async function bulkCancelPendingPickups() {
+  const phrase = 'CANCEL';
+  const typed = prompt(
+    '⚠️ Bulk cancel ALL pending pickup bookings?\n\n' +
+    'This will mark every booking with status "pending", "pending_payment" or "confirmed" as CANCELLED. ' +
+    'This is intended to clear stale/test data and CANNOT be undone in bulk.\n\n' +
+    'Type ' + phrase + ' (in capitals) to confirm:'
+  );
+  if (typed !== phrase) {
+    if (typed !== null) alert('Confirmation phrase did not match. No bookings were cancelled.');
+    return;
+  }
+  try {
+    const res = await api('/admin/bookings/cancel-pending-pickups', { method: 'POST', body: JSON.stringify({}) });
+    alert('✅ ' + (res.cancelled_count || 0) + ' booking(s) cancelled.');
+    showOperations();
+  } catch (e) {
+    alert('❌ ' + (e.message || 'Failed to bulk cancel.'));
+  }
 }
 
 async function confirmOp(bookingId, newStatus, action) {
