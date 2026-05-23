@@ -161,8 +161,16 @@ export default function LoginScreen() {
           <TouchableOpacity testID="google-login-button" style={styles.googleBtn} activeOpacity={0.7}
             onPress={() => {
               // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-              const redirectUrl = window.location.origin + '/(tabs)/home';
+              // Web-only: native builds (Android/iOS) don't have `window` and would crash on access.
+              if (Platform.OS !== 'web') {
+                Alert.alert(
+                  t('continueWithGoogle'),
+                  'Google Sign-In is currently available on the web version only. Please sign in with your email and password.'
+                );
+                return;
+              }
               if (typeof window !== 'undefined') {
+                const redirectUrl = window.location.origin + '/(tabs)/home';
                 window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
               }
             }}

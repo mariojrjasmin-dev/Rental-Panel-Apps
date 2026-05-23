@@ -1,266 +1,280 @@
-"""Tests for POST /api/admin/customers/{customer_id}/reset-password.
-
-Covers:
-  - Auth (unauth=401, customer=403)
-  - Happy path + login flips (old=401, new=200)
-  - Validation (short/empty/missing)
-  - Bad id (invalid → 400, valid unknown ObjectId → 404)
-  - Self-protection (admin -> own id → 400)
-  - Side-effects (password_resets and login_attempts rows deleted)
-  - Audit log line in backend stderr
-"""
+"""Tests for POST /api/admin/backfill-booking-taxes optimized endpoint."""
 import os
 import sys
 import time
-import secrets
-import asyncio
 import requests
-from datetime import datetime, timezone, timedelta
-
-from motor.motor_asyncio import AsyncIOMotorClient
+from bson import ObjectId
+from datetime import datetime, timezone
+from pymongo import MongoClient
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv("/app/backend/.env")
+load_dotenv(Path('/app/backend/.env'))
 
-BACKEND = "https://rental-routes.preview.emergentagent.com"
-API = BACKEND + "/api"
-
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ.get("DB_NAME", "test_database")
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+BASE = "http://localhost:8001/api"
+MONGO_URL = os.environ['MONGO_URL']
+DB_NAME = os.environ['DB_NAME']
 
 ADMIN_EMAIL = "admin@damscarrental.com"
 ADMIN_PASSWORD = "Admin@123"
 
-PASS = []
-FAIL = []
+results = []  # (name, ok, detail)
 
 
-def check(cond, msg):
-    if cond:
-        PASS.append(msg)
-        print(f"  PASS  {msg}")
-    else:
-        FAIL.append(msg)
-        print(f"  FAIL  {msg}")
+def check(name, cond, detail=""):
+    results.append((name, bool(cond), detail))
+    status = "PASS" if cond else "FAIL"
+    print(f"[{status}] {name}{(' - ' + detail) if detail else ''}")
 
 
-def login(email, password):
-    return requests.post(f"{API}/auth/login", json={"email": email, "password": password}, timeout=15)
+def admin_token():
+    r = requests.post(f"{BASE}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=10)
+    assert r.status_code == 200, f"admin login failed: {r.status_code} {r.text}"
+    return r.json()["token"]
 
 
-def H(token):
-    return {"Authorization": f"Bearer {token}"}
+def register_customer():
+    suffix = int(time.time() * 1000) % 10_000_000
+    email = f"backfill.cust.{suffix}@example.com"
+    r = requests.post(
+        f"{BASE}/auth/register",
+        json={
+            "name": "Backfill Tester",
+            "email": email,
+            "password": "Customer@123",
+            "phone": "+18095551234",
+            "terms_accepted": True,
+        },
+        timeout=10,
+    )
+    assert r.status_code == 200, f"register failed: {r.status_code} {r.text}"
+    return r.json()["token"], email
 
 
-async def main():
-    print("=" * 70)
-    print("Admin Reset Customer Password — endpoint tests")
-    print("=" * 70)
+def main():
+    mc = MongoClient(MONGO_URL)
+    db = mc[DB_NAME]
 
-    # [0] Admin login
-    print("\n[0] Admin login")
-    r = login(ADMIN_EMAIL, ADMIN_PASSWORD)
-    check(r.status_code == 200, f"Admin login status=200 (got {r.status_code})")
-    admin_token = r.json().get("token")
-    check(bool(admin_token), "Admin token returned")
-    me = requests.get(f"{API}/auth/me", headers=H(admin_token)).json()
-    admin_id = me.get("id") or me.get("_id")
-    check(bool(admin_id), f"Admin id resolved: {admin_id}")
+    # Defensive: clean any leftover test markers from previous failed runs
+    db.bookings.delete_many({"_test_marker": True})
 
-    # [1] Register temp customer
-    print("\n[1] Register temp customer")
-    rnd = secrets.token_hex(4)
-    cust_email = f"cust.pwreset.{rnd}@example.com"
-    cust_password_old = "InitialPass#1"
-    cust_password_new = "NewStrong#123"
-    r = requests.post(f"{API}/auth/register", json={
-        "email": cust_email,
-        "password": cust_password_old,
-        "name": "Patricia PwReset",
-        "phone": "+18095559090",
-        "terms_accepted": True,
-    }, timeout=15)
-    check(r.status_code == 200, f"Customer register status=200 (got {r.status_code} {r.text[:200]})")
+    loc = db.locations.find_one({"tax_rate": {"$gt": 0}})
+    if not loc:
+        loc = db.locations.find_one({})
+        if loc:
+            db.locations.update_one({"_id": loc["_id"]}, {"$set": {"tax_rate": 18.0}})
+            loc = db.locations.find_one({"_id": loc["_id"]})
+    assert loc is not None, "No location available in DB to test against"
+    loc_name = loc["name"]
+    loc_tax_rate = float(loc.get("tax_rate") or 0.0)
+    print(f"Using location: '{loc_name}' tax_rate={loc_tax_rate}")
+
+    # === (1) AUTH ===
+    r_unauth = requests.post(f"{BASE}/admin/backfill-booking-taxes", timeout=10)
+    check("AUTH: unauth → 401", r_unauth.status_code == 401, f"got {r_unauth.status_code}")
+
+    cust_token, cust_email = register_customer()
+    r_nonadmin = requests.post(
+        f"{BASE}/admin/backfill-booking-taxes",
+        headers={"Authorization": f"Bearer {cust_token}"},
+        timeout=10,
+    )
+    check("AUTH: non-admin → 403", r_nonadmin.status_code == 403, f"got {r_nonadmin.status_code}")
+
+    tok = admin_token()
+    hdrs = {"Authorization": f"Bearer {tok}"}
+
+    r_admin = requests.post(f"{BASE}/admin/backfill-booking-taxes", headers=hdrs, timeout=30)
+    check("AUTH: admin → 200", r_admin.status_code == 200, f"got {r_admin.status_code} body={r_admin.text[:200]}")
+
+    # === (2) FUNCTIONAL CORRECTNESS — seed 3 incomplete bookings ===
+    totals = [100.0, 250.0, 500.0]
+    seeded_ids = []
+    for t in totals:
+        doc = {
+            "user_id": "test-user",
+            "user_email": cust_email,
+            "user_name": "Backfill Test",
+            "car_id": "test-car",
+            "car_name": "Test Car",
+            "pickup_location": {"name": loc_name, "lat": 0.0, "lng": 0.0},
+            "dropoff_location": {"name": loc_name, "lat": 0.0, "lng": 0.0},
+            "pickup_date": datetime.now(timezone.utc),
+            "dropoff_date": datetime.now(timezone.utc),
+            "total_price": t,
+            "status": "completed",
+            "payment_status": "paid",
+            "payment_method": "cash",
+            "created_at": datetime.now(timezone.utc),
+            "_test_marker": True,
+        }
+        ins = db.bookings.insert_one(doc)
+        seeded_ids.append(ins.inserted_id)
+
+    already_ok_doc = {
+        "user_id": "test-user",
+        "user_email": cust_email,
+        "user_name": "Backfill Test",
+        "car_id": "test-car",
+        "car_name": "Test Car",
+        "pickup_location": {"name": loc_name},
+        "dropoff_location": {"name": loc_name},
+        "pickup_date": datetime.now(timezone.utc),
+        "dropoff_date": datetime.now(timezone.utc),
+        "total_price": 999.0,
+        "subtotal": 900.0,
+        "tax_rate": 11.0,
+        "tax_amount": 99.0,
+        "status": "completed",
+        "payment_status": "paid",
+        "payment_method": "cash",
+        "created_at": datetime.now(timezone.utc),
+        "_test_marker": True,
+    }
+    already_ok_id = db.bookings.insert_one(already_ok_doc).inserted_id
+
+    no_total_doc = {
+        "user_id": "test-user",
+        "user_email": cust_email,
+        "user_name": "Backfill Test",
+        "car_id": "test-car",
+        "car_name": "Test Car",
+        "pickup_location": {"name": loc_name},
+        "dropoff_location": {"name": loc_name},
+        "pickup_date": datetime.now(timezone.utc),
+        "dropoff_date": datetime.now(timezone.utc),
+        "status": "pending",
+        "payment_status": "pending",
+        "payment_method": "cash",
+        "created_at": datetime.now(timezone.utc),
+        "_test_marker": True,
+    }
+    no_total_id = db.bookings.insert_one(no_total_doc).inserted_id
+
+    r = requests.post(f"{BASE}/admin/backfill-booking-taxes", headers=hdrs, timeout=60)
+    check("BACKFILL: returns 200", r.status_code == 200, r.text[:200])
     body = r.json()
-    cust_token = body.get("token")
-    cust_id = body.get("id")
-    check(bool(cust_id), f"Customer id returned: {cust_id}")
+    check("BACKFILL: response has 'message'", "message" in body)
+    check("BACKFILL: response has 'updated' int", isinstance(body.get("updated"), int))
+    check("BACKFILL: response has 'already_ok' int >=0", isinstance(body.get("already_ok"), int) and body["already_ok"] >= 0)
+    check("BACKFILL: response has 'skipped_no_total' int", isinstance(body.get("skipped_no_total"), int))
+    check("BACKFILL: response 'limit' == 1000 default", body.get("limit") == 1000)
+    check("BACKFILL: updated >= 3 (seeded 3 incomplete)", body.get("updated", 0) >= 3, f"updated={body.get('updated')}")
+    check("BACKFILL: skipped_no_total >= 1", body.get("skipped_no_total", 0) >= 1, f"skipped={body.get('skipped_no_total')}")
 
-    rr = login(cust_email, cust_password_old)
-    check(rr.status_code == 200, f"Pre-reset login OLD password OK (status {rr.status_code})")
+    for sid, total in zip(seeded_ids, totals):
+        doc = db.bookings.find_one({"_id": sid})
+        assert doc is not None
+        subtotal = doc.get("subtotal")
+        tax_amount = doc.get("tax_amount")
+        tax_rate_val = doc.get("tax_rate")
+        check(f"MATH({total}): subtotal present", subtotal is not None)
+        check(f"MATH({total}): tax_amount present", tax_amount is not None)
+        check(f"MATH({total}): tax_rate matches location ({loc_tax_rate})", abs((tax_rate_val or 0) - loc_tax_rate) < 0.001, f"got tax_rate={tax_rate_val}")
+        expected_sub = round(total / (1 + loc_tax_rate / 100.0), 2)
+        check(f"MATH({total}): subtotal == round(total/(1+rate/100),2) == {expected_sub}",
+              abs((subtotal or 0) - expected_sub) < 0.005, f"got {subtotal} expected {expected_sub}")
+        check(f"MATH({total}): subtotal+tax_amount ≈ total_price",
+              abs(((subtotal or 0) + (tax_amount or 0)) - total) < 0.02,
+              f"sub={subtotal} tax={tax_amount} total={total}")
 
-    # [2] Auth checks
-    print("\n[2] Auth checks")
-    r = requests.post(f"{API}/admin/customers/{cust_id}/reset-password",
-                      json={"new_password": cust_password_new}, timeout=15)
-    check(r.status_code == 401, f"Unauth -> 401 (got {r.status_code})")
+    # === (3) FILTER CORRECTNESS ===
+    after = db.bookings.find_one({"_id": already_ok_id})
+    check("FILTER: already-ok subtotal unchanged (900.0)", after.get("subtotal") == 900.0, f"got {after.get('subtotal')}")
+    check("FILTER: already-ok tax_rate unchanged (11.0)", after.get("tax_rate") == 11.0, f"got {after.get('tax_rate')}")
+    check("FILTER: already-ok tax_amount unchanged (99.0)", after.get("tax_amount") == 99.0, f"got {after.get('tax_amount')}")
+    check("FILTER: already_ok response count >= 1", body.get("already_ok", 0) >= 1)
 
-    r = requests.post(f"{API}/admin/customers/{cust_id}/reset-password",
-                      headers=H(cust_token),
-                      json={"new_password": cust_password_new}, timeout=15)
-    check(r.status_code == 403, f"Customer JWT -> 403 (got {r.status_code})")
+    # === (4) MISSING total_price ===
+    no_total_after = db.bookings.find_one({"_id": no_total_id})
+    check("NO_TOTAL: doc still has no subtotal", "subtotal" not in no_total_after or no_total_after.get("subtotal") is None)
+    check("NO_TOTAL: doc still has no total_price", "total_price" not in no_total_after)
 
-    # [3] Validation
-    print("\n[3] Validation")
-    r = requests.post(f"{API}/admin/customers/{cust_id}/reset-password",
-                      headers=H(admin_token),
-                      json={"new_password": "shortpw"}, timeout=15)
-    check(r.status_code == 400, f"new_password='shortpw' (7 chars) -> 400 (got {r.status_code})")
-    check("at least 8" in (r.json().get("detail") or "").lower(),
-          f"400 detail mentions 'at least 8' (got: {r.json().get('detail')})")
+    # === (5) LIMIT QUERY PARAM ===
+    for t in [111.0, 222.0, 333.0]:
+        db.bookings.insert_one({
+            "user_id": "test-user",
+            "user_email": cust_email,
+            "car_id": "test-car",
+            "car_name": "Test Car",
+            "pickup_location": {"name": loc_name},
+            "dropoff_location": {"name": loc_name},
+            "pickup_date": datetime.now(timezone.utc),
+            "dropoff_date": datetime.now(timezone.utc),
+            "total_price": t,
+            "status": "completed",
+            "payment_status": "paid",
+            "payment_method": "cash",
+            "created_at": datetime.now(timezone.utc),
+            "_test_marker": True,
+        })
 
-    r = requests.post(f"{API}/admin/customers/{cust_id}/reset-password",
-                      headers=H(admin_token),
-                      json={"new_password": ""}, timeout=15)
-    check(r.status_code == 400, f"empty new_password -> 400 (got {r.status_code})")
+    r1 = requests.post(f"{BASE}/admin/backfill-booking-taxes?limit=1", headers=hdrs, timeout=30)
+    check("LIMIT=1: 200", r1.status_code == 200)
+    b1 = r1.json()
+    check("LIMIT=1: response.limit==1", b1.get("limit") == 1, f"got {b1.get('limit')}")
+    check("LIMIT=1: updated<=1", b1.get("updated", 0) <= 1, f"updated={b1.get('updated')}")
 
-    r = requests.post(f"{API}/admin/customers/{cust_id}/reset-password",
-                      headers=H(admin_token),
-                      json={}, timeout=15)
-    check(r.status_code in (400, 422),
-          f"missing new_password field -> 400/422 (got {r.status_code})")
+    r0 = requests.post(f"{BASE}/admin/backfill-booking-taxes?limit=0", headers=hdrs, timeout=30)
+    check("LIMIT=0: 200", r0.status_code == 200)
+    check("LIMIT=0: clamped to 1", r0.json().get("limit") == 1, f"got {r0.json().get('limit')}")
 
-    # [4] Bad id
-    print("\n[4] Bad id")
-    r = requests.post(f"{API}/admin/customers/abc/reset-password",
-                      headers=H(admin_token),
-                      json={"new_password": cust_password_new}, timeout=15)
-    check(r.status_code == 400, f"customer_id='abc' -> 400 (got {r.status_code})")
-    check("invalid customer id" in (r.json().get("detail") or "").lower(),
-          f"detail mentions 'Invalid customer id' (got: {r.json().get('detail')})")
+    r99 = requests.post(f"{BASE}/admin/backfill-booking-taxes?limit=99999", headers=hdrs, timeout=30)
+    check("LIMIT=99999: 200", r99.status_code == 200)
+    check("LIMIT=99999: clamped to 10000", r99.json().get("limit") == 10000, f"got {r99.json().get('limit')}")
 
-    unknown_oid = "0" * 24
-    r = requests.post(f"{API}/admin/customers/{unknown_oid}/reset-password",
-                      headers=H(admin_token),
-                      json={"new_password": cust_password_new}, timeout=15)
-    check(r.status_code == 404, f"unknown ObjectId -> 404 (got {r.status_code})")
-    check("customer not found" in (r.json().get("detail") or "").lower(),
-          f"detail mentions 'Customer not found' (got: {r.json().get('detail')})")
+    rabc = requests.post(f"{BASE}/admin/backfill-booking-taxes?limit=abc", headers=hdrs, timeout=30)
+    check("LIMIT=abc: 200 (no crash)", rabc.status_code == 200, f"got {rabc.status_code} body={rabc.text[:200]}")
+    check("LIMIT=abc: defaults to 1000", rabc.json().get("limit") == 1000, f"got {rabc.json().get('limit')}")
 
-    # [5] Self-protection (admin -> own id)
-    print("\n[5] Self-protection (admin -> own id)")
-    r = requests.post(f"{API}/admin/customers/{admin_id}/reset-password",
-                      headers=H(admin_token),
-                      json={"new_password": "SomethingStrong#1"}, timeout=15)
-    check(r.status_code == 400, f"admin -> own id -> 400 (got {r.status_code})")
-    detail = (r.json().get("detail") or "").lower()
-    check("/api/auth/change-password" in detail,
-          f"detail points to /api/auth/change-password (got: {r.json().get('detail')})")
+    # === (6) IDEMPOTENCY ===
+    r_idem = requests.post(f"{BASE}/admin/backfill-booking-taxes", headers=hdrs, timeout=30)
+    check("IDEMPOTENT: 200", r_idem.status_code == 200)
+    check("IDEMPOTENT: updated==0 (no new incomplete docs)", r_idem.json().get("updated") == 0,
+          f"updated={r_idem.json().get('updated')}")
 
-    # [6] Seed side-effect rows
-    print("\n[6] Seed side-effect rows (password_resets + login_attempts)")
-    await db.password_resets.insert_one({
-        "email": cust_email,
-        "code_hash": "$2b$12$dummyhashfortest" + "x" * 30,
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=15),
-        "attempts": 0,
-        "used": False,
-        "_test_marker": True,
-    })
-    await db.login_attempts.insert_one({
-        "email": cust_email,
-        "count": 3,
-        "locked_until": None,
-        "_test_marker": True,
-    })
+    # === (7) BULK WRITE SAFETY ===
+    with open('/app/backend/server.py') as f:
+        first_lines = "".join(f.readlines()[:30])
+    check("IMPORT: 'from pymongo import UpdateOne' present (top of server.py)",
+          "from pymongo import UpdateOne" in first_lines)
 
-    pre_resets = await db.password_resets.count_documents({"email": cust_email})
-    pre_attempts = await db.login_attempts.count_documents({"email": cust_email})
-    check(pre_resets >= 1, f"Seeded password_resets row exists pre-call (count={pre_resets})")
-    check(pre_attempts >= 1, f"Seeded login_attempts row exists pre-call (count={pre_attempts})")
-
-    # Capture backend stderr offset BEFORE happy-path
-    log_path = "/var/log/supervisor/backend.err.log"
-    log_size_before = 0
+    err_log_issues = []
     try:
-        log_size_before = os.path.getsize(log_path)
-    except OSError:
+        import glob
+        for path in glob.glob('/var/log/supervisor/backend.err*.log'):
+            with open(path) as f:
+                content = f.read()[-30000:]
+            for line in content.splitlines():
+                low = line.lower()
+                if ('bulk_write' in low or 'updateone' in low or 'pymongo import' in low) and ('error' in low or 'traceback' in low or 'exception' in low):
+                    err_log_issues.append(f"{path}: {line[:200]}")
+    except Exception as e:
+        err_log_issues.append(f"log-read-error: {e}")
+    check("LOG: no bulk_write/UpdateOne/pymongo errors in backend.err.log", len(err_log_issues) == 0,
+          f"issues={err_log_issues[:3]}")
+
+    # === CLEANUP ===
+    cleanup_count = db.bookings.delete_many({"_test_marker": True}).deleted_count
+    print(f"\nCleaned up {cleanup_count} test bookings.")
+
+    try:
+        db.users.delete_one({"email": cust_email})
+    except Exception:
         pass
 
-    # [7] Happy path
-    print("\n[7] Happy path: admin resets customer password")
-    r = requests.post(f"{API}/admin/customers/{cust_id}/reset-password",
-                      headers=H(admin_token),
-                      json={"new_password": cust_password_new}, timeout=15)
-    check(r.status_code == 200, f"Happy path status=200 (got {r.status_code} {r.text[:200]})")
-    body = r.json()
-    check(body.get("ok") is True, f"ok=True (got {body.get('ok')})")
-    check(body.get("customer_id") == cust_id, f"customer_id echoed (got {body.get('customer_id')})")
-    check(body.get("email") == cust_email, f"email echoed (got {body.get('email')})")
-    check(body.get("name") == "Patricia PwReset", f"name echoed (got {body.get('name')})")
-    pwd_at = body.get("password_updated_at")
-    check(isinstance(pwd_at, str) and pwd_at.startswith("20"),
-          f"password_updated_at ISO string (got {pwd_at})")
-    try:
-        parsed = datetime.fromisoformat(pwd_at.replace("Z", "+00:00"))
-        check(parsed.tzinfo is not None, "password_updated_at is tz-aware ISO")
-    except Exception as e:
-        check(False, f"password_updated_at parses as ISO: {e}")
-
-    # [8] Login flips
-    print("\n[8] Login flips after reset")
-    r_old = login(cust_email, cust_password_old)
-    check(r_old.status_code == 401, f"Login with OLD password -> 401 (got {r_old.status_code})")
-    r_new = login(cust_email, cust_password_new)
-    check(r_new.status_code == 200, f"Login with NEW password -> 200 (got {r_new.status_code})")
-    check(bool(r_new.json().get("token")), "NEW-password login returns token")
-
-    # [9] Side-effects post-call
-    print("\n[9] Verify side-effects rows are GONE")
-    post_resets = await db.password_resets.count_documents({"email": cust_email})
-    post_attempts = await db.login_attempts.count_documents({"email": cust_email})
-    check(post_resets == 0,
-          f"password_resets rows for {cust_email} are gone (post count={post_resets})")
-    check(post_attempts == 0,
-          f"login_attempts rows for {cust_email} are gone (post count={post_attempts})")
-
-    # [10] Audit log
-    print("\n[10] Audit log line in backend stderr")
-    time.sleep(0.5)
-    found_audit = False
-    new_log_chunk = ""
-    try:
-        with open(log_path, "rb") as fh:
-            fh.seek(log_size_before)
-            new_log_chunk = fh.read().decode("utf-8", errors="replace")
-        expected = f"reset password for customer {cust_email}"
-        found_audit = expected in new_log_chunk
-    except OSError as e:
-        new_log_chunk = f"<could not read log: {e}>"
-    check(found_audit,
-          f"Audit log contains 'reset password for customer {cust_email}'"
-          f"{'' if found_audit else ' -- sample tail: ' + new_log_chunk[-400:]}")
-
-    # CLEANUP
-    print("\n[CLEANUP] Removing temp test user + leftover marker rows")
-    res_u = await db.users.delete_one({"email": cust_email})
-    print(f"  users.delete_one({cust_email}) -> deleted_count={res_u.deleted_count}")
-    res_pr = await db.password_resets.delete_many({"_test_marker": True})
-    print(f"  password_resets._test_marker -> deleted_count={res_pr.deleted_count}")
-    res_la = await db.login_attempts.delete_many({"_test_marker": True})
-    print(f"  login_attempts._test_marker -> deleted_count={res_la.deleted_count}")
-    res_pr2 = await db.password_resets.delete_many({"email": cust_email})
-    res_la2 = await db.login_attempts.delete_many({"email": cust_email})
-    print(f"  defensive password_resets cleanup -> {res_pr2.deleted_count}")
-    print(f"  defensive login_attempts cleanup -> {res_la2.deleted_count}")
-
-    print("\n[SANITY] Admin login still works with original password")
-    r = login(ADMIN_EMAIL, ADMIN_PASSWORD)
-    check(r.status_code == 200, f"Admin login still 200 after tests (got {r.status_code})")
-
     print("\n" + "=" * 70)
-    print(f"PASSED: {len(PASS)}")
-    print(f"FAILED: {len(FAIL)}")
-    if FAIL:
-        print("\nFailed assertions:")
-        for f in FAIL:
-            print(f"  - {f}")
-    print("=" * 70)
-    return 0 if not FAIL else 1
+    total = len(results)
+    passed = sum(1 for _, ok, _ in results if ok)
+    failed = total - passed
+    print(f"RESULTS: {passed}/{total} passed, {failed} failed")
+    if failed:
+        print("\nFAILURES:")
+        for n, ok, d in results:
+            if not ok:
+                print(f"  ✗ {n}: {d}")
+    sys.exit(0 if failed == 0 else 1)
 
 
 if __name__ == "__main__":
-    rc = asyncio.run(main())
-    sys.exit(rc)
+    main()

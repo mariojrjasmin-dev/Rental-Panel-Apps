@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import UpdateOne
 from bson import ObjectId
 import os
 import logging
@@ -1487,30 +1488,52 @@ async def backfill_booking_taxes(request: Request):
     created before the tax feature was added. Existing total_price is preserved
     and treated as the grand total — subtotal is derived from the pickup
     location's current tax rate so that subtotal + tax = total_price.
+
+    Optimized:
+      * Filter at DB level so already-complete bookings aren't loaded into memory.
+      * Projection limits each doc to a handful of fields.
+      * Hard safety cap via ``?limit=`` query param (default 1000, max 10000) to
+        prevent unbounded DB scans / lockups in production.
+      * Batched ``bulk_write`` updates instead of N round-trips.
     """
     user = await get_authenticated_user(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
 
+    # Safety cap — prevents accidental multi-hour scans on large collections.
+    try:
+        limit = int(request.query_params.get("limit", 1000))
+    except (TypeError, ValueError):
+        limit = 1000
+    limit = max(1, min(limit, 10000))
+
     updated = 0
-    already_ok = 0
     no_total = 0
 
-    # Preload locations into a name -> tax_rate map
-    loc_rates = {}
-    for loc in await db.locations.find({}, {"name": 1, "tax_rate": 1}).to_list(500):
+    # Preload locations into a name -> tax_rate map (small, cap at 500).
+    loc_rates: dict = {}
+    async for loc in db.locations.find({}, {"_id": 0, "name": 1, "tax_rate": 1}).limit(500):
         loc_rates[loc.get("name", "")] = float(loc.get("tax_rate") or 0.0)
 
-    async for b in db.bookings.find({}):
-        has_complete = (
-            b.get("subtotal") is not None
-            and b.get("tax_rate") is not None
-            and b.get("tax_amount") is not None
-        )
-        if has_complete:
-            already_ok += 1
-            continue
+    # DB-level filter: only bookings missing at least one of the tax fields.
+    incomplete_filter = {
+        "$or": [
+            {"subtotal": {"$exists": False}},
+            {"subtotal": None},
+            {"tax_rate": {"$exists": False}},
+            {"tax_rate": None},
+            {"tax_amount": {"$exists": False}},
+            {"tax_amount": None},
+        ]
+    }
+    # Only fetch fields we actually need.
+    projection = {"_id": 1, "total_price": 1, "pickup_location.name": 1}
 
+    cursor = db.bookings.find(incomplete_filter, projection).limit(limit)
+
+    ops: list = []
+    BATCH = 500
+    async for b in cursor:
         total = b.get("total_price")
         if total is None:
             no_total += 1
@@ -1520,28 +1543,42 @@ async def backfill_booking_taxes(request: Request):
         pickup_name = (b.get("pickup_location") or {}).get("name", "")
         tax_rate = loc_rates.get(pickup_name, 0.0)
 
-        # total == subtotal * (1 + tax_rate/100) -> subtotal = total / (1 + r/100)
         divisor = 1.0 + (tax_rate / 100.0)
         subtotal = round(total / divisor, 2) if divisor > 0 else round(total, 2)
         tax_amount = round(total - subtotal, 2)
 
-        # Guard against minor rounding causing subtotal+tax != total
+        # Guard against minor rounding causing subtotal+tax != total.
         if abs((subtotal + tax_amount) - total) > 0.02:
             subtotal = round(total, 2)
             tax_amount = 0.0
             tax_rate = 0.0
 
-        await db.bookings.update_one(
+        ops.append(UpdateOne(
             {"_id": b["_id"]},
             {"$set": {"subtotal": subtotal, "tax_rate": tax_rate, "tax_amount": tax_amount}},
-        )
-        updated += 1
+        ))
+        if len(ops) >= BATCH:
+            res = await db.bookings.bulk_write(ops, ordered=False)
+            updated += res.modified_count or 0
+            ops = []
+
+    if ops:
+        res = await db.bookings.bulk_write(ops, ordered=False)
+        updated += res.modified_count or 0
+
+    # Count of fully-completed bookings (informational, single fast count).
+    already_ok = await db.bookings.count_documents({
+        "subtotal": {"$ne": None, "$exists": True},
+        "tax_rate": {"$ne": None, "$exists": True},
+        "tax_amount": {"$ne": None, "$exists": True},
+    })
 
     return {
-        "message": f"Backfilled tax on {updated} booking(s). {already_ok} already had full tax data, {no_total} skipped (no total_price).",
+        "message": f"Backfilled tax on {updated} booking(s). {already_ok} already had full tax data, {no_total} skipped (no total_price). Limit: {limit}.",
         "updated": updated,
         "already_ok": already_ok,
         "skipped_no_total": no_total,
+        "limit": limit,
     }
 
 
