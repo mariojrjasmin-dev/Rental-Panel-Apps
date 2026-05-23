@@ -3571,10 +3571,29 @@ async def admin_customer_detail(customer_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Customer not found")
 
     bookings_cursor = db.bookings.find({"user_id": str(u.get("_id"))}).sort("created_at", -1).limit(100)
+    bookings_raw = await bookings_cursor.to_list(100)
+
+    # Batch-fetch all referenced cars in a single query (was N+1).
+    # Collect valid ObjectIds and build a lookup map; skip invalid/missing car_ids.
+    car_oids = []
+    for b in bookings_raw:
+        cid = b.get("car_id")
+        if not cid:
+            continue
+        try:
+            car_oids.append(ObjectId(cid))
+        except Exception:
+            continue
+    cars_map = {}
+    if car_oids:
+        proj = {"_id": 1, "name": 1, "brand": 1}
+        async for c in db.cars.find({"_id": {"$in": car_oids}}, proj):
+            cars_map[str(c["_id"])] = c
+
     bookings_list = []
     total_spent = 0.0
-    async for b in bookings_cursor:
-        car = await db.cars.find_one({"_id": ObjectId(b.get("car_id"))}) if b.get("car_id") else None
+    for b in bookings_raw:
+        car = cars_map.get(str(b.get("car_id"))) if b.get("car_id") else None
         created = b.get("created_at")
         pickup = b.get("pickup_date")
         dropoff = b.get("dropoff_date")
