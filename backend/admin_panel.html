@@ -57,13 +57,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 /* ===== Admin Header / Menu (professional layout) ===== */
 .admin-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .admin-nav-group{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);padding:4px;border-radius:12px}
-.nav-btn{appearance:none;background:transparent;border:none;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;display:inline-flex;align-items:center;gap:6px;letter-spacing:0.1px;transition:background 0.12s ease}
+.nav-btn{appearance:none;background:transparent;border:none;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px;letter-spacing:0.1px;transition:background 0.12s ease}
 .nav-btn:hover{background:rgba(255,255,255,0.12)}
-.nav-btn.primary{background:#ff3b30;color:#fff}
-.nav-btn.primary:hover{background:#e63329}
-.nav-btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.2)}
-.nav-btn.danger-ghost{color:#ff6b6b;border:1px solid rgba(255,107,107,0.35)}
-.nav-btn.danger-ghost:hover{background:rgba(255,107,107,0.12)}
+.nav-btn.primary{background:#ff3b30;color:#ffffff;font-weight:800;box-shadow:0 1px 0 rgba(0,0,0,0.2) inset,0 2px 8px rgba(255,59,48,0.35);text-shadow:0 1px 1px rgba(0,0,0,0.25)}
+.nav-btn.primary:hover{background:#ff5247}
+.nav-btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.25);color:#fff}
+.nav-btn.ghost:hover{background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.4)}
+.nav-btn.danger-ghost{color:#ffffff;background:rgba(255,59,48,0.18);border:1px solid rgba(255,107,107,0.55);font-weight:800}
+.nav-btn.danger-ghost:hover{background:rgba(255,59,48,0.35);border-color:#ff6b6b}
 .nav-divider{width:1px;height:22px;background:rgba(255,255,255,0.12);margin:0 4px}
 .nav-dd{position:relative}
 .nav-dd-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:230px;background:#fff;color:#0a0a0a;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,0.18);padding:6px;z-index:50;display:none}
@@ -97,7 +98,12 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-function render(html) { document.getElementById('app').innerHTML = html; }
+function render(html) {
+  // Safety: remove any stray modals appended directly to <body> (from older bugs)
+  // so they can't persist across page navigations.
+  document.querySelectorAll('body > .modal, body > .modal-overlay').forEach(n => n.remove());
+  document.getElementById('app').innerHTML = html;
+}
 
 // ===== Dropdown helpers for the admin top nav =====
 function closeDDs() {
@@ -1156,39 +1162,43 @@ async function confirmOp(bookingId, newStatus, action) {
 }
 
 function showChangePassword() {
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  modal.innerHTML = `
-    <div class="modal-content" style="max-width:480px">
-      <div class="modal-header">
-        <h2>🔑 Change admin password</h2>
-        <button class="close-btn" onclick="closeModal()">×</button>
-      </div>
-      <div class="modal-body">
-        <div style="background:#fff5e6;border:1px solid #ffd48a;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#a05a00;font-weight:600">
-          ⚠️ You're about to change the password for this admin account. Make sure you save the new password somewhere safe — you'll need it on next login.
+  const root = document.getElementById('modal-root');
+  if (!root) {
+    alert('Please open this from the Dashboard.');
+    return;
+  }
+  root.innerHTML = `
+    <div id="cp-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:60px 20px 20px;overflow-y:auto" onclick="if(event.target===this)closeModal()">
+      <div style="background:#fff;border-radius:18px;width:100%;max-width:480px;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden">
+        <div style="padding:18px 22px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center">
+          <h2 style="margin:0;font-size:18px;font-weight:900;color:#0a0a0a">🔑 Change admin password</h2>
+          <button onclick="closeModal()" style="background:#f5f5f5;border:none;width:32px;height:32px;border-radius:16px;cursor:pointer;font-size:16px;line-height:1">✕</button>
         </div>
-        <div class="form-group">
-          <label>Current password</label>
-          <input class="input" id="cp-old" type="password" autocomplete="current-password" />
-        </div>
-        <div class="form-group">
-          <label>New password</label>
-          <input class="input" id="cp-new" type="password" autocomplete="new-password" />
-          <div style="font-size:11px;color:#888;margin-top:4px;font-weight:600">Minimum 8 characters.</div>
-        </div>
-        <div class="form-group">
-          <label>Confirm new password</label>
-          <input class="input" id="cp-new2" type="password" autocomplete="new-password" />
-        </div>
-        <div id="cp-msg" style="font-size:13px;font-weight:700;min-height:18px"></div>
-        <div style="display:flex;gap:8px;margin-top:14px">
-          <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-red" style="flex:1" onclick="doChangePassword()">Update password</button>
+        <div style="padding:20px 22px">
+          <div style="background:#fff5e6;border:1px solid #ffd48a;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#a05a00;font-weight:600">
+            ⚠️ You're about to change the password for this admin account. Make sure you save the new password somewhere safe — you'll need it on next login.
+          </div>
+          <div class="form-group">
+            <label>Current password</label>
+            <input class="input" id="cp-old" type="password" autocomplete="current-password" />
+          </div>
+          <div class="form-group">
+            <label>New password</label>
+            <input class="input" id="cp-new" type="password" autocomplete="new-password" />
+            <div style="font-size:11px;color:#888;margin-top:4px;font-weight:600">Minimum 8 characters.</div>
+          </div>
+          <div class="form-group">
+            <label>Confirm new password</label>
+            <input class="input" id="cp-new2" type="password" autocomplete="new-password" />
+          </div>
+          <div id="cp-msg" style="font-size:13px;font-weight:700;min-height:18px"></div>
+          <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-red" style="flex:1" onclick="doChangePassword()">Update password</button>
+          </div>
         </div>
       </div>
     </div>`;
-  document.body.appendChild(modal);
 }
 
 async function doChangePassword() {
