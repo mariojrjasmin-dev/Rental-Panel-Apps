@@ -3569,6 +3569,76 @@ async def admin_customer_detail(customer_id: str, request: Request):
         "total_spent": round(total_spent, 2),
     }
 
+
+class AdminResetCustomerPasswordRequest(BaseModel):
+    new_password: str
+
+
+@app.post("/api/admin/customers/{customer_id}/reset-password")
+async def admin_reset_customer_password(customer_id: str, body: AdminResetCustomerPasswordRequest, request: Request):
+    """Admin sets a new password for a customer directly (no current-password needed).
+
+    Notes:
+      - Admin-only (401/403).
+      - Cannot be used to change the admin's OWN password — admin must use POST /api/auth/change-password.
+      - New password must be at least 8 characters.
+      - Updates password_hash + password_updated_at on the customer document.
+      - Logs the action for audit purposes.
+      - Clears any pending password-reset codes and recent login_attempts for the user.
+    """
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    new_password = (body.new_password or "").strip()
+    if not new_password or len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    try:
+        oid = ObjectId(customer_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid customer id")
+
+    target = await db.users.find_one({"_id": oid})
+    if not target:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    # Safety: don't allow admin to change their own password via this endpoint
+    # (which would bypass the current-password check on /auth/change-password).
+    admin_id = str(user.get("_id") or user.get("id") or "")
+    if admin_id == str(target.get("_id")):
+        raise HTTPException(
+            status_code=400,
+            detail="Use POST /api/auth/change-password to update your own password.",
+        )
+
+    now = datetime.now(timezone.utc)
+    await db.users.update_one(
+        {"_id": oid},
+        {"$set": {"password_hash": hash_password(new_password), "password_updated_at": now}},
+    )
+    # Best-effort cleanup of any in-flight reset attempts / login lockouts.
+    try:
+        await db.password_resets.delete_many({"email": target.get("email")})
+    except Exception:
+        pass
+    try:
+        await db.login_attempts.delete_many({"email": target.get("email")})
+    except Exception:
+        pass
+
+    logger.info(
+        f"Admin {user.get('email')} reset password for customer {target.get('email')} (id={customer_id})."
+    )
+    return {
+        "ok": True,
+        "customer_id": customer_id,
+        "email": target.get("email"),
+        "name": target.get("name"),
+        "password_updated_at": now.isoformat(),
+    }
+
+
 # Serve admin panel HTML
 ADMIN_HTML = _Path(__file__).parent / "admin_panel.html"
 
