@@ -150,12 +150,15 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL = os.environ.get("SMTP_FROM_EMAIL", SMTP_USER)
 SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "DAMS Car Rental")
 # Public base URL — used to build absolute logo/asset URLs in outbound emails.
-# Falls back to FRONTEND_URL or the production host so transactional emails
-# always have a reachable logo image (mail clients do not load localhost URLs).
+# Resolution order:
+#   1. PUBLIC_BASE_URL  (set this explicitly in production for multi-tenant deploys)
+#   2. FRONTEND_URL     (legacy fallback)
+#   3. Production host  (single-tenant safe default — the actual deployed host,
+#                        NOT the preview URL which 404s outside the dev sandbox).
 PUBLIC_BASE_URL = (
     os.environ.get("PUBLIC_BASE_URL")
     or os.environ.get("FRONTEND_URL")
-    or "https://rental-routes.preview.emergentagent.com"
+    or "https://rental-routes.emergent.host"
 ).rstrip("/")
 EMAIL_LOGO_URL = f"{PUBLIC_BASE_URL}/api/assets/logo.png"
 # Default BCC for system notifications. Empty → no BCC.
