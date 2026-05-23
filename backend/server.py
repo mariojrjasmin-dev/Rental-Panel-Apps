@@ -157,10 +157,17 @@ PUBLIC_BASE_URL = (
     or "https://rental-routes.preview.emergentagent.com"
 ).rstrip("/")
 EMAIL_LOGO_URL = f"{PUBLIC_BASE_URL}/api/assets/logo.png"
+# Default BCC for system notifications. Empty → no BCC.
+# Password-reset emails intentionally bypass this for privacy.
+EMAIL_BCC = os.environ.get("EMAIL_BCC", "info@damsrentacar.com").strip()
 
 
-async def send_email(to: str, subject: str, html: str, text: Optional[str] = None) -> Dict:
-    """Send an email via SMTP (SMTP2GO). Fire-and-forget; never raises to caller."""
+async def send_email(to: str, subject: str, html: str, text: Optional[str] = None, bcc: Optional[str] = None, include_default_bcc: bool = True) -> Dict:
+    """Send an email via SMTP (SMTP2GO). Fire-and-forget; never raises to caller.
+    `include_default_bcc` toggles whether EMAIL_BCC (e.g. info@damsrentacar.com)
+    is added as a hidden recipient. Caller can pass include_default_bcc=False
+    for sensitive emails (password reset codes) where BCC is undesirable.
+    """
     if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD and to):
         return {"ok": False, "error": "SMTP not configured or no recipient"}
     try:
@@ -168,14 +175,25 @@ async def send_email(to: str, subject: str, html: str, text: Optional[str] = Non
         msg["From"] = f'{SMTP_FROM_NAME} <{SMTP_FROM_EMAIL}>'
         msg["To"] = to
         msg["Subject"] = subject
+        # Collect BCC recipients (header is NOT set; passed via recipients list).
+        bcc_list: List[str] = []
+        if bcc:
+            bcc_list.extend([b.strip() for b in bcc.split(",") if b.strip()])
+        if include_default_bcc and EMAIL_BCC and EMAIL_BCC.lower() != to.lower():
+            bcc_list.append(EMAIL_BCC)
         msg.set_content(text or "Please open this email in an HTML-capable client.")
         msg.add_alternative(html, subtype="html")
+        recipients = [to] + bcc_list
         await aiosmtplib.send(
             msg, hostname=SMTP_HOST, port=SMTP_PORT,
             username=SMTP_USER, password=SMTP_PASSWORD,
             start_tls=True, timeout=15,
+            recipients=recipients,
         )
-        logger.info(f"Email sent to {to} (subject: {subject!r})")
+        if bcc_list:
+            logger.info(f"Email sent to {to} (BCC: {','.join(bcc_list)}) (subject: {subject!r})")
+        else:
+            logger.info(f"Email sent to {to} (subject: {subject!r})")
         return {"ok": True}
     except Exception as e:
         logger.warning(f"Email send to {to} failed: {e}")
@@ -683,6 +701,47 @@ async def logout(response: Response):
     response.delete_cookie("session_token", path="/")
     return {"message": "Logged out"}
 
+
+# ==================== CHANGE PASSWORD (logged-in, no email code) ====================
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+@api_router.post("/auth/change-password")
+async def change_password(req: ChangePasswordRequest, request: Request):
+    """Logged-in user changes their own password by providing the current one.
+    Currently exposed to ADMINS ONLY in production (mobile customers use the
+    Forgot-Password email-code flow). The mobile app does NOT call this.
+    """
+    user = await get_authenticated_user(request)
+    # Restrict to admin role for now (per business requirement).
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can change their password here. Customers should use Forgot Password.")
+    # Re-fetch the FULL user doc (incl. password_hash) — get_authenticated_user strips it.
+    full = None
+    try:
+        if user.get("id"):
+            full = await db.users.find_one({"_id": ObjectId(user["id"])})
+    except Exception:
+        full = None
+    if not full and user.get("email"):
+        full = await db.users.find_one({"email": user["email"]})
+    if not full or not full.get("password_hash"):
+        raise HTTPException(status_code=400, detail="No password is set on this account.")
+    if not verify_password(req.current_password, full["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+    new_pwd = (req.new_password or "").strip()
+    if len(new_pwd) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters.")
+    new_hash = hash_password(new_pwd)
+    await db.users.update_one(
+        {"_id": full["_id"]},
+        {"$set": {"password_hash": new_hash, "password_updated_at": datetime.now(timezone.utc)}},
+    )
+    logger.info(f"Password changed for admin {user.get('email')}")
+    return {"ok": True, "message": "Password updated successfully."}
+
+
 # ==================== PASSWORD RESET (6-DIGIT CODE) ====================
 import secrets as _secrets
 
@@ -738,7 +797,7 @@ async def forgot_password(req: ForgotPasswordRequest):
             f"</div>"
         )
         text = f"Your DAMS Rent a Car password reset code is {code}. It expires in {PASSWORD_RESET_TTL_MIN} minutes."
-        await send_email(email, subject, html, text)
+        await send_email(email, subject, html, text, include_default_bcc=False)
     except Exception as e:
         logger.exception(f"Password reset email failed for {email}: {e}")
 
@@ -2997,10 +3056,146 @@ async def seed_data():
 @app.on_event("startup")
 async def startup():
     await seed_data()
+    # Kick off background payment-reminder loop. It runs in-process and survives
+    # for the lifetime of the worker. If the deployment has multiple workers
+    # MongoDB-level idempotency (last_payment_reminder_at) prevents duplicates.
+    import asyncio as _aio
+    _aio.create_task(payment_reminder_loop())
 
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+
+
+# ==================== PAYMENT REMINDERS (unpaid cash bookings) ====================
+# Default day-threshold; admin can override via /api/settings/payment-reminder-days.
+PAYMENT_REMINDER_DEFAULT_DAYS = 2
+# Don't re-spam the same customer more than once every N hours.
+PAYMENT_REMINDER_COOLDOWN_HOURS = 24
+
+
+async def get_payment_reminder_days() -> int:
+    """Read admin-configured threshold (in days). Falls back to default."""
+    try:
+        s = await db.settings.find_one({"key": "payment_reminder_days"})
+        if s and s.get("value") is not None:
+            return max(0, int(s["value"]))
+    except Exception:
+        pass
+    return PAYMENT_REMINDER_DEFAULT_DAYS
+
+
+async def send_payment_reminders_once() -> dict:
+    """Find unpaid bookings older than the configured threshold and email them.
+    Returns a dict with `processed` / `sent` / `skipped` counts.
+    """
+    threshold_days = await get_payment_reminder_days()
+    if threshold_days <= 0:
+        return {"processed": 0, "sent": 0, "skipped": 0, "threshold_days": threshold_days, "disabled": True}
+    now = datetime.now(timezone.utc)
+    age_cutoff = now - timedelta(days=threshold_days)
+    cooldown_cutoff = now - timedelta(hours=PAYMENT_REMINDER_COOLDOWN_HOURS)
+    q = {
+        "payment_status": {"$in": ["unpaid", "pending", None]},
+        "status": {"$in": ["pending", "pending_payment", "confirmed"]},
+        "created_at": {"$lt": age_cutoff},
+        "$or": [
+            {"last_payment_reminder_at": None},
+            {"last_payment_reminder_at": {"$exists": False}},
+            {"last_payment_reminder_at": {"$lt": cooldown_cutoff}},
+        ],
+    }
+    sent = 0
+    skipped = 0
+    processed = 0
+    try:
+        cursor = db.bookings.find(q).limit(200)
+        async for b in cursor:
+            processed += 1
+            email_to = b.get("user_email") or ""
+            if not email_to:
+                skipped += 1
+                continue
+            try:
+                booking_id = str(b.get("_id"))
+                short_id = booking_id[-8:].upper()
+                car_name = b.get("car_name") or "your booking"
+                pickup_date = b.get("pickup_date") or "—"
+                pickup_loc = (b.get("pickup_location") or {}).get("name", "—")
+                total = b.get("total_price") or 0
+                age_days = (now - b["created_at"]).days if b.get("created_at") else "?"
+                # Build email body
+                title = "Friendly reminder · your booking is still unpaid"
+                intro = (
+                    f"Hi {b.get('user_name') or 'there'}, your booking <strong>#{short_id}</strong> for "
+                    f"<strong>{car_name}</strong> at <strong>{pickup_loc}</strong> on <strong>{pickup_date}</strong> "
+                    f"is still marked as unpaid (created {age_days} day(s) ago).<br><br>"
+                    "Please complete payment so we can confirm your pickup. Cash bookings are paid at the counter "
+                    "when you arrive — just make sure you show up on time and bring the agreed amount."
+                )
+                body_block = _booking_summary_block(serialize_booking({**b}))
+                html = _email_template(title, intro, body_block)
+                text = (
+                    f"Reminder: your DAMS Rent a Car booking #{short_id} for {car_name} on {pickup_date} "
+                    f"is still unpaid. Total: ${total}. Please complete payment to confirm pickup."
+                )
+                result = await send_email(email_to, f"Payment reminder · #{short_id}", html, text)
+                if result.get("ok"):
+                    sent += 1
+                    await db.bookings.update_one(
+                        {"_id": b["_id"]},
+                        {"$set": {"last_payment_reminder_at": now}, "$inc": {"payment_reminder_count": 1}},
+                    )
+                else:
+                    skipped += 1
+            except Exception as inner:
+                logger.warning(f"Payment reminder skip for {b.get('_id')}: {inner}")
+                skipped += 1
+    except Exception as e:
+        logger.exception(f"send_payment_reminders_once failed: {e}")
+    return {"processed": processed, "sent": sent, "skipped": skipped, "threshold_days": threshold_days, "checked_at": now.isoformat()}
+
+
+async def payment_reminder_loop():
+    """Background loop: runs every hour, sends payment reminders to eligible bookings."""
+    import asyncio as _aio
+    await _aio.sleep(60)  # initial delay so the app finishes startup
+    while True:
+        try:
+            result = await send_payment_reminders_once()
+            if result.get("sent"):
+                logger.info(f"Payment-reminder cycle: {result}")
+        except Exception as e:
+            logger.exception(f"payment_reminder_loop iteration failed: {e}")
+        await _aio.sleep(60 * 60)  # 1 hour
+
+
+class PaymentReminderConfig(BaseModel):
+    days: int
+
+@api_router.get("/admin/payment-reminders/config")
+async def admin_get_payment_reminders_config(request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return {"days": await get_payment_reminder_days(), "cooldown_hours": PAYMENT_REMINDER_COOLDOWN_HOURS}
+
+@api_router.put("/admin/payment-reminders/config")
+async def admin_set_payment_reminders_config(cfg: PaymentReminderConfig, request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    days = max(0, int(cfg.days))
+    await db.settings.update_one({"key": "payment_reminder_days"}, {"$set": {"key": "payment_reminder_days", "value": days, "updated_at": datetime.now(timezone.utc)}}, upsert=True)
+    return {"ok": True, "days": days, "note": "0 disables automatic reminders entirely."}
+
+@api_router.post("/admin/payment-reminders/run-now")
+async def admin_run_payment_reminders(request: Request):
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return await send_payment_reminders_once()
+
 
 # Include router
 
