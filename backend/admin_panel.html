@@ -53,6 +53,33 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .hidden{display:none}
 .error{color:#ff3b30;font-size:13px;margin-bottom:12px;background:#fff0f0;padding:10px;border-radius:10px}
 .section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1px;margin:20px 0 8px}
+
+/* ===== Admin Header / Menu (professional layout) ===== */
+.admin-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.admin-nav-group{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);padding:4px;border-radius:12px}
+.nav-btn{appearance:none;background:transparent;border:none;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;display:inline-flex;align-items:center;gap:6px;letter-spacing:0.1px;transition:background 0.12s ease}
+.nav-btn:hover{background:rgba(255,255,255,0.12)}
+.nav-btn.primary{background:#ff3b30;color:#fff}
+.nav-btn.primary:hover{background:#e63329}
+.nav-btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.2)}
+.nav-btn.danger-ghost{color:#ff6b6b;border:1px solid rgba(255,107,107,0.35)}
+.nav-btn.danger-ghost:hover{background:rgba(255,107,107,0.12)}
+.nav-divider{width:1px;height:22px;background:rgba(255,255,255,0.12);margin:0 4px}
+.nav-dd{position:relative}
+.nav-dd-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:230px;background:#fff;color:#0a0a0a;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,0.18);padding:6px;z-index:50;display:none}
+.nav-dd.open .nav-dd-menu{display:block}
+.nav-dd-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:#0a0a0a}
+.nav-dd-item:hover{background:#f5f5f5}
+.nav-dd-item .dd-emoji{font-size:15px;width:20px;text-align:center}
+.nav-dd-sep{height:1px;background:#eee;margin:4px 0}
+.nav-dd-label{font-size:10px;color:#999;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;padding:8px 12px 4px}
+.admin-id-pill{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);padding:6px 10px;border-radius:50px;font-size:12px;color:#fff;font-weight:600}
+.admin-id-pill .dot{width:8px;height:8px;border-radius:4px;background:#34c759}
+@media (max-width: 920px){
+  .admin-nav-group{padding:3px}
+  .nav-btn{padding:7px 9px;font-size:12px}
+  .nav-dd-menu{right:auto;left:0}
+}
 </style>
 </head>
 <body>
@@ -71,6 +98,22 @@ async function api(path, opts = {}) {
 }
 
 function render(html) { document.getElementById('app').innerHTML = html; }
+
+// ===== Dropdown helpers for the admin top nav =====
+function closeDDs() {
+  document.querySelectorAll('.nav-dd.open').forEach(el => el.classList.remove('open'));
+}
+function toggleDD(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const willOpen = !el.classList.contains('open');
+  closeDDs();
+  if (willOpen) el.classList.add('open');
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.nav-dd')) closeDDs();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDDs(); });
 
 // LOGIN
 function showLogin(err='') {
@@ -102,22 +145,51 @@ async function showDashboard() {
     locations = locs;
     render(`
       <div class="header">
-        <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-sm btn-gray" onclick="showBookings()">Bookings</button>
-          <button class="btn btn-sm" style="background:#34c759;color:#fff" onclick="showOperations()">🔑 Pickups &amp; Drop-offs</button>
-          <button class="btn btn-sm btn-gray" onclick="showLocations()">Locations</button>
-          <button class="btn btn-sm" style="background:#5856d6;color:#fff" onclick="showAnalytics()">📊 Analytics</button>
-          <button class="btn btn-sm" style="background:#ff9500;color:#fff" onclick="showNotifications()">📣 Notify</button>
-          <button class="btn btn-sm" style="background:#ff2d92;color:#fff" onclick="showPromos()">🎟️ Promos</button>
-          <button class="btn btn-sm" style="background:#34c759;color:#fff" onclick="showTerms()">📜 Terms</button>
-          <button class="btn btn-sm" style="background:#5856d6;color:#fff" onclick="showPrivacy()">🔒 Privacy</button>
-          <button class="btn btn-sm" style="background:#ff9500;color:#fff" onclick="showPaymentReminders()">💸 Reminders</button>
-          <button class="btn btn-sm" style="background:#0a84ff;color:#fff" onclick="showCustomers()">👥 Customers</button>
-          <button class="btn btn-sm btn-blue" onclick="showMigration()">Import/Export</button>
-          <button class="btn btn-sm btn-gray" onclick="showChangePassword()">🔑 Password</button>
-          <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+        <div style="display:flex;align-items:center;gap:14px">
+          <img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/>
+          <span class="admin-id-pill" title="Logged in as admin"><span class="dot"></span>Admin</span>
         </div>
+        <nav class="admin-nav" aria-label="Admin navigation">
+          <div class="admin-nav-group" aria-label="Operations">
+            <button class="nav-btn primary" onclick="showDashboard()" title="Vehicles dashboard"><span>🚗</span><span>Cars</span></button>
+            <button class="nav-btn" onclick="showBookings()" title="Bookings list"><span>📋</span><span>Bookings</span></button>
+            <button class="nav-btn" onclick="showOperations()" title="Pickups & Drop-offs"><span>🔑</span><span>Pickups</span></button>
+            <button class="nav-btn" onclick="showLocations()" title="Locations"><span>📍</span><span>Locations</span></button>
+            <button class="nav-btn" onclick="showCustomers()" title="Customers"><span>👥</span><span>Customers</span></button>
+          </div>
+          <div class="nav-dd" id="dd-reports">
+            <button class="nav-btn ghost" onclick="toggleDD('dd-reports')" aria-haspopup="true">📊 Reports ▾</button>
+            <div class="nav-dd-menu" role="menu">
+              <div class="nav-dd-label">Insights</div>
+              <div class="nav-dd-item" onclick="closeDDs();showAnalytics()"><span class="dd-emoji">📈</span>Analytics</div>
+              <div class="nav-dd-item" onclick="closeDDs();showPaymentReminders()"><span class="dd-emoji">💸</span>Payment reminders</div>
+              <div class="nav-dd-sep"></div>
+              <div class="nav-dd-label">Marketing</div>
+              <div class="nav-dd-item" onclick="closeDDs();showPromos()"><span class="dd-emoji">🎟️</span>Promo codes</div>
+              <div class="nav-dd-item" onclick="closeDDs();showNotifications()"><span class="dd-emoji">📣</span>Push notifications</div>
+            </div>
+          </div>
+          <div class="nav-dd" id="dd-content">
+            <button class="nav-btn ghost" onclick="toggleDD('dd-content')" aria-haspopup="true">📜 Content ▾</button>
+            <div class="nav-dd-menu" role="menu">
+              <div class="nav-dd-label">Legal pages</div>
+              <div class="nav-dd-item" onclick="closeDDs();showTerms()"><span class="dd-emoji">📜</span>Terms &amp; Conditions</div>
+              <div class="nav-dd-item" onclick="closeDDs();showPrivacy()"><span class="dd-emoji">🔒</span>Privacy Policy</div>
+            </div>
+          </div>
+          <div class="nav-dd" id="dd-settings">
+            <button class="nav-btn ghost" onclick="toggleDD('dd-settings')" aria-haspopup="true">⚙️ Settings ▾</button>
+            <div class="nav-dd-menu" role="menu">
+              <div class="nav-dd-label">Account</div>
+              <div class="nav-dd-item" onclick="closeDDs();showChangePassword()"><span class="dd-emoji">🔑</span>Change password</div>
+              <div class="nav-dd-sep"></div>
+              <div class="nav-dd-label">Data</div>
+              <div class="nav-dd-item" onclick="closeDDs();showMigration()"><span class="dd-emoji">📦</span>Import / Export</div>
+            </div>
+          </div>
+          <div class="nav-divider"></div>
+          <button class="nav-btn danger-ghost" onclick="doLogout()" title="Sign out">⎋ Logout</button>
+        </nav>
       </div>
       <div class="container">
         <div class="stats">
@@ -1391,30 +1463,44 @@ async function savePrivacy() {
 // ==================== CUSTOMERS ====================
 let _custQ = '';
 let _custPage = 1;
+let _custIncludeAdmins = false;
 async function showCustomers(page = 1, q = _custQ) {
   _custPage = page;
   _custQ = q;
   let data = { items: [], total: 0, pages: 0, page };
-  try { data = await api('/admin/customers?limit=50&page=' + page + (q ? '&q=' + encodeURIComponent(q) : '')); } catch(e) { alert(e.message); }
+  const roleParam = _custIncludeAdmins ? '' : '&role=user';
+  try { data = await api('/admin/customers?limit=50&page=' + page + (q ? '&q=' + encodeURIComponent(q) : '') + roleParam); } catch(e) { alert(e.message); }
   const items = data.items || [];
+  const adminCount = items.filter(u => u.role === 'admin').length;
+  const realCustomerCount = items.length - adminCount;
   render(`
     <div class="header">
-      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/>
+        <span class="admin-id-pill"><span class="dot"></span>Customers</span>
+      </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
-        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+        <button class="nav-btn ghost" onclick="showDashboard()">← Back to Cars</button>
+        <button class="nav-btn danger-ghost" onclick="doLogout()">⎋ Logout</button>
       </div>
     </div>
     <div class="container">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-        <h2 style="font-size:20px;font-weight:800">👥 Customers <span style="color:#666;font-weight:600;font-size:14px">(${data.total||0} total)</span></h2>
-        <input id="cust-search" class="input" placeholder="Search name, email or phone…" style="max-width:320px" value="${(q||'').replace(/"/g,'&quot;')}" oninput="clearTimeout(window._custT);window._custT=setTimeout(()=>showCustomers(1,this.value.trim()),350)">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:8px">
+        <h2 style="font-size:22px;font-weight:900">👥 Customers <span style="color:#666;font-weight:600;font-size:14px">(${data.total||0} ${_custIncludeAdmins ? 'users' : 'customers'})</span></h2>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#444;background:#fff;padding:8px 12px;border:1px solid #e5e5e5;border-radius:50px;cursor:pointer">
+            <input type="checkbox" ${_custIncludeAdmins?'checked':''} onchange="_custIncludeAdmins=this.checked;showCustomers(1,_custQ)" style="margin:0">
+            Include admin accounts
+          </label>
+          <input id="cust-search" class="input" placeholder="🔎 Search name, email or phone…" style="max-width:300px;margin:0" value="${(q||'').replace(/"/g,'&quot;')}" oninput="clearTimeout(window._custT);window._custT=setTimeout(()=>showCustomers(1,this.value.trim()),350)">
+        </div>
       </div>
+      <p style="color:#888;font-size:12px;margin-bottom:16px">${_custIncludeAdmins ? 'Showing all user accounts including admins.' : 'Only end-customers are shown. Toggle "Include admin accounts" to see staff/admin users too.'}</p>
       <div style="background:#fff;border:1px solid #e5e5e5;border-radius:12px;overflow:hidden">
         <div style="display:grid;grid-template-columns:1.6fr 2fr 1fr 0.7fr 0.7fr 0.9fr;gap:8px;padding:12px 16px;background:#fafafa;font-size:11px;color:#666;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;border-bottom:1px solid #e5e5e5">
           <div>Name</div><div>Email</div><div>Phone</div><div style="text-align:right">Bookings</div><div style="text-align:right">Spent</div><div>Joined</div>
         </div>
-        ${items.length === 0 ? '<div style="padding:48px 24px;text-align:center;color:#999">No customers match this filter.</div>' : items.map(u => `
+        ${items.length === 0 ? `<div style="padding:48px 24px;text-align:center;color:#999"><div style="font-size:40px;margin-bottom:8px">🫥</div><div style="font-weight:700;color:#666">No ${_custIncludeAdmins?'users':'customers'} yet</div><div style="font-size:12px;margin-top:6px">${q ? 'No results match your search. Try a different keyword.' : (_custIncludeAdmins ? 'There are no user accounts in the database yet.' : 'When customers sign up via the mobile app, they will appear here.')}</div></div>` : items.map(u => `
           <div onclick="viewCustomer('${u.id}')" style="display:grid;grid-template-columns:1.6fr 2fr 1fr 0.7fr 0.7fr 0.9fr;gap:8px;padding:14px 16px;border-bottom:1px solid #f5f5f5;cursor:pointer;align-items:center;font-size:13px" onmouseover="this.style.background='#fafafa'" onmouseout="this.style.background=''">
             <div><strong style="color:#0a0a0a">${(u.name||'(no name)').replace(/</g,'&lt;')}</strong>${u.role==='admin' ? ' <span style="background:#FFF0F0;color:#FF3B30;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:800;margin-left:6px">ADMIN</span>' : ''}</div>
             <div style="color:#0a0a0a;word-break:break-all">${(u.email||'').replace(/</g,'&lt;')}</div>
@@ -1459,8 +1545,7 @@ async function viewCustomer(id) {
           </div>
           <div style="background:#fafafa;border-radius:12px;padding:16px;font-size:13px;color:#555;line-height:1.7;margin-bottom:20px">
             <div><strong>Terms accepted:</strong> ${d.terms_accepted_at?new Date(d.terms_accepted_at).toLocaleString():'—'}</div>
-            <div><strong>Password last updated:</strong> ${d.password_updated_at?new Date(d.password_updated_at).toLocaleString():'—'}</div>
-            <div><strong>Role:</strong> ${d.role||'user'}</div>
+            <div><strong>Account type:</strong> ${d.role==='admin' ? '<span style="color:#FF3B30;font-weight:800">Admin / Staff</span>' : 'Customer'}</div>
           </div>
           <h3 style="font-size:14px;font-weight:800;color:#0a0a0a;margin:0 0 12px;text-transform:uppercase;letter-spacing:0.5px">Booking history (${d.bookings_count||0})</h3>
           ${(d.bookings||[]).length===0 ? '<div style="text-align:center;color:#999;padding:24px;background:#fafafa;border-radius:12px">No bookings yet.</div>' : `
