@@ -400,6 +400,147 @@ async def get_authenticated_user(request: Request) -> dict:
         pass
     raise HTTPException(status_code=401, detail="Not authenticated")
 
+# ============================================================
+# RBAC: Role-Based Access Control for Admin Panel
+# ============================================================
+# Each permission gates a specific menu/action in the admin panel.
+# Legacy admins (role='admin' without an explicit permissions list) are
+# treated as Super Admins so the original `admin@damscarrental.com` keeps
+# full access without a migration.
+ALL_PERMISSIONS: Dict[str, str] = {
+    "dashboard.view":        "View dashboard & analytics",
+    "reports.view":          "View reports",
+    "reports.export":        "Export data (CSV/JSON)",
+    "bookings.view":         "View bookings list",
+    "bookings.edit":         "Update booking status",
+    "bookings.cancel":       "Cancel individual bookings",
+    "bookings.bulk_cancel":  "Bulk-cancel pending pickups",
+    "cars.view":             "View car inventory",
+    "cars.create":           "Create new cars",
+    "cars.edit":             "Edit existing cars",
+    "cars.delete":           "Delete cars",
+    "cars.stock":            "Manage per-location stock",
+    "customers.view":        "View customer list",
+    "customers.edit":        "Edit customer details",
+    "customers.reset_password": "Reset customer passwords",
+    "locations.view":        "View locations",
+    "locations.edit":        "Create/edit/delete locations (incl. tax & refuel)",
+    "promo.view":            "View promo codes",
+    "promo.manage":          "Create/edit/delete promo codes",
+    "settings.view":         "View settings (terms, privacy, etc)",
+    "settings.manage":       "Edit terms, privacy, payment reminders",
+    "logo.manage":           "Upload/change app logo",
+    "notifications.send":    "Send push notifications",
+    "admins.manage":         "Manage admin users & permissions (Super Admin)",
+    "audit.view":            "View audit log",
+}
+
+PRESET_ROLES: Dict[str, dict] = {
+    "super_admin": {
+        "name": "Super Admin",
+        "description": "Full access including admin user management",
+        "permissions": list(ALL_PERMISSIONS.keys()),
+    },
+    "manager": {
+        "name": "Manager",
+        "description": "Operational access — no admin user management, no settings",
+        "permissions": [
+            "dashboard.view", "reports.view", "reports.export",
+            "bookings.view", "bookings.edit", "bookings.cancel", "bookings.bulk_cancel",
+            "cars.view", "cars.create", "cars.edit", "cars.stock",
+            "customers.view", "customers.edit",
+            "locations.view",
+            "promo.view", "promo.manage",
+            "notifications.send",
+        ],
+    },
+    "front_desk": {
+        "name": "Front Desk",
+        "description": "Bookings + customers only (read-only on cars/locations)",
+        "permissions": [
+            "dashboard.view",
+            "bookings.view", "bookings.edit", "bookings.cancel",
+            "customers.view", "customers.edit",
+            "cars.view", "locations.view",
+        ],
+    },
+    "read_only": {
+        "name": "Read Only",
+        "description": "View everything; edit nothing",
+        "permissions": [
+            "dashboard.view", "reports.view",
+            "bookings.view", "cars.view", "customers.view",
+            "locations.view", "promo.view", "settings.view", "audit.view",
+        ],
+    },
+}
+
+
+def get_user_permissions(user: dict) -> set:
+    """Resolve effective permission set for an admin user."""
+    if not user or user.get("role") != "admin":
+        return set()
+    perms = user.get("permissions")
+    if isinstance(perms, list) and perms:
+        # Filter to known permissions only (defensive)
+        return {p for p in perms if p in ALL_PERMISSIONS}
+    # Legacy admin with no explicit perms → full super-admin access
+    return set(ALL_PERMISSIONS.keys())
+
+
+def has_permission(user: dict, perm: str) -> bool:
+    return perm in get_user_permissions(user)
+
+
+async def require_admin(request: Request) -> dict:
+    """Auth + must be an admin (any role/permission set)."""
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user
+
+
+async def require_super_admin(request: Request) -> dict:
+    """Auth + must have admins.manage permission (super admin)."""
+    user = await require_admin(request)
+    if not has_permission(user, "admins.manage"):
+        raise HTTPException(status_code=403, detail="Super Admin only")
+    return user
+
+
+async def require_permission(request: Request, perm: str) -> dict:
+    """Auth + must have specific permission."""
+    user = await require_admin(request)
+    if not has_permission(user, perm):
+        raise HTTPException(status_code=403, detail=f"Missing permission: {perm}")
+    return user
+
+
+# ---- Audit log ----
+async def log_admin_action(actor: dict, action: str, target: str = "",
+                           meta: Optional[dict] = None, request: Optional[Request] = None):
+    """Insert an audit log entry. Failure is non-fatal (logs warning only)."""
+    try:
+        ip = None
+        if request is not None:
+            ip = (request.client.host if request.client else None)
+        await db.audit_log.insert_one({
+            "actor_id": str(actor.get("_id") or ""),
+            "actor_email": actor.get("email") or "",
+            "actor_name": actor.get("name") or "",
+            "action": action,
+            "target": target,
+            "meta": meta or {},
+            "ip": ip,
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logger.warning(f"audit_log insert failed (action={action}): {e}")
+# ============================================================
+# END RBAC
+# ============================================================
+
+
 # Pydantic models
 class RegisterRequest(BaseModel):
     email: str
@@ -1250,12 +1391,11 @@ async def update_car(car_id: str, car: CarUpdate, request: Request):
 
 @api_router.delete("/cars/{car_id}")
 async def delete_car(car_id: str, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "cars.delete")
     result = await db.cars.delete_one({"_id": ObjectId(car_id)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Car not found")
+    await log_admin_action(user, "car.delete", car_id, None, request)
     return {"message": "Car deleted"}
 
 @api_router.get("/cars/categories/list")
@@ -1758,9 +1898,7 @@ async def admin_cancel_pending_pickups(request: Request):
       - Does NOT touch stock (no pickup ever happened so stock was never decremented).
       - Returns the count of bookings affected and a small sample list for confirmation.
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "bookings.bulk_cancel")
 
     query = {"status": {"$in": ["pending", "pending_payment", "confirmed"]}}
     # Sample a few before the update so we can show the admin what was cleared.
@@ -3645,9 +3783,7 @@ async def admin_reset_customer_password(customer_id: str, body: AdminResetCustom
       - Logs the action for audit purposes.
       - Clears any pending password-reset codes and recent login_attempts for the user.
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "customers.reset_password")
 
     new_password = (body.new_password or "").strip()
     if not new_password or len(new_password) < 8:
@@ -3726,6 +3862,281 @@ async def serve_brand_logo():
 
 # Serve uploaded images
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
+
+# ============================================================
+# RBAC ENDPOINTS — Admin user management (Super Admin only)
+# ============================================================
+
+@api_router.get("/admin/me")
+async def admin_me(request: Request):
+    """Return the currently authenticated admin's profile + effective permissions.
+    Used by the admin panel to hide/show menu items.
+    """
+    user = await require_admin(request)
+    perms = sorted(get_user_permissions(user))
+    return {
+        "id": str(user.get("_id")),
+        "email": user.get("email"),
+        "name": user.get("name"),
+        "admin_role": user.get("admin_role") or ("super_admin" if "admins.manage" in perms else "custom"),
+        "permissions": perms,
+        "is_super_admin": "admins.manage" in perms,
+    }
+
+
+@api_router.get("/admin/permissions")
+async def list_permissions(request: Request):
+    """Return all available permissions and preset roles (for the UI form)."""
+    await require_super_admin(request)
+    return {
+        "permissions": [{"key": k, "description": v} for k, v in ALL_PERMISSIONS.items()],
+        "roles": [
+            {"key": k, "name": v["name"], "description": v["description"], "permissions": v["permissions"]}
+            for k, v in PRESET_ROLES.items()
+        ],
+    }
+
+
+@api_router.get("/admin/admins")
+async def list_admins(request: Request):
+    """List all admin users with their role + permissions."""
+    await require_super_admin(request)
+    rows = []
+    async for u in db.users.find({"role": "admin"}).sort("created_at", 1):
+        perms = list(get_user_permissions(u))
+        rows.append({
+            "id": str(u.get("_id")),
+            "email": u.get("email"),
+            "name": u.get("name"),
+            "phone": u.get("phone"),
+            "admin_role": u.get("admin_role") or "super_admin",
+            "permissions": perms,
+            "permission_count": len(perms),
+            "is_super_admin": "admins.manage" in perms,
+            "created_at": u.get("created_at").isoformat() if isinstance(u.get("created_at"), datetime) else None,
+            "last_login_at": u.get("last_login_at").isoformat() if isinstance(u.get("last_login_at"), datetime) else None,
+        })
+    return rows
+
+
+class CreateAdminRequest(BaseModel):
+    email: str
+    name: str
+    password: str
+    phone: Optional[str] = None
+    admin_role: Optional[str] = "manager"          # preset role key
+    permissions: Optional[List[str]] = None        # if provided, overrides preset
+
+
+@api_router.post("/admin/admins")
+async def create_admin(payload: CreateAdminRequest, request: Request):
+    """Create a new admin user.
+    - If `permissions` is set, it's the source of truth.
+    - Otherwise the preset role's permissions are applied.
+    """
+    actor = await require_super_admin(request)
+
+    email = (payload.email or "").strip().lower()
+    name = (payload.name or "").strip()
+    password = payload.password or ""
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email is required")
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Name must be at least 2 characters")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=400, detail="A user with this email already exists")
+
+    role_key = payload.admin_role or "manager"
+    if role_key not in PRESET_ROLES and role_key != "custom":
+        raise HTTPException(status_code=400, detail=f"Unknown admin_role '{role_key}'")
+
+    if payload.permissions is not None:
+        perms = [p for p in payload.permissions if p in ALL_PERMISSIONS]
+        effective_role = "custom"
+    else:
+        perms = list(PRESET_ROLES[role_key]["permissions"])
+        effective_role = role_key
+
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    doc = {
+        "email": email,
+        "name": name,
+        "phone": payload.phone or "",
+        "password_hash": hashed,
+        "role": "admin",
+        "admin_role": effective_role,
+        "permissions": perms,
+        "created_at": datetime.now(timezone.utc),
+        "created_by": str(actor.get("_id") or ""),
+        "terms_accepted": True,
+        "terms_accepted_at": datetime.now(timezone.utc),
+    }
+    result = await db.users.insert_one(doc)
+    new_id = str(result.inserted_id)
+    await log_admin_action(
+        actor, "admin.create", new_id,
+        {"email": email, "admin_role": effective_role, "permissions_count": len(perms)},
+        request,
+    )
+    return {"id": new_id, "email": email, "name": name, "admin_role": effective_role, "permissions": perms}
+
+
+class UpdateAdminRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    admin_role: Optional[str] = None
+    permissions: Optional[List[str]] = None
+    new_password: Optional[str] = None
+
+
+@api_router.put("/admin/admins/{admin_id}")
+async def update_admin(admin_id: str, payload: UpdateAdminRequest, request: Request):
+    """Update an admin's role/permissions/password.
+    Safety: a super admin can't strip their own `admins.manage` permission
+    (would lock everyone out if they're the last super admin).
+    """
+    actor = await require_super_admin(request)
+    try:
+        oid = ObjectId(admin_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid admin id")
+
+    target = await db.users.find_one({"_id": oid})
+    if not target or target.get("role") != "admin":
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    updates: dict = {}
+    if payload.name is not None and payload.name.strip():
+        updates["name"] = payload.name.strip()
+    if payload.phone is not None:
+        updates["phone"] = payload.phone.strip()
+    if payload.new_password:
+        if len(payload.new_password) < 8:
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+        updates["password_hash"] = bcrypt.hashpw(
+            payload.new_password.encode("utf-8"), bcrypt.gensalt()
+        ).decode("utf-8")
+        updates["password_updated_at"] = datetime.now(timezone.utc)
+
+    # Resolve permissions
+    new_perms = None
+    if payload.permissions is not None:
+        new_perms = [p for p in payload.permissions if p in ALL_PERMISSIONS]
+        updates["admin_role"] = "custom"
+    elif payload.admin_role is not None:
+        if payload.admin_role not in PRESET_ROLES:
+            raise HTTPException(status_code=400, detail=f"Unknown admin_role '{payload.admin_role}'")
+        new_perms = list(PRESET_ROLES[payload.admin_role]["permissions"])
+        updates["admin_role"] = payload.admin_role
+
+    if new_perms is not None:
+        # Self-demotion guard
+        if str(target.get("_id")) == str(actor.get("_id")) and "admins.manage" not in new_perms:
+            raise HTTPException(
+                status_code=400,
+                detail="You cannot remove your own 'admins.manage' permission. Ask another Super Admin to do it.",
+            )
+        # Last-super-admin guard
+        if "admins.manage" not in new_perms:
+            other_super = await db.users.count_documents({
+                "role": "admin",
+                "_id": {"$ne": oid},
+                "permissions": "admins.manage",
+            })
+            if other_super == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot demote the last Super Admin — promote someone else first.",
+                )
+        updates["permissions"] = new_perms
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    await db.users.update_one({"_id": oid}, {"$set": updates})
+    await log_admin_action(
+        actor, "admin.update", admin_id,
+        {"fields": sorted(updates.keys()), "admin_role": updates.get("admin_role")},
+        request,
+    )
+    return {"ok": True, "updated_fields": sorted(updates.keys())}
+
+
+@api_router.delete("/admin/admins/{admin_id}")
+async def revoke_admin(admin_id: str, request: Request):
+    """Revoke admin privileges by downgrading to role='user'.
+    Does NOT delete the underlying user account.
+    """
+    actor = await require_super_admin(request)
+    try:
+        oid = ObjectId(admin_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid admin id")
+    if str(oid) == str(actor.get("_id")):
+        raise HTTPException(status_code=400, detail="You cannot revoke yourself")
+
+    target = await db.users.find_one({"_id": oid})
+    if not target or target.get("role") != "admin":
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    # Last-super-admin guard
+    if "admins.manage" in get_user_permissions(target):
+        other_super = await db.users.count_documents({
+            "role": "admin",
+            "_id": {"$ne": oid},
+            "permissions": "admins.manage",
+        })
+        if other_super == 0:
+            raise HTTPException(status_code=400, detail="Cannot revoke the last Super Admin.")
+
+    await db.users.update_one(
+        {"_id": oid},
+        {"$set": {"role": "user"}, "$unset": {"permissions": "", "admin_role": ""}},
+    )
+    await log_admin_action(
+        actor, "admin.revoke", admin_id,
+        {"email": target.get("email"), "name": target.get("name")},
+        request,
+    )
+    return {"ok": True, "message": f"{target.get('email')} no longer has admin access"}
+
+
+@api_router.get("/admin/audit-log")
+async def list_audit_log(request: Request, limit: int = 100, action: Optional[str] = None):
+    """Return recent audit log entries (most recent first). Requires audit.view."""
+    user = await require_admin(request)
+    if not has_permission(user, "audit.view"):
+        raise HTTPException(status_code=403, detail="Missing permission: audit.view")
+
+    try:
+        limit = max(1, min(int(limit), 500))
+    except (TypeError, ValueError):
+        limit = 100
+
+    q: dict = {}
+    if action:
+        q["action"] = action
+
+    rows = []
+    async for row in db.audit_log.find(q).sort("created_at", -1).limit(limit):
+        rows.append({
+            "id": str(row.get("_id")),
+            "actor_id": row.get("actor_id"),
+            "actor_email": row.get("actor_email"),
+            "actor_name": row.get("actor_name"),
+            "action": row.get("action"),
+            "target": row.get("target"),
+            "meta": row.get("meta") or {},
+            "ip": row.get("ip"),
+            "created_at": row.get("created_at").isoformat() if isinstance(row.get("created_at"), datetime) else None,
+        })
+    return rows
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,

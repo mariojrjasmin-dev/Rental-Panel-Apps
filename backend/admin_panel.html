@@ -191,6 +191,10 @@ async function showDashboard() {
               <div class="nav-dd-sep"></div>
               <div class="nav-dd-label">Data</div>
               <div class="nav-dd-item" onclick="closeDDs();showMigration()"><span class="dd-emoji">📦</span>Import / Export</div>
+              <div class="nav-dd-sep" id="rbac-sep" style="display:none"></div>
+              <div class="nav-dd-label" id="rbac-label" style="display:none">Security</div>
+              <div class="nav-dd-item" id="rbac-admins" style="display:none" onclick="closeDDs();showAdminUsers()"><span class="dd-emoji">👮</span>Admin users</div>
+              <div class="nav-dd-item" id="rbac-audit" style="display:none" onclick="closeDDs();showAuditLog()"><span class="dd-emoji">📜</span>Audit log</div>
             </div>
           </div>
           <div class="nav-divider"></div>
@@ -212,10 +216,240 @@ async function showDashboard() {
       </div>
       <div id="modal-root"></div>
     `);
+    // Load RBAC state and show/hide admin-only menu items
+    loadCurrentAdmin();
   } catch(e) { 
     // Clear stale token and show actual error
     token=null; localStorage.removeItem('admin_token'); 
     showLogin(e.message || 'Session expired. Please login again.'); 
+  }
+}
+
+// ==================== RBAC: current admin + permission gating ====================
+let currentAdmin = null;
+async function loadCurrentAdmin() {
+  try {
+    const me = await api('/admin/me');
+    currentAdmin = me;
+    const isSuper = !!me.is_super_admin;
+    const hasAudit = (me.permissions || []).includes('audit.view');
+    const adminItem = document.getElementById('rbac-admins');
+    const auditItem = document.getElementById('rbac-audit');
+    const sep = document.getElementById('rbac-sep');
+    const lbl = document.getElementById('rbac-label');
+    if (adminItem) adminItem.style.display = isSuper ? 'flex' : 'none';
+    if (auditItem) auditItem.style.display = (isSuper || hasAudit) ? 'flex' : 'none';
+    const anyShown = isSuper || hasAudit;
+    if (sep) sep.style.display = anyShown ? 'block' : 'none';
+    if (lbl) lbl.style.display = anyShown ? 'block' : 'none';
+  } catch(e) { /* non-fatal */ }
+}
+function can(perm) {
+  if (!currentAdmin) return true; // legacy fallback before /me loads
+  return (currentAdmin.permissions || []).includes(perm);
+}
+
+// ==================== ADMIN USERS (Super Admin only) ====================
+async function showAdminUsers() {
+  try {
+    const [admins, meta] = await Promise.all([
+      api('/admin/admins'),
+      api('/admin/permissions'),
+    ]);
+    const rows = admins.map(a => {
+      const badge = a.is_super_admin
+        ? '<span class="admin-id-pill" style="background:#7c1d1d;color:#ffd9d9"><span class="dot" style="background:#ffb3b3"></span>Super Admin</span>'
+        : `<span class="admin-id-pill" style="background:#1c2a3a;color:#cfe3ff"><span class="dot" style="background:#7aa2ff"></span>${(a.admin_role || 'custom').replace('_',' ')}</span>`;
+      const selfBadge = (currentAdmin && currentAdmin.id === a.id) ? ' <span style="color:#9aa3b2;font-size:11px">(you)</span>' : '';
+      return `
+        <div class="card" style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:240px">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <strong style="font-size:15px">${a.name || '(no name)'}${selfBadge}</strong>
+                ${badge}
+              </div>
+              <div style="color:#9aa3b2;font-size:13px;margin-top:4px">${a.email}</div>
+              <div style="color:#9aa3b2;font-size:12px;margin-top:2px">${a.permission_count} permission${a.permission_count===1?'':'s'} · created ${(a.created_at||'').slice(0,10)||'—'}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn btn-sm" onclick='showAdminEditor(${JSON.stringify(a)})'>Edit</button>
+              ${(currentAdmin && currentAdmin.id === a.id) ? '' : `<button class="btn btn-sm btn-red" onclick="revokeAdmin('${a.id}','${(a.email||'').replace(/'/g,"\\'")}')">Revoke</button>`}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    render(`
+      <div class="header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <img class="brand-logo" src="/api/assets/logo.png"/>
+          <span class="admin-id-pill"><span class="dot"></span>Admin Users</span>
+        </div>
+        <button class="btn" onclick="showDashboard()">← Dashboard</button>
+      </div>
+      <div class="container">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:10px;flex-wrap:wrap">
+          <div>
+            <h2 style="font-size:22px;font-weight:800">Admin Users</h2>
+            <div style="color:#9aa3b2;font-size:13px">Create admins, assign roles, and control which sections of the panel they can access.</div>
+          </div>
+          <button class="btn btn-red" onclick='showAdminEditor(null, ${JSON.stringify(meta)})'>+ New Admin</button>
+        </div>
+        <div id="admin-list">${rows || '<div style="color:#9aa3b2">No admins.</div>'}</div>
+      </div>
+      <div id="modal-root"></div>
+    `);
+    // Stash meta on window for the editor (avoids re-fetch)
+    window.__rbacMeta = meta;
+  } catch(e) {
+    alert(e.message || 'Failed to load admins');
+  }
+}
+
+function showAdminEditor(admin, meta) {
+  meta = meta || window.__rbacMeta;
+  if (!meta) { api('/admin/permissions').then(m => { window.__rbacMeta = m; showAdminEditor(admin, m); }); return; }
+  const isEdit = !!admin;
+  const currentPerms = new Set(admin ? (admin.permissions || []) : (meta.roles.find(r => r.key === 'manager').permissions));
+  const currentRole = admin ? (admin.admin_role || 'custom') : 'manager';
+
+  const groupOrder = ['dashboard','reports','bookings','cars','customers','locations','promo','settings','logo','notifications','admins','audit'];
+  const groups = {};
+  meta.permissions.forEach(p => {
+    const g = p.key.split('.')[0];
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(p);
+  });
+  const groupHTML = groupOrder.filter(g => groups[g]).map(g => {
+    const items = groups[g].map(p => `
+      <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;cursor:pointer">
+        <input type="checkbox" data-perm="${p.key}" ${currentPerms.has(p.key)?'checked':''} onchange="document.getElementById('ae-role').value='custom'"/>
+        <span><strong style="font-size:13px">${p.key}</strong> <span style="color:#9aa3b2;font-size:12px">— ${p.description}</span></span>
+      </label>`).join('');
+    return `<div class="card" style="margin-bottom:10px"><div style="font-weight:700;text-transform:uppercase;font-size:12px;color:#7aa2ff;margin-bottom:6px">${g}</div>${items}</div>`;
+  }).join('');
+
+  const roleOptions = meta.roles.map(r => `<option value="${r.key}" ${r.key===currentRole?'selected':''}>${r.name} — ${r.description}</option>`).join('') + `<option value="custom" ${currentRole==='custom'?'selected':''}>Custom</option>`;
+
+  openModal(`
+    <h3 style="font-size:18px;font-weight:800;margin-bottom:14px">${isEdit ? 'Edit Admin: '+admin.email : 'New Admin User'}</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label style="font-size:12px;color:#9aa3b2">Email${isEdit?' (cannot change)':''}</label>
+        <input id="ae-email" class="input" ${isEdit?'disabled':''} value="${isEdit?admin.email:''}" placeholder="manager@damscarrental.com"/></div>
+      <div><label style="font-size:12px;color:#9aa3b2">Full name</label>
+        <input id="ae-name" class="input" value="${isEdit?(admin.name||''):''}" placeholder="John Doe"/></div>
+      <div><label style="font-size:12px;color:#9aa3b2">Phone (optional)</label>
+        <input id="ae-phone" class="input" value="${isEdit?(admin.phone||''):''}" placeholder="+1..."/></div>
+      <div><label style="font-size:12px;color:#9aa3b2">${isEdit?'New password (leave empty to keep)':'Password (min 8 chars)'}</label>
+        <input id="ae-pwd" type="password" class="input" placeholder="${isEdit?'••••••••':'At least 8 characters'}"/></div>
+    </div>
+    <div style="margin-top:14px">
+      <label style="font-size:12px;color:#9aa3b2">Role preset</label>
+      <select id="ae-role" class="input" onchange="applyRolePreset()">${roleOptions}</select>
+    </div>
+    <div style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <strong style="font-size:14px">Permissions</strong>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" type="button" onclick="aeSelectAll(true)">Select all</button>
+          <button class="btn btn-sm" type="button" onclick="aeSelectAll(false)">Clear</button>
+        </div>
+      </div>
+      <div id="ae-perms" style="max-height:340px;overflow-y:auto;border:1px solid #2a3344;border-radius:8px;padding:10px;background:#0f1623">${groupHTML}</div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-red" onclick="saveAdmin(${isEdit?`'${admin.id}'`:'null'})">${isEdit?'Save changes':'Create admin'}</button>
+    </div>
+  `);
+}
+
+function aeSelectAll(checked) {
+  document.querySelectorAll('#ae-perms input[type=checkbox]').forEach(cb => cb.checked = checked);
+  document.getElementById('ae-role').value = 'custom';
+}
+function applyRolePreset() {
+  const role = document.getElementById('ae-role').value;
+  if (role === 'custom') return;
+  const meta = window.__rbacMeta;
+  if (!meta) return;
+  const r = meta.roles.find(x => x.key === role);
+  if (!r) return;
+  const set = new Set(r.permissions);
+  document.querySelectorAll('#ae-perms input[type=checkbox]').forEach(cb => {
+    cb.checked = set.has(cb.dataset.perm);
+  });
+}
+async function saveAdmin(id) {
+  const email = document.getElementById('ae-email').value.trim();
+  const name = document.getElementById('ae-name').value.trim();
+  const phone = document.getElementById('ae-phone').value.trim();
+  const pwd = document.getElementById('ae-pwd').value;
+  const role = document.getElementById('ae-role').value;
+  const perms = Array.from(document.querySelectorAll('#ae-perms input[type=checkbox]:checked')).map(c => c.dataset.perm);
+  try {
+    if (id) {
+      const body = { name, phone };
+      if (pwd) body.new_password = pwd;
+      if (role === 'custom') body.permissions = perms;
+      else body.admin_role = role;
+      await api(`/admin/admins/${id}`, { method:'PUT', body: JSON.stringify(body) });
+    } else {
+      if (!email || !pwd) { alert('Email and password are required.'); return; }
+      const body = { email, name, phone, password: pwd };
+      if (role === 'custom') body.permissions = perms;
+      else body.admin_role = role;
+      await api('/admin/admins', { method:'POST', body: JSON.stringify(body) });
+    }
+    closeModal();
+    showAdminUsers();
+  } catch(e) { alert(e.message || 'Save failed'); }
+}
+async function revokeAdmin(id, email) {
+  if (!confirm(`Revoke admin access for ${email}? They will become a regular user (no panel access).`)) return;
+  try {
+    await api(`/admin/admins/${id}`, { method:'DELETE' });
+    showAdminUsers();
+  } catch(e) { alert(e.message || 'Revoke failed'); }
+}
+
+// ==================== AUDIT LOG ====================
+async function showAuditLog() {
+  try {
+    const rows = await api('/admin/audit-log?limit=200');
+    const tbody = rows.map(r => `
+      <tr>
+        <td style="font-size:12px;color:#9aa3b2;white-space:nowrap">${(r.created_at||'').replace('T',' ').slice(0,19)}</td>
+        <td><strong>${r.actor_email || '—'}</strong><div style="font-size:11px;color:#9aa3b2">${r.actor_name||''}</div></td>
+        <td><code style="color:#ffb3b3">${r.action}</code></td>
+        <td style="font-size:12px;color:#9aa3b2">${r.target || ''}</td>
+        <td style="font-size:11px;color:#9aa3b2"><pre style="margin:0;white-space:pre-wrap;max-width:380px">${JSON.stringify(r.meta || {})}</pre></td>
+        <td style="font-size:11px;color:#9aa3b2">${r.ip||'—'}</td>
+      </tr>`).join('');
+    render(`
+      <div class="header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <img class="brand-logo" src="/api/assets/logo.png"/>
+          <span class="admin-id-pill"><span class="dot"></span>Audit Log</span>
+        </div>
+        <button class="btn" onclick="showDashboard()">← Dashboard</button>
+      </div>
+      <div class="container">
+        <h2 style="font-size:22px;font-weight:800;margin-bottom:6px">Audit Log</h2>
+        <div style="color:#9aa3b2;font-size:13px;margin-bottom:14px">Most recent 200 entries · sensitive actions (admin/booking/customer changes) are tracked.</div>
+        <div style="overflow-x:auto;background:#0f1623;border-radius:10px;padding:6px">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="text-align:left;color:#9aa3b2;font-size:12px">
+              <th style="padding:8px">When</th><th style="padding:8px">Actor</th><th style="padding:8px">Action</th>
+              <th style="padding:8px">Target</th><th style="padding:8px">Meta</th><th style="padding:8px">IP</th>
+            </tr></thead>
+            <tbody>${tbody || '<tr><td colspan="6" style="padding:14px;color:#9aa3b2">No audit entries yet.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    `);
+  } catch(e) {
+    alert(e.message || 'Failed to load audit log');
   }
 }
 
@@ -949,6 +1183,15 @@ async function deleteCar(id,name) {
 }
 
 function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+function openModal(innerHtml) {
+  // Generic centered modal — used by Admin Users editor (and any future modal)
+  document.getElementById('modal-root').innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeModal()">
+      <div style="background:#1a2030;color:#e9ecf3;border:1px solid #2a3344;border-radius:14px;padding:22px;max-width:760px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.5);margin-top:24px">
+        ${innerHtml}
+      </div>
+    </div>`;
+}
 
 function getAllImages() {
   const primary = document.getElementById('f-img').value;
