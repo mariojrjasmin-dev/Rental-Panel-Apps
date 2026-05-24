@@ -415,6 +415,8 @@ ALL_PERMISSIONS: Dict[str, str] = {
     "bookings.edit":         "Update booking status",
     "bookings.cancel":       "Cancel individual bookings",
     "bookings.bulk_cancel":  "Bulk-cancel pending pickups",
+    "pickups.view":          "View Pickups & Drop-offs operations page",
+    "pickups.confirm":       "Confirm pickups & drop-offs (adjusts stock)",
     "cars.view":             "View car inventory",
     "cars.create":           "Create new cars",
     "cars.edit":             "Edit existing cars",
@@ -447,6 +449,7 @@ PRESET_ROLES: Dict[str, dict] = {
         "permissions": [
             "dashboard.view", "reports.view", "reports.export",
             "bookings.view", "bookings.edit", "bookings.cancel", "bookings.bulk_cancel",
+            "pickups.view", "pickups.confirm",
             "cars.view", "cars.create", "cars.edit", "cars.stock",
             "customers.view", "customers.edit",
             "locations.view",
@@ -456,10 +459,11 @@ PRESET_ROLES: Dict[str, dict] = {
     },
     "front_desk": {
         "name": "Front Desk",
-        "description": "Bookings + customers only (read-only on cars/locations)",
+        "description": "Bookings + customers + pickup operations (read-only on cars/locations)",
         "permissions": [
             "dashboard.view",
             "bookings.view", "bookings.edit", "bookings.cancel",
+            "pickups.view", "pickups.confirm",
             "customers.view", "customers.edit",
             "cars.view", "locations.view",
         ],
@@ -469,7 +473,8 @@ PRESET_ROLES: Dict[str, dict] = {
         "description": "View everything; edit nothing",
         "permissions": [
             "dashboard.view", "reports.view",
-            "bookings.view", "cars.view", "customers.view",
+            "bookings.view", "pickups.view",
+            "cars.view", "customers.view",
             "locations.view", "promo.view", "settings.view", "audit.view",
         ],
     },
@@ -1756,10 +1761,24 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
     - status: pending / pending_payment / confirmed / active / completed / cancelled
     - payment_status: pending / paid / refunded / failed
     Used by the admin to confirm cash collection: set status=confirmed AND payment_status=paid.
+
+    Permissions: pickup-related transitions (→active or →completed) accept either
+    `pickups.confirm` OR `bookings.edit`. All other status changes require `bookings.edit`.
+    Cancellations require `bookings.cancel`.
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_admin(request)
+    is_pickup_transition = body.status in {"active", "completed"} and body.payment_status is None
+    is_cancel = body.status == "cancelled"
+
+    if is_cancel:
+        if not has_permission(user, "bookings.cancel"):
+            raise HTTPException(status_code=403, detail="Missing permission: bookings.cancel")
+    elif is_pickup_transition:
+        if not (has_permission(user, "pickups.confirm") or has_permission(user, "bookings.edit")):
+            raise HTTPException(status_code=403, detail="Missing permission: pickups.confirm or bookings.edit")
+    else:
+        if not has_permission(user, "bookings.edit"):
+            raise HTTPException(status_code=403, detail="Missing permission: bookings.edit")
 
     update_data = {}
     if body.status is not None:
@@ -3297,20 +3316,41 @@ async def migrate_legacy_admins_to_rbac():
     """One-time idempotent migration: any user with role='admin' that does NOT have
     an explicit `permissions` field gets promoted to a full Super Admin in the DB.
 
-    This keeps the DB state in sync with the in-memory `get_user_permissions()`
-    fallback (which treats unmigrated admins as super) so that DB-level guards
-    like the last-super-admin check work correctly.
+    Also tops up existing Super Admins (admin_role='super_admin') with any newly
+    added permissions so that adding entries to `ALL_PERMISSIONS` doesn't require
+    a manual data fix.
     """
     try:
         full_perms = list(ALL_PERMISSIONS.keys())
-        result = await db.users.update_many(
+        # Step 1: migrate unmigrated legacy admins
+        r1 = await db.users.update_many(
             {"role": "admin", "permissions": {"$exists": False}},
             {"$set": {"permissions": full_perms, "admin_role": "super_admin"}},
         )
-        if result.modified_count:
+        if r1.modified_count:
             logger.info(
                 "RBAC migration: promoted %d legacy admin(s) to explicit Super Admin",
-                result.modified_count,
+                r1.modified_count,
+            )
+        # Step 2: top-up existing super admins with any newly-added permissions
+        # (only those whose current set is missing any of the full perm list).
+        topped = 0
+        async for su in db.users.find(
+            {"role": "admin", "admin_role": "super_admin"},
+            {"_id": 1, "permissions": 1, "email": 1},
+        ):
+            current = set(su.get("permissions") or [])
+            missing = [p for p in full_perms if p not in current]
+            if missing:
+                await db.users.update_one(
+                    {"_id": su["_id"]},
+                    {"$set": {"permissions": full_perms}},
+                )
+                topped += 1
+        if topped:
+            logger.info(
+                "RBAC migration: topped up %d super admin(s) with newly added permissions",
+                topped,
             )
     except Exception as e:
         logger.warning(f"RBAC migration skipped due to error: {e}")

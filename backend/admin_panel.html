@@ -313,7 +313,7 @@ function showAdminEditor(admin, meta) {
   const currentPerms = new Set(admin ? (admin.permissions || []) : (meta.roles.find(r => r.key === 'manager').permissions));
   const currentRole = admin ? (admin.admin_role || 'custom') : 'manager';
 
-  const groupOrder = ['dashboard','reports','bookings','cars','customers','locations','promo','settings','logo','notifications','admins','audit'];
+  const groupOrder = ['dashboard','reports','bookings','pickups','cars','customers','locations','promo','settings','logo','notifications','admins','audit'];
   const groups = {};
   meta.permissions.forEach(p => {
     const g = p.key.split('.')[0];
