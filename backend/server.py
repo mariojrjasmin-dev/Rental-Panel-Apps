@@ -3868,7 +3868,7 @@ app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads"
 # RBAC ENDPOINTS — Admin user management (Super Admin only)
 # ============================================================
 
-@api_router.get("/admin/me")
+@app.get("/api/admin/me")
 async def admin_me(request: Request):
     """Return the currently authenticated admin's profile + effective permissions.
     Used by the admin panel to hide/show menu items.
@@ -3885,7 +3885,7 @@ async def admin_me(request: Request):
     }
 
 
-@api_router.get("/admin/permissions")
+@app.get("/api/admin/permissions")
 async def list_permissions(request: Request):
     """Return all available permissions and preset roles (for the UI form)."""
     await require_super_admin(request)
@@ -3898,7 +3898,7 @@ async def list_permissions(request: Request):
     }
 
 
-@api_router.get("/admin/admins")
+@app.get("/api/admin/admins")
 async def list_admins(request: Request):
     """List all admin users with their role + permissions."""
     await require_super_admin(request)
@@ -3929,7 +3929,7 @@ class CreateAdminRequest(BaseModel):
     permissions: Optional[List[str]] = None        # if provided, overrides preset
 
 
-@api_router.post("/admin/admins")
+@app.post("/api/admin/admins")
 async def create_admin(payload: CreateAdminRequest, request: Request):
     """Create a new admin user.
     - If `permissions` is set, it's the source of truth.
@@ -3994,7 +3994,7 @@ class UpdateAdminRequest(BaseModel):
     new_password: Optional[str] = None
 
 
-@api_router.put("/admin/admins/{admin_id}")
+@app.put("/api/admin/admins/{admin_id}")
 async def update_admin(admin_id: str, payload: UpdateAdminRequest, request: Request):
     """Update an admin's role/permissions/password.
     Safety: a super admin can't strip their own `admins.manage` permission
@@ -4067,7 +4067,7 @@ async def update_admin(admin_id: str, payload: UpdateAdminRequest, request: Requ
     return {"ok": True, "updated_fields": sorted(updates.keys())}
 
 
-@api_router.delete("/admin/admins/{admin_id}")
+@app.delete("/api/admin/admins/{admin_id}")
 async def revoke_admin(admin_id: str, request: Request):
     """Revoke admin privileges by downgrading to role='user'.
     Does NOT delete the underlying user account.
@@ -4106,7 +4106,7 @@ async def revoke_admin(admin_id: str, request: Request):
     return {"ok": True, "message": f"{target.get('email')} no longer has admin access"}
 
 
-@api_router.get("/admin/audit-log")
+@app.get("/api/admin/audit-log")
 async def list_audit_log(request: Request, limit: int = 100, action: Optional[str] = None):
     """Return recent audit log entries (most recent first). Requires audit.view."""
     user = await require_admin(request)

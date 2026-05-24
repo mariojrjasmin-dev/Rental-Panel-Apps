@@ -142,15 +142,23 @@ ENDPOINT_MATRIX = [
     ("GET", "/admin/audit-log"),
 ]
 
+# Minimal valid bodies for POST/PUT so that auth deps run before body validation
+def _body_for(method, path):
+    if method == "POST" and "/admin/admins" in path:
+        return {"email": f"x.{rand_suffix()}@x.com", "name": "x", "password": "Pwd12345!", "admin_role": "read_only"}
+    if method == "PUT" and "/admin/admins/" in path:
+        return {"admin_role": "manager"}
+    return None
+
 print("\n-- Unauthenticated -> 401 on all new endpoints --")
 for method, path in ENDPOINT_MATRIX:
-    r = requests.request(method, f"{API}{path}", timeout=20, json={} if method in ("POST", "PUT") else None)
+    r = requests.request(method, f"{API}{path}", timeout=20, json=_body_for(method, path))
     assertion(r.status_code == 401, f"UNAUTH {method} {path} -> 401", f"got {r.status_code}: {r.text[:120]}")
 
 print("\n-- Regular user -> 403 on all new endpoints --")
 for method, path in ENDPOINT_MATRIX:
     r = requests.request(method, f"{API}{path}", headers=reg_h, timeout=20,
-                        json={} if method in ("POST", "PUT") else None)
+                        json=_body_for(method, path))
     assertion(r.status_code == 403, f"REGULAR {method} {path} -> 403", f"got {r.status_code}: {r.text[:120]}")
 
 print("\n-- Legacy super admin -> 200 on read endpoints --")
@@ -398,13 +406,17 @@ print("\n=== Section 6: Audit log writes ===")
 new_car_payload = {
     "name": f"RBAC Test Car {rand_suffix(4).upper()}",
     "brand": "Test",
+    "model": "RBAC-Audit",
+    "year": 2024,
     "category": "Compact",
-    "transmission": "automatic",
+    "transmission": "Automatic",
     "seats": 4,
-    "fuel_type": "petrol",
+    "fuel_type": "Gasoline",
     "price_per_day": 30,
     "image_url": "",
-    "stock": {},
+    "stock": {"Punta Cana Airport": 1},
+    "pickup_locations": [{"name": "Punta Cana Airport", "lat": 18.5, "lng": -68.4}],
+    "dropoff_locations": [{"name": "Punta Cana Airport", "lat": 18.5, "lng": -68.4}],
 }
 r = requests.post(f"{API}/cars", headers=admin_h, json=new_car_payload, timeout=20)
 test_car_id = None
