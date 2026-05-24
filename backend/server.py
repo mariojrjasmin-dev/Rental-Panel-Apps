@@ -3285,11 +3285,35 @@ async def seed_data():
 @app.on_event("startup")
 async def startup():
     await seed_data()
+    await migrate_legacy_admins_to_rbac()
     # Kick off background payment-reminder loop. It runs in-process and survives
     # for the lifetime of the worker. If the deployment has multiple workers
     # MongoDB-level idempotency (last_payment_reminder_at) prevents duplicates.
     import asyncio as _aio
     _aio.create_task(payment_reminder_loop())
+
+
+async def migrate_legacy_admins_to_rbac():
+    """One-time idempotent migration: any user with role='admin' that does NOT have
+    an explicit `permissions` field gets promoted to a full Super Admin in the DB.
+
+    This keeps the DB state in sync with the in-memory `get_user_permissions()`
+    fallback (which treats unmigrated admins as super) so that DB-level guards
+    like the last-super-admin check work correctly.
+    """
+    try:
+        full_perms = list(ALL_PERMISSIONS.keys())
+        result = await db.users.update_many(
+            {"role": "admin", "permissions": {"$exists": False}},
+            {"$set": {"permissions": full_perms, "admin_role": "super_admin"}},
+        )
+        if result.modified_count:
+            logger.info(
+                "RBAC migration: promoted %d legacy admin(s) to explicit Super Admin",
+                result.modified_count,
+            )
+    except Exception as e:
+        logger.warning(f"RBAC migration skipped due to error: {e}")
 
 @app.on_event("shutdown")
 async def shutdown():
