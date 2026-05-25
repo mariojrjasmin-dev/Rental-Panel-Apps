@@ -29,6 +29,13 @@ type Booking = {
   status: string;
   payment_method: string;
   created_at?: string;
+  // Booking workflow upgrades
+  deposit?: number;
+  odometer_in?: number;
+  odometer_out?: number;
+  extra_mileage_fee?: number;
+  extra_mileage_km?: number;
+  extra_mileage_rate?: number;
 };
 
 export default function ReceiptScreen() {
@@ -199,6 +206,12 @@ export default function ReceiptScreen() {
           {!!booking.dropoff_location?.name && <Row label="Drop-off Location" value={booking.dropoff_location.name} />}
           <Row label="Duration" value={`${booking.days} day${booking.days === 1 ? '' : 's'}`} />
           <Row label="Payment" value={(booking.payment_method || 'cash').toUpperCase()} />
+          {booking.odometer_in != null && (
+            <Row label="Odometer (Pickup)" value={`${Number(booking.odometer_in).toLocaleString()} km`} />
+          )}
+          {booking.odometer_out != null && (
+            <Row label="Odometer (Drop-off)" value={`${Number(booking.odometer_out).toLocaleString()} km`} />
+          )}
         </View>
 
         {/* Cost breakdown */}
@@ -215,6 +228,12 @@ export default function ReceiptScreen() {
               value={`−$${((booking as any).discount_amount || 0).toFixed(2)}`}
             />
           )}
+          {!!booking.extra_mileage_fee && booking.extra_mileage_fee > 0 && (
+            <Row
+              label={`Extra Mileage (${booking.extra_mileage_km || 0} km × $${(booking.extra_mileage_rate || 0).toFixed(2)})`}
+              value={`$${booking.extra_mileage_fee.toFixed(2)}`}
+            />
+          )}
           <Row
             label={`Tax (${booking.tax_rate || 0}%)`}
             value={`$${(booking.tax_amount || 0).toFixed(2)}`}
@@ -228,6 +247,20 @@ export default function ReceiptScreen() {
           <Text style={styles.totalValue}>${(booking.total_price || 0).toFixed(2)}</Text>
           <Text style={styles.totalCurrency}>USD</Text>
         </View>
+
+        {/* Refundable security deposit (separate — not added to grand total) */}
+        {!!booking.deposit && booking.deposit > 0 && (
+          <View style={styles.depositCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="shield-half" size={20} color="#FFFFFF" />
+              <Text style={styles.depositLabel}>REFUNDABLE SECURITY DEPOSIT</Text>
+            </View>
+            <Text style={styles.depositValue}>${booking.deposit.toFixed(2)} USD</Text>
+            <Text style={styles.depositHint}>
+              Collected at pickup. Refunded at drop-off if no damages or extras are owed. Not included in the grand total.
+            </Text>
+          </View>
+        )}
 
         {/* Actions */}
         <TouchableOpacity style={styles.downloadBtn} onPress={downloadPdf} disabled={downloading} activeOpacity={0.7}>
@@ -325,6 +358,10 @@ const styles = StyleSheet.create({
   totalLabel: { flex: 1, color: '#FFF', fontSize: 14, fontWeight: '800', letterSpacing: 1 },
   totalValue: { color: '#FFF', fontSize: 28, fontWeight: '900' },
   totalCurrency: { color: '#FFF', fontSize: 12, fontWeight: '700', marginLeft: 6, opacity: 0.8 },
+  depositCard: { backgroundColor: '#0a3d80', borderRadius: 16, padding: 16, marginTop: 12, marginBottom: 4 },
+  depositLabel: { color: '#FFF', fontSize: 12, fontWeight: '800', letterSpacing: 0.8 },
+  depositValue: { color: '#FFF', fontSize: 22, fontWeight: '900', marginTop: 8 },
+  depositHint: { color: '#cfe0ff', fontSize: 11, fontWeight: '600', marginTop: 6, lineHeight: 15 },
 
   downloadBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,

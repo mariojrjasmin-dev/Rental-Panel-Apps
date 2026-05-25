@@ -24,6 +24,9 @@ type Booking = {
   payment_method: string;
   payment_status: string;
   days: number;
+  // Booking workflow upgrades
+  deposit?: number;
+  extra_mileage_fee?: number;
 };
 
 const PAYMENT_BADGE: Record<string, { color: string; key: string }> = {
@@ -139,6 +142,21 @@ export default function BookingsScreen() {
           <View style={styles.taxRow}>
             <Text style={styles.taxText}>
               Subtotal ${(item.subtotal ?? 0).toFixed(2)} · Tax {item.tax_rate ?? 0}% ${(item.tax_amount ?? 0).toFixed(2)}
+            </Text>
+          </View>
+        )}
+        {!!item.extra_mileage_fee && item.extra_mileage_fee > 0 && (
+          <View style={styles.taxRow}>
+            <Text style={[styles.taxText, { color: '#a05a00', fontWeight: '700' }]}>
+              ⚠️ Extra mileage charged: ${item.extra_mileage_fee.toFixed(2)}
+            </Text>
+          </View>
+        )}
+        {!!item.deposit && item.deposit > 0 && (
+          <View style={[styles.taxRow, { backgroundColor: '#eaf3ff', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginTop: 4, alignSelf: 'flex-start' }]}>
+            <Ionicons name="shield-half" size={12} color="#0a3d80" />
+            <Text style={[styles.taxText, { color: '#0a3d80', fontWeight: '700', marginLeft: 4 }]}>
+              ${item.deposit.toFixed(2)} refundable deposit
             </Text>
           </View>
         )}

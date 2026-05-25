@@ -1,12 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, TextInput, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, TextInput, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Switch } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { BACKEND_URL } from '../src/config';
-const EMPTY_LOC = { name: '', address: '', city: '', country: '', lat: '', lng: '', type: 'both', tax_rate: '' };
+const EMPTY_LOC = {
+  name: '', address: '', city: '', country: '', lat: '', lng: '', type: 'both',
+  tax_rate: '', min_booking_days: '1', active: true,
+  insurance_included: false, refuel_amount: '0',
+  unlimited_mileage: true, mileage_limit_per_day: '', extra_mileage_charge: '0',
+};
 
 export default function AdminLocationsScreen() {
   const [locations, setLocations] = useState<any[]>([]);
@@ -37,6 +42,13 @@ export default function AdminLocationsScreen() {
       name: loc.name || '', address: loc.address || '', city: loc.city || '', country: loc.country || '',
       lat: String(loc.lat ?? ''), lng: String(loc.lng ?? ''), type: loc.type || 'both',
       tax_rate: String(loc.tax_rate ?? '0'),
+      min_booking_days: String(loc.min_booking_days ?? '1'),
+      active: loc.active !== false,
+      insurance_included: !!loc.insurance_included,
+      refuel_amount: String(loc.refuel_amount ?? '0'),
+      unlimited_mileage: loc.unlimited_mileage !== false,
+      mileage_limit_per_day: loc.mileage_limit_per_day ? String(loc.mileage_limit_per_day) : '',
+      extra_mileage_charge: String(loc.extra_mileage_charge ?? '0'),
     });
     setShowForm(true);
   };
@@ -50,7 +62,23 @@ export default function AdminLocationsScreen() {
     try {
       const token = await AsyncStorage.getItem('auth_token');
       const url = editLoc ? `${BACKEND_URL}/api/locations/${editLoc.id}` : `${BACKEND_URL}/api/locations`;
-      const body = { ...form, lat: parseFloat(form.lat), lng: parseFloat(form.lng), tax_rate: parseFloat(form.tax_rate) || 0 };
+      const body: any = {
+        name: form.name,
+        address: form.address,
+        city: form.city,
+        country: form.country,
+        type: form.type,
+        lat: parseFloat(form.lat),
+        lng: parseFloat(form.lng),
+        tax_rate: parseFloat(form.tax_rate) || 0,
+        min_booking_days: Math.max(1, parseInt(form.min_booking_days) || 1),
+        active: form.active,
+        insurance_included: form.insurance_included,
+        refuel_amount: parseFloat(form.refuel_amount) || 0,
+        unlimited_mileage: form.unlimited_mileage,
+        mileage_limit_per_day: form.unlimited_mileage ? null : (parseInt(form.mileage_limit_per_day) || null),
+        extra_mileage_charge: parseFloat(form.extra_mileage_charge) || 0,
+      };
       const res = await fetch(url, {
         method: editLoc ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -118,6 +146,76 @@ export default function AdminLocationsScreen() {
 
             <Text style={styles.label}>Tax Rate (%)</Text>
             <TextInput testID="loc-tax-input" style={styles.input} value={form.tax_rate} onChangeText={v => setForm({...form, tax_rate: v})} keyboardType="decimal-pad" placeholder="e.g. 18 for 18%" />
+
+            <Text style={styles.label}>Minimum Booking Days</Text>
+            <TextInput testID="loc-mindays-input" style={styles.input} value={form.min_booking_days} onChangeText={v => setForm({...form, min_booking_days: v})} keyboardType="number-pad" placeholder="1" />
+
+            <Text style={styles.label}>Pre-paid Refuel Fee ($)</Text>
+            <TextInput testID="loc-refuel-input" style={styles.input} value={form.refuel_amount} onChangeText={v => setForm({...form, refuel_amount: v})} keyboardType="decimal-pad" placeholder="0 = disabled" />
+
+            {/* MILEAGE POLICY */}
+            <View style={styles.sectionDivider}>
+              <Text style={styles.sectionTitle}>📏 Mileage Policy</Text>
+            </View>
+
+            <View style={styles.toggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.toggleLabel}>Unlimited mileage</Text>
+                <Text style={styles.toggleHint}>Drive as much as you want — no extra fees.</Text>
+              </View>
+              <Switch
+                testID="loc-unlimited-toggle"
+                value={form.unlimited_mileage}
+                onValueChange={v => setForm({...form, unlimited_mileage: v})}
+                trackColor={{ false: '#e5e5e5', true: '#34c759' }}
+                thumbColor={Platform.OS === 'android' ? '#fff' : undefined}
+              />
+            </View>
+
+            {!form.unlimited_mileage && (
+              <>
+                <Text style={styles.label}>Mileage Limit (km/day)</Text>
+                <TextInput testID="loc-mileage-limit-input" style={styles.input} value={form.mileage_limit_per_day} onChangeText={v => setForm({...form, mileage_limit_per_day: v})} keyboardType="number-pad" placeholder="e.g. 200" />
+
+                <Text style={styles.label}>Extra Mileage Charge ($/km)</Text>
+                <TextInput testID="loc-extra-charge-input" style={styles.input} value={form.extra_mileage_charge} onChangeText={v => setForm({...form, extra_mileage_charge: v})} keyboardType="decimal-pad" placeholder="e.g. 0.50" />
+
+                <Text style={styles.helperText}>
+                  Customer is allowed {form.mileage_limit_per_day || '?'} km/day. Each extra km is billed at ${form.extra_mileage_charge || '0.00'}.
+                </Text>
+              </>
+            )}
+
+            {/* TOGGLES */}
+            <View style={styles.sectionDivider} />
+
+            <View style={styles.toggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.toggleLabel}>🛡️ Insurance included</Text>
+                <Text style={styles.toggleHint}>Basic insurance is part of every rental at this location.</Text>
+              </View>
+              <Switch
+                testID="loc-insurance-toggle"
+                value={form.insurance_included}
+                onValueChange={v => setForm({...form, insurance_included: v})}
+                trackColor={{ false: '#e5e5e5', true: '#34c759' }}
+                thumbColor={Platform.OS === 'android' ? '#fff' : undefined}
+              />
+            </View>
+
+            <View style={styles.toggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.toggleLabel}>Location is active</Text>
+                <Text style={styles.toggleHint}>Customers can book pickups/drop-offs here.</Text>
+              </View>
+              <Switch
+                testID="loc-active-toggle"
+                value={form.active}
+                onValueChange={v => setForm({...form, active: v})}
+                trackColor={{ false: '#e5e5e5', true: '#34c759' }}
+                thumbColor={Platform.OS === 'android' ? '#fff' : undefined}
+              />
+            </View>
 
             <Text style={styles.label}>Type</Text>
             <View style={styles.typeRow}>
@@ -241,4 +339,10 @@ const styles = StyleSheet.create({
   typeTextActive: { color: '#FFF' },
   saveBtn: { backgroundColor: '#FF3B30', borderRadius: 50, paddingVertical: 18, alignItems: 'center', marginTop: 24 },
   saveBtnText: { color: '#FFF', fontSize: 17, fontWeight: '700' },
+  sectionDivider: { marginTop: 24, marginBottom: 4, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  sectionTitle: { fontSize: 14, fontWeight: '800', color: '#0A0A0A' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FAFAFA', borderWidth: 1, borderColor: '#E5E5E5', borderRadius: 12, padding: 14, marginTop: 12, gap: 10 },
+  toggleLabel: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
+  toggleHint: { fontSize: 11, color: '#666', marginTop: 2, fontWeight: '500' },
+  helperText: { fontSize: 11, color: '#a05a00', marginTop: 6, fontWeight: '600', fontStyle: 'italic' },
 });

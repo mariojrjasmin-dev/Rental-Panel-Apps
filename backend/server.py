@@ -242,20 +242,46 @@ def _booking_summary_block(booking: dict) -> str:
         ("Pickup", f"{pickup_date} · {pickup_loc}"),
         ("Drop-off", f"{drop_date} · {drop_loc}"),
         ("Subtotal", f"${float(subtotal):,.2f}"),
+    ]
+    # Extra mileage charges (only after drop-off, only if applied)
+    extra_fee = float(booking.get("extra_mileage_fee") or 0)
+    if extra_fee > 0:
+        extra_km = booking.get("extra_mileage_km") or 0
+        rate = float(booking.get("extra_mileage_rate") or 0)
+        rows.append((f"Extra Mileage ({extra_km} km × ${rate:.2f})", f"<strong style='color:#a05a00'>${extra_fee:,.2f}</strong>"))
+    rows += [
         ("Tax", f"${float(tax):,.2f}"),
         ("Total", f"<strong style='color:#FF3B30'>${float(total):,.2f}</strong>"),
         ("Payment", (booking.get("payment_method") or "—").upper()),
     ]
+    # Odometer readings if recorded by admin
+    if booking.get("odometer_in") is not None:
+        rows.append(("Odometer at Pickup", f"{int(booking['odometer_in']):,} km"))
+    if booking.get("odometer_out") is not None:
+        rows.append(("Odometer at Drop-off", f"{int(booking['odometer_out']):,} km"))
     rows_html = "".join(
         f"<tr><td style='padding:8px 0;color:#666;font-size:13px'>{k}</td>"
         f"<td style='padding:8px 0;color:#0a0a0a;font-size:13px;text-align:right;font-weight:600'>{v}</td></tr>"
         for k, v in rows
     )
+    # Separate refundable deposit notice (not added to total)
+    deposit = float(booking.get("deposit") or 0)
+    deposit_block = ""
+    if deposit > 0:
+        deposit_block = (
+            "<div style='background:#eaf3ff;border:1px solid #0a84ff;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px'>"
+            "<div style='font-size:11px;font-weight:700;color:#0a3d80;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:4px'>"
+            "💼 Refundable Security Deposit</div>"
+            f"<div style='color:#0a3d80;font-weight:800;font-size:16px'>${deposit:,.2f} USD</div>"
+            "<div style='color:#1d4f8f;font-size:12px;margin-top:2px'>"
+            "Collected at pickup. Refunded at drop-off if no damages or extras are owed. Not included in the total above."
+            "</div></div>"
+        )
     return (
         "<div style='background:#fafafa;border-radius:12px;padding:16px;margin:16px 0'>"
         "<div style='font-size:11px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px'>Booking summary</div>"
         f"<table style='width:100%;border-collapse:collapse'>{rows_html}</table>"
-        "</div>"
+        f"</div>{deposit_block}"
     )
 
 
@@ -2247,6 +2273,22 @@ def _generate_receipt_pdf(booking: dict) -> bytes:
     c.setFont("Helvetica-Bold", 14)
     c.drawRightString(W - 22 * mm, y + 0.5 * mm, f"${total:,.2f} USD")
     y -= 18 * mm
+
+    # Refundable security deposit (separate line — NOT added to grand total)
+    deposit_amt = float(booking.get("deposit") or 0)
+    if deposit_amt > 0:
+        c.setFillColor(colors.HexColor("#0a3d80"))
+        c.rect(18 * mm, y - 2 * mm, W - 36 * mm, 10 * mm, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(22 * mm, y + 1.5 * mm, "REFUNDABLE SECURITY DEPOSIT")
+        c.setFont("Helvetica-Bold", 11)
+        c.drawRightString(W - 22 * mm, y + 1.5 * mm, f"${deposit_amt:,.2f} USD")
+        y -= 6 * mm
+        c.setFillColor(MUTED)
+        c.setFont("Helvetica-Oblique", 8)
+        c.drawString(22 * mm, y - 2 * mm, "Collected at pickup. Refunded at drop-off if no damages or extras are owed.")
+        y -= 10 * mm
 
     # Footer
     c.setFillColor(MUTED)
