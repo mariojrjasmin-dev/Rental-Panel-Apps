@@ -4034,7 +4034,12 @@ LOGO_PATH = _Path(__file__).parent.parent / "frontend" / "assets" / "images" / "
 @app.get("/api/admin-panel", response_class=HTMLResponse)
 async def serve_admin_panel():
     if ADMIN_HTML.exists():
-        return HTMLResponse(content=ADMIN_HTML.read_text(), status_code=200)
+        # No-cache so admins always get the latest version after a hot-reload.
+        return HTMLResponse(
+            content=ADMIN_HTML.read_text(),
+            status_code=200,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "Expires": "0"},
+        )
     return HTMLResponse(content="<h1>Admin panel not found</h1>", status_code=404)
 
 @app.get("/api/assets/logo.png")
