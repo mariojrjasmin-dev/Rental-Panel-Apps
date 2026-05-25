@@ -983,6 +983,7 @@ async function showCarForm(id) {
         <div class="form-group"><label>Category</label><div class="loc-pills">${cats.map(c=>`<span class="loc-pill ${car.category===c?'active-green':''}" onclick="this.parentNode.querySelectorAll('.loc-pill').forEach(p=>p.classList.remove('active-green'));this.classList.add('active-green');document.getElementById('f-cat').value='${c}'">${c}</span>`).join('')}</div><input type="hidden" id="f-cat" value="${car.category||'Sedan'}"></div>
         <div class="form-row">
           <div class="form-group"><label>Price/Day ($) *</label><input class="input" id="f-price" type="number" step="0.01" value="${car.price_per_day||0}"></div>
+          <div class="form-group"><label>Security Deposit ($) <span style="color:#999;font-weight:normal;font-size:11px">refundable, not added to total</span></label><input class="input" id="f-deposit" type="number" step="0.01" min="0" value="${car.deposit || 0}"></div>
           <div class="form-group"><label>Transmission</label><input class="input" id="f-trans" value="${car.transmission||'Automatic'}"></div>
           <div class="form-group"><label>Fuel</label><input class="input" id="f-fuel" value="${car.fuel_type||'Gasoline'}"></div>
         </div>
@@ -1158,6 +1159,7 @@ async function saveCar(id) {
     images: (() => { try { return JSON.parse(document.getElementById('f-images').value || '[]'); } catch(e) { return []; } })(),
     unlimited_mileage: unlim,
     mileage_limit: unlim ? null : (isNaN(mileageVal) ? null : mileageVal),
+    deposit: parseFloat(document.getElementById('f-deposit').value) || 0,
     min_driver_age: parseInt(document.getElementById('f-minage').value) || 21,
     android_auto: document.getElementById('f-android').checked,
     apple_carplay: document.getElementById('f-carplay').checked,
