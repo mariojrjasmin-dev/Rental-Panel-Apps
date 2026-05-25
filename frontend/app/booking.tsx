@@ -20,6 +20,10 @@ export default function BookingScreen() {
   const [insuranceIncluded, setInsuranceIncluded] = useState(false);
   const [refuelAmount, setRefuelAmount] = useState(0);
   const [refuelOptedIn, setRefuelOptedIn] = useState(false);
+  // Per-location mileage policy (returned by /locations/tax-by-name)
+  const [unlimitedMileage, setUnlimitedMileage] = useState(true);
+  const [mileageLimitPerDay, setMileageLimitPerDay] = useState(0);
+  const [extraMileageCharge, setExtraMileageCharge] = useState(0);
   // Multi-location: customer picks from the allowed pickup/dropoff lists.
   // Default to the first entry; resets when the car changes.
   type LocOpt = { name: string; lat: number; lng: number };
@@ -316,6 +320,10 @@ export default function BookingScreen() {
           const refuel = Number(taxData.refuel_amount) || 0;
           setRefuelAmount(refuel);
           if (refuel <= 0) setRefuelOptedIn(false);
+          // Mileage policy (per-location)
+          setUnlimitedMileage(taxData.unlimited_mileage !== false);
+          setMileageLimitPerDay(Number(taxData.mileage_limit_per_day) || 0);
+          setExtraMileageCharge(Number(taxData.extra_mileage_charge) || 0);
           // Track pickup country so we can enforce same-country dropoff.
           // Falls back to the {name → country} map if tax-by-name didn't resolve a country.
           const co = (taxData.country || '').trim();
@@ -327,6 +335,9 @@ export default function BookingScreen() {
           setInsuranceIncluded(false);
           setRefuelAmount(0);
           setRefuelOptedIn(false);
+          setUnlimitedMileage(true);
+          setMileageLimitPerDay(0);
+          setExtraMileageCharge(0);
           setPickupCountry((countryByName[(locName || '').toLowerCase()] || '').trim());
         }
       } catch (e: any) {
@@ -765,6 +776,48 @@ export default function BookingScreen() {
           )}
         </View>
 
+        {/* Mileage policy (per pickup location) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📏 Mileage Policy</Text>
+          <View style={unlimitedMileage ? styles.mileageUnlimited : styles.mileageLimited}>
+            <Ionicons
+              name={unlimitedMileage ? 'infinite' : 'speedometer-outline'}
+              size={22}
+              color={unlimitedMileage ? '#0a5d2b' : '#a05a00'}
+            />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={[styles.mileageTitle, { color: unlimitedMileage ? '#0a5d2b' : '#a05a00' }]}>
+                {unlimitedMileage
+                  ? 'Unlimited Mileage'
+                  : `Extra Mileage: $${extraMileageCharge.toFixed(2)}/km`}
+              </Text>
+              <Text style={[styles.mileageSub, { color: unlimitedMileage ? '#1e7a3e' : '#b87600' }]}>
+                {unlimitedMileage
+                  ? 'Drive as much as you want — no per-km charges apply.'
+                  : `Includes ${mileageLimitPerDay} km/day (${mileageLimitPerDay * days} km total). $${extraMileageCharge.toFixed(2)} per extra km billed at drop-off.`}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Refundable Security Deposit (per vehicle) */}
+        {car.deposit > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>💼 Security Deposit</Text>
+            <View style={styles.depositCard}>
+              <Ionicons name="shield-half" size={22} color="#0a3d80" />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.depositTitle}>
+                  ${Number(car.deposit).toFixed(2)} refundable
+                </Text>
+                <Text style={styles.depositSub}>
+                  Collected at pickup, refunded at drop-off if no damages or extras are owed. Not added to the total below.
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         <View style={styles.summary}>
           <Text style={styles.summaryTitle}>{tr('costBreakdown')}</Text>
           <View style={styles.summaryRow}>
@@ -932,6 +985,13 @@ const styles = StyleSheet.create({
   insuranceNotIncluded: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#fff5e6', borderWidth: 1, borderColor: '#ff9500', borderRadius: 12, padding: 14 },
   insuranceTitle: { fontSize: 14, fontWeight: '800' },
   insuranceSub: { fontSize: 12, marginTop: 4, lineHeight: 16 },
+  mileageUnlimited: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#e6f9ed', borderWidth: 1, borderColor: '#34c759', borderRadius: 12, padding: 14 },
+  mileageLimited: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#fff5e6', borderWidth: 1, borderColor: '#ff9500', borderRadius: 12, padding: 14 },
+  mileageTitle: { fontSize: 14, fontWeight: '800' },
+  mileageSub: { fontSize: 12, marginTop: 4, lineHeight: 16 },
+  depositCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#eaf3ff', borderWidth: 1, borderColor: '#0a84ff', borderRadius: 12, padding: 14 },
+  depositTitle: { fontSize: 14, fontWeight: '800', color: '#0a3d80' },
+  depositSub: { fontSize: 12, marginTop: 4, lineHeight: 16, color: '#1d4f8f' },
   promoRow: { flexDirection: 'row', gap: 10 },
   promoInput: { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontWeight: '600', color: '#0A0A0A', letterSpacing: 1 },
   promoApplyBtn: { backgroundColor: '#ff2d92', paddingHorizontal: 20, justifyContent: 'center', borderRadius: 12, minWidth: 80, alignItems: 'center' },

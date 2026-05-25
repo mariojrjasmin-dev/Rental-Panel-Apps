@@ -1585,6 +1585,9 @@ async def create_booking(booking: BookingCreate, request: Request):
         "tax_amount": tax_amount,
         "total_price": total,
         "payment_method": booking.payment_method,
+        # Refundable security deposit (snapshot of car.deposit at booking time).
+        # Not added to grand total — collected at pickup, refunded at drop-off.
+        "deposit": float(car.get("deposit") or 0.0),
         # Cash: stays pending until admin collects money on pickup and marks it paid/confirmed
         # Stripe: pending until the Stripe webhook confirms payment
         "payment_status": "pending",
@@ -1761,6 +1764,14 @@ async def admin_list_bookings(request: Request, status: Optional[str] = None, q:
 class BookingStatusUpdate(BaseModel):
     status: Optional[str] = None
     payment_status: Optional[str] = None
+    # ---- New booking workflow fields (June 2025) ----
+    # Captured at admin pickup confirmation:
+    payment_method: Optional[str] = None  # "cash" | "card" (collected at pickup)
+    odometer_in: Optional[int] = None      # km reading when customer picks up the car
+    # Captured at admin drop-off confirmation:
+    odometer_out: Optional[int] = None     # km reading when customer returns the car
+    # Optional override for extra-mileage fee (admin can edit the auto-computed value).
+    extra_mileage_fee: Optional[float] = None
 
 
 @api_router.put("/admin/bookings/{booking_id}/status")
@@ -1801,6 +1812,31 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
             raise HTTPException(status_code=400, detail=f"Invalid payment_status. Must be one of: {', '.join(sorted(valid_pay))}")
         update_data["payment_status"] = body.payment_status
 
+    # ---- Capture booking workflow fields ----
+    # Payment method (Cash/Card) is collected by the admin at pickup. Persist
+    # only if the admin explicitly sent a value (overwrites the customer's
+    # original "payment_method" intent).
+    if body.payment_method is not None:
+        pm = (body.payment_method or "").strip().lower()
+        if pm not in {"cash", "card", "stripe"}:
+            raise HTTPException(status_code=400, detail="payment_method must be 'cash' or 'card'")
+        update_data["payment_method"] = pm
+    if body.odometer_in is not None:
+        try:
+            update_data["odometer_in"] = max(0, int(body.odometer_in))
+        except Exception:
+            raise HTTPException(status_code=400, detail="odometer_in must be an integer (km)")
+    if body.odometer_out is not None:
+        try:
+            update_data["odometer_out"] = max(0, int(body.odometer_out))
+        except Exception:
+            raise HTTPException(status_code=400, detail="odometer_out must be an integer (km)")
+    if body.extra_mileage_fee is not None:
+        try:
+            update_data["extra_mileage_fee"] = round(max(0.0, float(body.extra_mileage_fee)), 2)
+        except Exception:
+            raise HTTPException(status_code=400, detail="extra_mileage_fee must be a number")
+
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -1818,12 +1854,26 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
     # Transition INTO 'completed' (admin confirms drop-off) → +1 at dropoff_location
     # Each transition is applied at most once per booking via the
     # `stock_adjustments` audit trail to avoid double counting.
+    #
+    # HARDENING (June 2025): The drop-off increment now runs whenever the
+    # booking is currently in 'completed' status AND we previously decremented
+    # at pickup but haven't yet incremented at drop-off — regardless of whether
+    # *this* request caused the status change. This recovers stock for bookings
+    # whose status was edited twice (e.g. active → completed → active → completed)
+    # or marked completed by a different code path.
     try:
-        new_status_for_stock = update_data.get("status")
         car_id = (booking or {}).get("car_id")
-        if car_id and new_status_for_stock and new_status_for_stock != old_status:
+        current_status = (booking or {}).get("status")
+        if car_id:
             adjustments = (booking or {}).get("stock_adjustments") or {}
-            if new_status_for_stock == "active" and not adjustments.get("pickup_decremented"):
+            # Pickup: still gated on actual transition INTO 'active' to avoid
+            # double-decrementing inventory if a booking is bounced back & forth.
+            new_status_for_stock = update_data.get("status")
+            if (
+                new_status_for_stock == "active"
+                and new_status_for_stock != old_status
+                and not adjustments.get("pickup_decremented")
+            ):
                 pickup_name = (((booking or {}).get("pickup_location") or {}).get("name") or "").strip()
                 if pickup_name:
                     await db.cars.update_one(
@@ -1834,7 +1884,14 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
                         {"_id": ObjectId(booking_id)},
                         {"$set": {"stock_adjustments.pickup_decremented": True, "stock_adjustments.pickup_at": datetime.now(timezone.utc)}},
                     )
-            elif new_status_for_stock == "completed" and not adjustments.get("dropoff_incremented"):
+            # Drop-off: idempotent. Triggers whenever the booking is in
+            # 'completed' status, pickup was decremented, and dropoff hasn't
+            # been credited yet. Safe across retries and re-edits.
+            if (
+                current_status == "completed"
+                and adjustments.get("pickup_decremented")
+                and not adjustments.get("dropoff_incremented")
+            ):
                 dropoff_name = (((booking or {}).get("dropoff_location") or {}).get("name") or "").strip()
                 if dropoff_name:
                     await db.cars.update_one(
@@ -1849,6 +1906,53 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
             booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
     except Exception as _e:
         logger.exception(f"Stock auto-adjust error for booking {booking_id}: {_e}")
+
+    # ---- Extra-mileage auto-calculation on drop-off ----
+    # When the admin confirms drop-off and provides odometer_out, compute the
+    # overage charge using the PICKUP location's mileage policy:
+    #   allowed_km = mileage_limit_per_day × rental_days
+    #   overage_km = max(0, odometer_out - odometer_in - allowed_km)
+    #   fee = overage_km × extra_mileage_charge
+    # If unlimited mileage is enabled, fee is always 0. The admin can override
+    # the computed value by sending an explicit extra_mileage_fee in the body.
+    try:
+        if (
+            booking
+            and booking.get("status") == "completed"
+            and body.extra_mileage_fee is None
+            and (body.odometer_out is not None or booking.get("odometer_out") is not None)
+        ):
+            odom_in_val = booking.get("odometer_in")
+            odom_out_val = booking.get("odometer_out")
+            if odom_in_val is not None and odom_out_val is not None and odom_out_val >= odom_in_val:
+                pickup_name = (((booking or {}).get("pickup_location") or {}).get("name") or "").strip()
+                if pickup_name:
+                    import re as _re_em
+                    loc_doc = await db.locations.find_one(
+                        {"name": {"$regex": f"^{_re_em.escape(pickup_name)}$", "$options": "i"}},
+                        {"_id": 0, "unlimited_mileage": 1, "mileage_limit_per_day": 1, "extra_mileage_charge": 1},
+                    )
+                    if loc_doc and not bool(loc_doc.get("unlimited_mileage", True)):
+                        per_day_limit = int(loc_doc.get("mileage_limit_per_day") or 0)
+                        charge_per_km = float(loc_doc.get("extra_mileage_charge") or 0.0)
+                        rental_days = int(booking.get("days") or 1) or 1
+                        allowed_km = max(0, per_day_limit * rental_days)
+                        driven_km = max(0, int(odom_out_val) - int(odom_in_val))
+                        overage_km = max(0, driven_km - allowed_km)
+                        fee = round(overage_km * charge_per_km, 2)
+                        await db.bookings.update_one(
+                            {"_id": ObjectId(booking_id)},
+                            {"$set": {
+                                "extra_mileage_fee": fee,
+                                "extra_mileage_km": overage_km,
+                                "extra_mileage_rate": charge_per_km,
+                                "mileage_allowed_km": allowed_km,
+                                "mileage_driven_km": driven_km,
+                            }},
+                        )
+                        booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+    except Exception as _e:
+        logger.exception(f"Extra mileage calc error for booking {booking_id}: {_e}")
 
     booking_payload = serialize_booking(booking)  # serialize once; serialize_booking mutates the dict
 
@@ -2100,6 +2204,11 @@ def _generate_receipt_pdf(booking: dict) -> bytes:
     row("Days", booking.get("days") or 0)
     row("Payment Method", (booking.get("payment_method") or "cash").upper())
     row("Status", (booking.get("status") or "").replace("_", " ").title())
+    # Odometer readings (only if collected by admin at pickup/drop-off)
+    if booking.get("odometer_in") is not None:
+        row("Odometer (Pickup)", f"{booking.get('odometer_in'):,} km")
+    if booking.get("odometer_out") is not None:
+        row("Odometer (Drop-off)", f"{booking.get('odometer_out'):,} km")
 
     # Cost breakdown
     y -= 6 * mm
@@ -2120,6 +2229,12 @@ def _generate_receipt_pdf(booking: dict) -> bytes:
 
     row(f"Daily Rate × {days} day(s)", f"${eff_rate:,.2f} × {days}")
     row("Subtotal", f"${subtotal:,.2f}")
+    # Extra mileage (only shown if a fee was applied on drop-off)
+    extra_mileage_fee = float(booking.get("extra_mileage_fee") or 0)
+    if extra_mileage_fee > 0:
+        extra_km = booking.get("extra_mileage_km") or 0
+        rate = booking.get("extra_mileage_rate") or 0
+        row(f"Extra Mileage ({extra_km} km × ${rate:.2f})", f"${extra_mileage_fee:,.2f}")
     row(f"Tax ({tax_rate}%)", f"${tax_amount:,.2f}")
 
     # Grand total (highlighted)
@@ -2714,9 +2829,9 @@ async def get_tax_by_location_name(name: str):
     import re as _re
     q = (name or "").strip()
     if not q:
-        return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0}
+        return {"tax_rate": 0.0, "name": q, "city": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0, "unlimited_mileage": True, "mileage_limit_per_day": 0, "extra_mileage_charge": 0.0}
 
-    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "country": 1, "min_booking_days": 1, "insurance_included": 1, "refuel_amount": 1}
+    proj = {"_id": 0, "tax_rate": 1, "name": 1, "city": 1, "country": 1, "min_booking_days": 1, "insurance_included": 1, "refuel_amount": 1, "unlimited_mileage": 1, "mileage_limit_per_day": 1, "extra_mileage_charge": 1}
     safe_q = _re.escape(q)
 
     # 1) Exact (case-insensitive)
@@ -2757,8 +2872,11 @@ async def get_tax_by_location_name(name: str):
             "min_booking_days": int(loc.get("min_booking_days") or 1),
             "insurance_included": bool(loc.get("insurance_included") or False),
             "refuel_amount": float(loc.get("refuel_amount") or 0.0),
+            "unlimited_mileage": bool(loc.get("unlimited_mileage", True)),
+            "mileage_limit_per_day": int(loc.get("mileage_limit_per_day") or 0),
+            "extra_mileage_charge": float(loc.get("extra_mileage_charge") or 0.0),
         }
-    return {"tax_rate": 0.0, "name": q, "city": "", "country": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0}
+    return {"tax_rate": 0.0, "name": q, "city": "", "country": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0, "unlimited_mileage": True, "mileage_limit_per_day": 0, "extra_mileage_charge": 0.0}
 
 @api_router.get("/locations/{location_id}")
 async def get_location(location_id: str):

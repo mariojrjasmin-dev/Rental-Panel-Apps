@@ -1396,12 +1396,169 @@ async function bulkCancelPendingPickups() {
 }
 
 async function confirmOp(bookingId, newStatus, action) {
-  const label = action === 'pickup' ? 'pickup' : 'drop-off';
-  if (!confirm('Confirm '+label+'? The vehicle stock will be auto-adjusted.')) return;
+  // Find the booking in the cached list (we re-fetch below for safety).
+  let bookings = [];
+  try { bookings = await api('/admin/bookings'); } catch (e) { alert(e.message); return; }
+  const b = bookings.find(x => x.id === bookingId);
+  if (!b) { alert('Booking not found'); return; }
+
+  // Look up the pickup location's mileage policy so we can show the live
+  // extra-mileage estimate at drop-off time.
+  let mileagePolicy = { unlimited_mileage: true, mileage_limit_per_day: 0, extra_mileage_charge: 0 };
+  const pickupName = (b.pickup_location && b.pickup_location.name) || '';
+  if (pickupName && action === 'dropoff') {
+    try {
+      const r = await fetch(`/api/locations/tax-by-name?name=${encodeURIComponent(pickupName)}`);
+      if (r.ok) {
+        const data = await r.json();
+        mileagePolicy = {
+          unlimited_mileage: !!data.unlimited_mileage,
+          mileage_limit_per_day: parseInt(data.mileage_limit_per_day || 0, 10) || 0,
+          extra_mileage_charge: parseFloat(data.extra_mileage_charge || 0) || 0,
+        };
+      }
+    } catch (_e) { /* ignore — keep defaults */ }
+  }
+
+  const root = document.getElementById('modal-root');
+  if (!root) { alert('Please open Pickups from the Dashboard first.'); return; }
+
+  const isPickup = action === 'pickup';
+  const title = isPickup ? '✅ Confirm Pickup' : '🔄 Confirm Drop-off';
+  const headerColor = isPickup ? '#34c759' : '#0a84ff';
+  const days = parseInt(b.days || 1, 10) || 1;
+  const allowedKm = mileagePolicy.unlimited_mileage ? null : (mileagePolicy.mileage_limit_per_day * days);
+  const odomInPrev = (b.odometer_in !== null && b.odometer_in !== undefined) ? b.odometer_in : '';
+  const carDeposit = parseFloat(b.deposit || 0) || 0;
+
+  const pickupBlock = `
+    <div class="form-group">
+      <label style="font-weight:800">💰 Payment Method <span style="color:#ff3b30">*</span></label>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <label style="flex:1;display:flex;align-items:center;gap:8px;padding:14px 12px;border:2px solid #e5e5e5;border-radius:12px;cursor:pointer;background:#fafafa" onclick="document.getElementById('po-pm-cash').checked=true">
+          <input type="radio" id="po-pm-cash" name="po-pm" value="cash" checked style="width:18px;height:18px"/>
+          <span style="font-weight:700">💵 Cash</span>
+        </label>
+        <label style="flex:1;display:flex;align-items:center;gap:8px;padding:14px 12px;border:2px solid #e5e5e5;border-radius:12px;cursor:pointer;background:#fafafa" onclick="document.getElementById('po-pm-card').checked=true">
+          <input type="radio" id="po-pm-card" name="po-pm" value="card" style="width:18px;height:18px"/>
+          <span style="font-weight:700">💳 Card</span>
+        </label>
+      </div>
+      <div style="font-size:11px;color:#888;margin-top:6px;font-weight:600">Select how the customer paid at pickup.</div>
+    </div>
+    <div class="form-group">
+      <label style="font-weight:800">🚗 Odometer reading at Pickup (km)</label>
+      <input class="input" id="po-odom-in" type="number" min="0" placeholder="e.g. 45230" />
+      <div style="font-size:11px;color:#888;margin-top:4px;font-weight:600">Optional. Used later to compute extra mileage on drop-off.</div>
+    </div>
+    ${carDeposit > 0 ? `<div style="background:#fff5e6;border:1px solid #ffd48a;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#a05a00;font-weight:600">
+      💼 <strong>Security deposit due at pickup:</strong> $${carDeposit.toFixed(2)} — refunded at drop-off if no damages.
+    </div>` : ''}
+  `;
+
+  const dropoffBlock = `
+    <div class="form-group">
+      <label style="font-weight:800">🚗 Odometer at Pickup (km)</label>
+      <input class="input" id="po-odom-in" type="number" min="0" value="${odomInPrev}" placeholder="—" ${odomInPrev !== '' ? 'readonly' : ''} />
+      ${odomInPrev !== '' ? '<div style="font-size:11px;color:#888;margin-top:4px;font-weight:600">Recorded at pickup. Cannot be edited.</div>' : '<div style="font-size:11px;color:#a05a00;margin-top:4px;font-weight:600">⚠️ No reading was captured at pickup. Enter it now to compute extra mileage.</div>'}
+    </div>
+    <div class="form-group">
+      <label style="font-weight:800">🏁 Odometer at Drop-off (km) <span style="color:#666;font-weight:500">(optional)</span></label>
+      <input class="input" id="po-odom-out" type="number" min="0" placeholder="e.g. 45980" oninput="window._poUpdateMileage && window._poUpdateMileage()" />
+    </div>
+    <div id="po-mileage-preview" style="background:#f5f5f7;border-radius:10px;padding:12px;font-size:12px;color:#333;font-weight:600;margin-bottom:8px">
+      ${mileagePolicy.unlimited_mileage
+        ? '✅ <strong>Unlimited mileage</strong> on this location — no extra mileage fee will be charged.'
+        : `📏 Mileage policy: <strong>${mileagePolicy.mileage_limit_per_day} km/day</strong> × ${days} day(s) = <strong>${allowedKm} km allowed</strong>. Overage charged at <strong>$${mileagePolicy.extra_mileage_charge.toFixed(2)}/km</strong>.<br/><span id="po-extra-fee" style="color:#666">Enter both odometer values to see the estimate.</span>`}
+    </div>
+  `;
+
+  root.innerHTML = `
+    <div id="po-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:60px 20px 20px;overflow-y:auto" onclick="if(event.target===this)closeModal()">
+      <div style="background:#fff;border-radius:18px;width:100%;max-width:520px;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden">
+        <div style="padding:18px 22px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;background:${headerColor};color:#fff">
+          <h2 style="margin:0;font-size:18px;font-weight:900">${title}</h2>
+          <button onclick="closeModal()" style="background:rgba(255,255,255,0.25);border:none;width:32px;height:32px;border-radius:16px;cursor:pointer;font-size:16px;line-height:1;color:#fff">✕</button>
+        </div>
+        <div style="padding:20px 22px">
+          <div style="background:#fafafa;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px">
+            <div style="font-weight:800;color:#0a0a0a">${b.car_name || 'Car'}</div>
+            <div style="color:#666;font-weight:600;margin-top:2px">${b.user_name || ''} · ${b.user_email || ''}</div>
+            <div style="color:#333;margin-top:4px">📍 ${isPickup ? ((b.pickup_location && b.pickup_location.name) || '—') : ((b.dropoff_location && b.dropoff_location.name) || '—')} · 💰 $${(b.total_price || 0).toFixed ? b.total_price.toFixed(2) : b.total_price}</div>
+          </div>
+          ${isPickup ? pickupBlock : dropoffBlock}
+          <div id="po-msg" style="font-size:13px;font-weight:700;min-height:18px;color:#d70015"></div>
+          <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="btn btn-gray" style="flex:1" onclick="closeModal()">Cancel</button>
+            <button class="btn" style="flex:1;background:${headerColor};color:#fff;font-weight:800" onclick="submitOp('${bookingId}','${newStatus}','${action}', ${JSON.stringify(mileagePolicy).replace(/"/g,'&quot;')}, ${days})">${isPickup ? '✓ Confirm Pickup' : '✓ Confirm Drop-off'}</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Live update of extra-mileage estimate as the admin types odometer values.
+  if (!isPickup && !mileagePolicy.unlimited_mileage) {
+    window._poUpdateMileage = function () {
+      const oin = parseInt(document.getElementById('po-odom-in').value || '0', 10) || 0;
+      const oout = parseInt(document.getElementById('po-odom-out').value || '0', 10) || 0;
+      const target = document.getElementById('po-extra-fee');
+      if (!target) return;
+      if (!oin || !oout || oout < oin) {
+        target.textContent = 'Enter both odometer values to see the estimate.';
+        target.style.color = '#666';
+        return;
+      }
+      const driven = oout - oin;
+      const overage = Math.max(0, driven - (allowedKm || 0));
+      const fee = (overage * (mileagePolicy.extra_mileage_charge || 0));
+      if (overage <= 0) {
+        target.textContent = `✅ Within limit: ${driven} km driven (allowed ${allowedKm} km). No extra fee.`;
+        target.style.color = '#0a5d2b';
+      } else {
+        target.innerHTML = `⚠️ <strong>${driven} km driven</strong> · <strong>${overage} km overage</strong> · Extra fee: <strong>$${fee.toFixed(2)}</strong> (will be added to receipt).`;
+        target.style.color = '#a05a00';
+      }
+    };
+  }
+}
+
+async function submitOp(bookingId, newStatus, action, policy, days) {
+  const msg = document.getElementById('po-msg');
+  if (msg) msg.textContent = '';
+  const payload = { status: newStatus };
+
+  if (action === 'pickup') {
+    const cash = document.getElementById('po-pm-cash');
+    const card = document.getElementById('po-pm-card');
+    if (cash && cash.checked) payload.payment_method = 'cash';
+    else if (card && card.checked) payload.payment_method = 'card';
+    else { if (msg) msg.textContent = 'Please select a payment method.'; return; }
+    // For pickup with CASH we also auto-set payment_status=paid (admin collects cash now).
+    if (payload.payment_method === 'cash') payload.payment_status = 'paid';
+    const odomEl = document.getElementById('po-odom-in');
+    const odom = odomEl && odomEl.value ? parseInt(odomEl.value, 10) : null;
+    if (odom !== null && !isNaN(odom)) payload.odometer_in = odom;
+  } else {
+    // Drop-off
+    const oinEl = document.getElementById('po-odom-in');
+    const ooutEl = document.getElementById('po-odom-out');
+    const oin = oinEl && oinEl.value !== '' ? parseInt(oinEl.value, 10) : null;
+    const oout = ooutEl && ooutEl.value !== '' ? parseInt(ooutEl.value, 10) : null;
+    if (oin !== null && !isNaN(oin)) payload.odometer_in = oin;
+    if (oout !== null && !isNaN(oout)) {
+      if (oin !== null && oout < oin) { if (msg) msg.textContent = 'Drop-off reading cannot be less than pickup reading.'; return; }
+      payload.odometer_out = oout;
+    }
+  }
+
   try {
-    await api('/admin/bookings/'+bookingId+'/status', { method:'PUT', body: JSON.stringify({ status: newStatus }) });
+    await api('/admin/bookings/'+bookingId+'/status', { method:'PUT', body: JSON.stringify(payload) });
+    closeModal();
     showOperations();
-  } catch (e) { alert(e.message); }
+  } catch (e) {
+    if (msg) msg.textContent = e.message || 'Failed to update booking.';
+    else alert(e.message);
+  }
 }
 
 function showChangePassword() {
