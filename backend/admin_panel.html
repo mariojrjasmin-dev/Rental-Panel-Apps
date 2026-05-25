@@ -1422,8 +1422,13 @@ async function confirmOp(bookingId, newStatus, action) {
     } catch (_e) { /* ignore — keep defaults */ }
   }
 
-  const root = document.getElementById('modal-root');
-  if (!root) { alert('Please open Pickups from the Dashboard first.'); return; }
+  const root = document.getElementById('modal-root') || (() => {
+    // Page didn't render a modal-root (e.g. Pickups page) — create one on the fly.
+    const el = document.createElement('div');
+    el.id = 'modal-root';
+    document.body.appendChild(el);
+    return el;
+  })();
 
   const isPickup = action === 'pickup';
   const title = isPickup ? '✅ Confirm Pickup' : '🔄 Confirm Drop-off';
