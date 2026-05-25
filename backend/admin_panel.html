@@ -1476,8 +1476,36 @@ async function confirmOp(bookingId, newStatus, action) {
     <div id="po-mileage-preview" style="background:#f5f5f7;border-radius:10px;padding:12px;font-size:12px;color:#333;font-weight:600;margin-bottom:8px">
       ${mileagePolicy.unlimited_mileage
         ? '✅ <strong>Unlimited mileage</strong> on this location — no extra mileage fee will be charged.'
-        : `📏 Mileage policy: <strong>${mileagePolicy.mileage_limit_per_day} km/day</strong> × ${days} day(s) = <strong>${allowedKm} km allowed</strong>. Overage charged at <strong>$${mileagePolicy.extra_mileage_charge.toFixed(2)}/km</strong>.<br/><span id="po-extra-fee" style="color:#666">Enter both odometer values to see the estimate.</span>`}
+        : `📏 Mileage policy: <strong>${mileagePolicy.mileage_limit_per_day} km/day</strong> × ${days} day(s) = <strong>${allowedKm} km allowed</strong>. Overage charged at <strong>$${mileagePolicy.extra_mileage_charge.toFixed(2)}/km</strong>.`}
     </div>
+    ${mileagePolicy.unlimited_mileage ? '' : `
+    <div id="po-mileage-breakdown" style="display:none;background:#fff5e6;border:2px solid #ffd48a;border-radius:12px;padding:14px;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:800;color:#a05a00;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">📊 Extra Mileage Calculation</div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;color:#333;font-weight:600">
+        <span>Odometer at Drop-off</span><span id="po-br-out">— km</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;color:#333;font-weight:600">
+        <span>− Odometer at Pickup</span><span id="po-br-in">— km</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;color:#0a0a0a;font-weight:800;border-top:1px dashed #ccc;margin-top:4px;padding-top:8px">
+        <span>= Total driven</span><span id="po-br-driven">— km</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;color:#333;font-weight:600">
+        <span>− Allowed (${mileagePolicy.mileage_limit_per_day} km/day × ${days} day${days===1?'':'s'})</span><span>${allowedKm} km</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;color:#0a0a0a;font-weight:800;border-top:1px dashed #ccc;margin-top:4px;padding-top:8px">
+        <span>= Extra mileage</span><span id="po-br-extra">— km</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;color:#333;font-weight:600">
+        <span>× Rate per km</span><span>$${mileagePolicy.extra_mileage_charge.toFixed(2)}</span>
+      </div>
+      <div id="po-total-wrap" style="margin-top:12px;padding:14px;background:#a05a00;color:#fff;border-radius:10px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:13px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase">💰 To collect at drop-off</span>
+        <span id="po-br-total" style="font-size:22px;font-weight:900">$0.00</span>
+      </div>
+    </div>
+    <div id="po-extra-fee" style="font-size:12px;color:#666;font-weight:600;margin-bottom:8px">Enter both odometer values to see the breakdown.</div>
+    `}
   `;
 
   root.innerHTML = `
@@ -1508,22 +1536,48 @@ async function confirmOp(bookingId, newStatus, action) {
     window._poUpdateMileage = function () {
       const oin = parseInt(document.getElementById('po-odom-in').value || '0', 10) || 0;
       const oout = parseInt(document.getElementById('po-odom-out').value || '0', 10) || 0;
-      const target = document.getElementById('po-extra-fee');
-      if (!target) return;
-      if (!oin || !oout || oout < oin) {
-        target.textContent = 'Enter both odometer values to see the estimate.';
-        target.style.color = '#666';
+      const breakdown = document.getElementById('po-mileage-breakdown');
+      const hint = document.getElementById('po-extra-fee');
+      const brOut = document.getElementById('po-br-out');
+      const brIn = document.getElementById('po-br-in');
+      const brDriven = document.getElementById('po-br-driven');
+      const brExtra = document.getElementById('po-br-extra');
+      const brTotal = document.getElementById('po-br-total');
+      const totalWrap = document.getElementById('po-total-wrap');
+      if (!breakdown || !hint) return;
+
+      if (!oin || !oout) {
+        breakdown.style.display = 'none';
+        hint.style.display = 'block';
+        hint.textContent = 'Enter both odometer values to see the breakdown.';
+        hint.style.color = '#666';
         return;
       }
+      if (oout < oin) {
+        breakdown.style.display = 'none';
+        hint.style.display = 'block';
+        hint.textContent = '⚠️ Drop-off reading cannot be less than pickup reading.';
+        hint.style.color = '#d70015';
+        return;
+      }
+      // Show the breakdown panel
+      breakdown.style.display = 'block';
+      hint.style.display = 'none';
       const driven = oout - oin;
       const overage = Math.max(0, driven - (allowedKm || 0));
-      const fee = (overage * (mileagePolicy.extra_mileage_charge || 0));
+      const fee = overage * (mileagePolicy.extra_mileage_charge || 0);
+      brOut.textContent = oout.toLocaleString() + ' km';
+      brIn.textContent = oin.toLocaleString() + ' km';
+      brDriven.textContent = driven.toLocaleString() + ' km';
+      brExtra.textContent = overage.toLocaleString() + ' km';
+      brTotal.textContent = '$' + fee.toFixed(2);
+      // Green/Orange total bar depending on overage
       if (overage <= 0) {
-        target.textContent = `✅ Within limit: ${driven} km driven (allowed ${allowedKm} km). No extra fee.`;
-        target.style.color = '#0a5d2b';
+        totalWrap.style.background = '#34c759';
+        brTotal.parentElement.firstElementChild.textContent = '✅ Within limit — no extra charge';
       } else {
-        target.innerHTML = `⚠️ <strong>${driven} km driven</strong> · <strong>${overage} km overage</strong> · Extra fee: <strong>$${fee.toFixed(2)}</strong> (will be added to receipt).`;
-        target.style.color = '#a05a00';
+        totalWrap.style.background = '#a05a00';
+        brTotal.parentElement.firstElementChild.textContent = '💰 To collect at drop-off';
       }
     };
   }
