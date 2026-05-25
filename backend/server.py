@@ -599,6 +599,7 @@ class CarCreate(BaseModel):
     # Mileage & premium features
     unlimited_mileage: bool = True
     mileage_limit: Optional[int] = None  # km/day cap when unlimited_mileage = False
+    deposit: float = 0.0  # Refundable security deposit per vehicle (collected at pickup, not added to grand total)
     min_driver_age: int = 21
     android_auto: bool = False
     apple_carplay: bool = False
@@ -631,6 +632,7 @@ class CarUpdate(BaseModel):
     stock: Optional[Dict[str, int]] = None
     unlimited_mileage: Optional[bool] = None
     mileage_limit: Optional[int] = None
+    deposit: Optional[float] = None
     min_driver_age: Optional[int] = None
     android_auto: Optional[bool] = None
     apple_carplay: Optional[bool] = None
@@ -742,6 +744,10 @@ class LocationCreate(BaseModel):
     min_booking_days: int = 1
     insurance_included: bool = False
     refuel_amount: float = 0.0  # flat fee for pre-paid refuel option (0 = disabled)
+    # ---- Mileage policy (per location) ----
+    unlimited_mileage: bool = True
+    mileage_limit_per_day: Optional[int] = None  # km/day cap when unlimited_mileage = False
+    extra_mileage_charge: float = 1.0  # $ per km charged for overage at this location
     active: bool = True  # When False, hidden from customers and rejected by /bookings
 
 class LocationUpdate(BaseModel):
@@ -756,6 +762,9 @@ class LocationUpdate(BaseModel):
     min_booking_days: Optional[int] = None
     insurance_included: Optional[bool] = None
     refuel_amount: Optional[float] = None
+    unlimited_mileage: Optional[bool] = None
+    mileage_limit_per_day: Optional[int] = None
+    extra_mileage_charge: Optional[float] = None
     active: Optional[bool] = None
 
 class ReviewCreate(BaseModel):
