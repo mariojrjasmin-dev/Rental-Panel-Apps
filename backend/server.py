@@ -1284,22 +1284,28 @@ async def get_cars(category: Optional[str] = None, search: Optional[str] = None,
         if "$and" not in query:
             query["$and"] = []
         query["$and"].append({"$or": search_conditions})
+    # Filter by location NAME (preferred). Matches either the deprecated
+    # singular `pickup_location.name` OR any item in the new multi-select
+    # `pickup_locations.name` array. We intentionally search by location *name*
+    # (not city) so admins control visibility per location.
     if location:
         loc_conditions = [
             {"pickup_location.name": {"$regex": location, "$options": "i"}},
             {"dropoff_location.name": {"$regex": location, "$options": "i"}},
-            {"pickup_location.address": {"$regex": location, "$options": "i"}},
-            {"dropoff_location.address": {"$regex": location, "$options": "i"}}
+            {"pickup_locations.name": {"$regex": location, "$options": "i"}},
+            {"dropoff_locations.name": {"$regex": location, "$options": "i"}},
         ]
         if "$and" not in query:
             query["$and"] = []
         query["$and"].append({"$or": loc_conditions})
+    # `city` param is treated as an alias for `location` (name-based) for
+    # backward compatibility with older clients. Same matching rules apply.
     if city:
         city_conditions = [
             {"pickup_location.name": {"$regex": city, "$options": "i"}},
             {"dropoff_location.name": {"$regex": city, "$options": "i"}},
-            {"pickup_location.address": {"$regex": city, "$options": "i"}},
-            {"dropoff_location.address": {"$regex": city, "$options": "i"}}
+            {"pickup_locations.name": {"$regex": city, "$options": "i"}},
+            {"dropoff_locations.name": {"$regex": city, "$options": "i"}},
         ]
         if "$and" not in query:
             query["$and"] = []

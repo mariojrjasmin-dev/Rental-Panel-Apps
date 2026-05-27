@@ -47,7 +47,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
-  const [activeCity, setActiveCity] = useState('');
+  const [activeLocation, setActiveLocation] = useState('');
   const { user } = useAuth();
   const router = useRouter();
   // Reserve space at the bottom of the car FlatList so the LegalLinks footer
@@ -57,7 +57,9 @@ export default function HomeScreen() {
   const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 80;
 
   // Derive unique cities from locations
-  const cities = [...new Set(locations.map(l => l.city))];
+  // Use location NAMES (not cities) so each location is shown as its own pill.
+  // Sorted alphabetically for predictable ordering.
+  const locationNames = [...new Set((locations || []).map(l => l.name).filter(Boolean))].sort((a,b) => a.localeCompare(b));
 
   const fetchLocations = useCallback(async () => {
     try {
@@ -71,13 +73,13 @@ export default function HomeScreen() {
       const params = new URLSearchParams();
       if (activeCategory !== 'All') params.append('category', activeCategory);
       if (search) params.append('search', search);
-      if (activeCity) params.append('city', activeCity);
+      if (activeLocation) params.append('location', activeLocation);
       const res = await fetch(`${BACKEND_URL}/api/cars?${params.toString()}`);
       if (res.ok) setCars(await res.json());
     } catch (e) { console.log('Fetch cars error:', e); }
     setLoading(false);
     setRefreshing(false);
-  }, [activeCategory, search, activeCity]);
+  }, [activeCategory, search, activeLocation]);
 
   useEffect(() => { fetchLocations(); }, [fetchLocations]);
 
@@ -91,12 +93,12 @@ export default function HomeScreen() {
   const onRefresh = () => { setRefreshing(true); fetchCars(); };
 
   const clearFilters = () => {
-    setActiveCity('');
+    setActiveLocation('');
     setActiveCategory('All');
     setSearch('');
   };
 
-  const hasFilters = activeCity || activeCategory !== 'All' || search;
+  const hasFilters = activeLocation || activeCategory !== 'All' || search;
 
   const renderCar = ({ item }: { item: Car }) => (
     <TouchableOpacity
@@ -180,7 +182,7 @@ export default function HomeScreen() {
       </View>
 
       {/* Location filter */}
-      {cities.length > 0 && (
+      {locationNames.length > 0 && (
         <View>
           <View style={styles.sectionHeader}>
             <Ionicons name="location" size={16} color="#FF3B30" />
@@ -189,21 +191,21 @@ export default function HomeScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterList}>
             <TouchableOpacity
               testID="location-all"
-              style={[styles.locationPill, !activeCity && styles.locationPillActive]}
-              onPress={() => setActiveCity('')}
+              style={[styles.locationPill, !activeLocation && styles.locationPillActive]}
+              onPress={() => setActiveLocation('')}
             >
-              <Ionicons name="globe-outline" size={14} color={!activeCity ? '#FFF' : '#FF3B30'} />
-              <Text style={[styles.locationPillText, !activeCity && styles.locationPillTextActive]}>All Locations</Text>
+              <Ionicons name="globe-outline" size={14} color={!activeLocation ? '#FFF' : '#FF3B30'} />
+              <Text style={[styles.locationPillText, !activeLocation && styles.locationPillTextActive]}>All Locations</Text>
             </TouchableOpacity>
-            {cities.map(c => (
+            {locationNames.map(name => (
               <TouchableOpacity
-                key={c}
-                testID={`location-${c.replace(/\s/g, '-')}`}
-                style={[styles.locationPill, activeCity === c && styles.locationPillActive]}
-                onPress={() => setActiveCity(activeCity === c ? '' : c)}
+                key={name}
+                testID={`location-${(name || '').replace(/\s/g, '-')}`}
+                style={[styles.locationPill, activeLocation === name && styles.locationPillActive]}
+                onPress={() => setActiveLocation(activeLocation === name ? '' : name)}
               >
-                <Ionicons name="location-outline" size={14} color={activeCity === c ? '#FFF' : '#FF3B30'} />
-                <Text style={[styles.locationPillText, activeCity === c && styles.locationPillTextActive]}>{c}</Text>
+                <Ionicons name="location-outline" size={14} color={activeLocation === name ? '#FFF' : '#FF3B30'} />
+                <Text style={[styles.locationPillText, activeLocation === name && styles.locationPillTextActive]}>{name}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
