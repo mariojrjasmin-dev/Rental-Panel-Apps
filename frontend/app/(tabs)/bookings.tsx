@@ -8,6 +8,7 @@ import { useAuth } from '../_layout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { t as tr } from '../../src/i18n';
 import { useTheme } from '../../src/theme';
+import { taxLabel } from '../../src/tax';
 
 import { BACKEND_URL } from '../../src/config';
 
@@ -28,6 +29,7 @@ type Booking = {
   // Booking workflow upgrades
   deposit?: number;
   extra_mileage_fee?: number;
+  pickup_location?: { name?: string; country?: string };
 };
 
 const PAYMENT_BADGE: Record<string, { color: string; key: string }> = {
@@ -143,7 +145,7 @@ export default function BookingsScreen() {
         {(item.subtotal != null || (item.tax_amount ?? 0) > 0) && (
           <View style={styles.taxRow}>
             <Text style={styles.taxText}>
-              Subtotal ${(item.subtotal ?? 0).toFixed(2)} · Tax {item.tax_rate ?? 0}% ${(item.tax_amount ?? 0).toFixed(2)}
+              Subtotal ${(item.subtotal ?? 0).toFixed(2)} · {taxLabel(item.pickup_location?.country)} {item.tax_rate ?? 0}% ${(item.tax_amount ?? 0).toFixed(2)}
             </Text>
           </View>
         )}

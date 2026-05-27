@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatePickerField from '../components/DatePickerField';
 import { t as tr } from '../src/i18n';
 import { useTheme } from '../src/theme';
+import { taxLabel } from '../src/tax';
 
 import { BACKEND_URL } from '../src/config';
 
@@ -31,7 +32,7 @@ export default function BookingScreen() {
   const [extraMileageCharge, setExtraMileageCharge] = useState(0);
   // Multi-location: customer picks from the allowed pickup/dropoff lists.
   // Default to the first entry; resets when the car changes.
-  type LocOpt = { name: string; lat: number; lng: number };
+  type LocOpt = { name: string; lat: number; lng: number; country?: string; city?: string };
   const [selectedPickup, setSelectedPickup] = useState<LocOpt | null>(null);
   const [selectedDropoff, setSelectedDropoff] = useState<LocOpt | null>(null);
   // Country lookup: name → country (used to enforce same-country pickup/dropoff)
@@ -873,12 +874,12 @@ export default function BookingScreen() {
           )}
           {taxRate > 0 ? (
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>{tr('tax')} ({taxRate}%)</Text>
+              <Text style={styles.summaryLabel}>{taxLabel(pickupCountry || selectedPickup?.country)} ({taxRate}%)</Text>
               <Text style={styles.summaryValue}>${appliedPromo ? recomputedTax : taxAmount}</Text>
             </View>
           ) : (
             <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: '#999' }]}>{tr('tax')} (0%)</Text>
+              <Text style={[styles.summaryLabel, { color: '#999' }]}>{taxLabel(pickupCountry || selectedPickup?.country)} (0%)</Text>
               <Text style={[styles.summaryValue, { color: '#999' }]}>$0.00</Text>
             </View>
           )}
