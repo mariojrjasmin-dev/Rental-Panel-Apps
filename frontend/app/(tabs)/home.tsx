@@ -9,6 +9,7 @@ import LegalLinks from '../../components/LegalLinks';
 import BrandLogo from '../../components/BrandLogo';
 import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
 import { t as tr } from '../../src/i18n';
+import { useTheme } from '../../src/theme';
 
 import { BACKEND_URL } from '../../src/config';
 
@@ -50,6 +51,7 @@ export default function HomeScreen() {
   const [activeLocation, setActiveLocation] = useState('');
   const { user } = useAuth();
   const router = useRouter();
+  const { colors } = useTheme();
   // Reserve space at the bottom of the car FlatList so the LegalLinks footer
   // (and last car card) is never hidden behind the bottom tab bar.
   // useContext is safer than useBottomTabBarHeight() (which throws on web /
@@ -103,20 +105,20 @@ export default function HomeScreen() {
   const renderCar = ({ item }: { item: Car }) => (
     <TouchableOpacity
       testID={`car-card-${item.id}`}
-      style={styles.carCard}
+      style={[styles.carCard, { backgroundColor: colors.bgElevated, borderColor: colors.border, borderWidth: 1 }]}
       activeOpacity={0.7}
       onPress={() => router.push({ pathname: '/car-detail', params: { id: item.id } })}
     >
       <Image source={{ uri: item.image_url }} style={styles.carImage} resizeMode="cover" />
       <View style={styles.carInfo}>
-        <Text style={styles.carName} numberOfLines={1}>{item.name}</Text>
+        <Text style={[styles.carName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
         <View style={styles.categoryBadgeSolo}>
           <Text style={styles.categoryText}>Or Similar | {item.category}</Text>
         </View>
         {item.pickup_location && (
           <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={13} color="#007AFF" />
-            <Text style={styles.locationText} numberOfLines={1}>{item.pickup_location.name}</Text>
+            <Ionicons name="location-outline" size={13} color={colors.info} />
+            <Text style={[styles.locationText, { color: colors.info }]} numberOfLines={1}>{item.pickup_location.name}</Text>
           </View>
         )}
         {(item.avg_rating !== undefined && item.avg_rating > 0) && (
@@ -126,49 +128,49 @@ export default function HomeScreen() {
         )}
         <View style={styles.carSpecs}>
           <View style={styles.specItem}>
-            <Ionicons name="people-outline" size={14} color="#666" />
-            <Text style={styles.specText}>{item.seats} seats</Text>
+            <Ionicons name="people-outline" size={14} color={colors.textMuted} />
+            <Text style={[styles.specText, { color: colors.textMuted }]}>{item.seats} seats</Text>
           </View>
           <View style={styles.specItem}>
-            <Ionicons name="bag-handle-outline" size={14} color="#666" />
-            <Text style={styles.specText}>{item.bags ?? 2} bags</Text>
+            <Ionicons name="bag-handle-outline" size={14} color={colors.textMuted} />
+            <Text style={[styles.specText, { color: colors.textMuted }]}>{item.bags ?? 2} bags</Text>
           </View>
           <View style={styles.specItem}>
-            <Ionicons name="cog-outline" size={14} color="#666" />
-            <Text style={styles.specText}>{item.transmission}</Text>
+            <Ionicons name="cog-outline" size={14} color={colors.textMuted} />
+            <Text style={[styles.specText, { color: colors.textMuted }]}>{item.transmission}</Text>
           </View>
           <View style={styles.specItem}>
-            <Ionicons name="flash-outline" size={14} color="#666" />
-            <Text style={styles.specText}>{item.fuel_type}</Text>
+            <Ionicons name="flash-outline" size={14} color={colors.textMuted} />
+            <Text style={[styles.specText, { color: colors.textMuted }]}>{item.fuel_type}</Text>
           </View>
         </View>
         <View style={styles.carFooter}>
-          <Text style={styles.price}>${item.price_per_day}</Text>
-          <Text style={styles.priceUnit}>/day</Text>
+          <Text style={[styles.price, { color: colors.text }]}>${item.price_per_day}</Text>
+          <Text style={[styles.priceUnit, { color: colors.textMuted }]}>/day</Text>
         </View>
       </View>
     </TouchableOpacity>
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]} edges={['top']}>
       <View style={styles.topBar}>
         <View style={{ flex: 1 }}>
           <Text style={styles.greeting}>{tr('welcomeNew')}{user?.name ? `, ${user.name}` : ''}</Text>
           <BrandLogo size="medium" containerStyle={styles.topLogo} />
         </View>
         <TouchableOpacity testID="profile-avatar" style={styles.avatar} onPress={() => router.push('/(tabs)/profile')}>
-          <Ionicons name="person-circle" size={40} color="#0A0A0A" />
+          <Ionicons name="person-circle" size={40} color={colors.text} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#999" />
+      <View style={[styles.searchContainer, { backgroundColor: colors.bgSubtle, borderColor: colors.border }]}>
+        <Ionicons name="search" size={20} color={colors.textSubtle} />
         <TextInput
           testID="car-search-input"
-          style={styles.searchInput}
+          style={[styles.searchInput, { color: colors.text }]}
           placeholder={tr('findCar')}
-          placeholderTextColor="#999"
+          placeholderTextColor={colors.textSubtle}
           value={search}
           onChangeText={setSearch}
           onSubmitEditing={fetchCars}
@@ -176,7 +178,7 @@ export default function HomeScreen() {
         />
         {search ? (
           <TouchableOpacity onPress={() => setSearch('')}>
-            <Ionicons name="close-circle" size={20} color="#999" />
+            <Ionicons name="close-circle" size={20} color={colors.textSubtle} />
           </TouchableOpacity>
         ) : null}
       </View>

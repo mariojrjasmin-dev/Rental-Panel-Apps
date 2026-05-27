@@ -9,11 +9,13 @@ import { t } from '../../src/i18n';
 import { isBiometricAvailable, isBiometricEnabled, disableBiometricLogin, enableBiometricLogin, type BiometricCheck } from '../../src/biometric';
 import { BACKEND_URL } from '../../src/config';
 import LegalLinks from '../../components/LegalLinks';
+import { useTheme } from '../../src/theme';
 
 export default function ProfileScreen() {
   const { user, logout, locale, changeLocale } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colors, isDark, toggle: toggleTheme } = useTheme();
   // Safer than useBottomTabBarHeight() which throws on web / non-tab screens.
   // Falls back to a sane default that matches the iOS tab bar + home indicator.
   const tabBarHeight = useContext(BottomTabBarHeightContext) ?? (64 + (insets.bottom || 0));
@@ -137,20 +139,35 @@ export default function ProfileScreen() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]} edges={['top']}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>{t('profile')}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
+          <Text style={[styles.title, { color: colors.text, marginBottom: 0 }]}>{t('profile')}</Text>
+          <Pressable
+            testID="theme-toggle-btn"
+            onPress={toggleTheme}
+            hitSlop={10}
+            style={({ pressed }) => [{
+              width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: isDark ? colors.bgElevated : '#FFF',
+              borderWidth: 1, borderColor: colors.border,
+              opacity: pressed ? 0.7 : 1,
+            }]}
+          >
+            <Ionicons name={isDark ? 'sunny' : 'moon'} size={22} color={isDark ? '#FFCC00' : '#0A0A0A'} />
+          </Pressable>
+        </View>
 
-        <View style={styles.profileCard}>
+        <View style={[styles.profileCard, { backgroundColor: colors.bgElevated }]}>
           <View style={styles.avatarCircle}>
             <Ionicons name="person" size={40} color="#FFF" />
           </View>
-          <Text style={styles.userName}>{user?.name || t('member')}</Text>
-          <Text style={styles.userEmail}>{user?.email || ''}</Text>
+          <Text style={[styles.userName, { color: colors.text }]}>{user?.name || t('member')}</Text>
+          <Text style={[styles.userEmail, { color: colors.textMuted }]}>{user?.email || ''}</Text>
           {user?.role === 'admin' && (
             <View style={styles.adminBadge}>
               <Ionicons name="shield-checkmark" size={14} color="#FF3B30" />
@@ -160,8 +177,8 @@ export default function ProfileScreen() {
         </View>
 
         {/* Language toggle */}
-        <View style={styles.langCard}>
-          <Text style={styles.langLabel}>{t('language')}</Text>
+        <View style={[styles.langCard, { backgroundColor: colors.bgElevated }]}>
+          <Text style={[styles.langLabel, { color: colors.textMuted }]}>{t('language')}</Text>
           <View style={styles.langRow}>
             <Pressable
               style={[styles.langBtn, locale === 'en' && styles.langBtnActive]}

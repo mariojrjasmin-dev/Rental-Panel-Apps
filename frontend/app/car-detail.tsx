@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import StarRating from '../components/StarRating';
 import { useAuth } from './_layout';
 import { t as tr } from '../src/i18n';
+import { useTheme } from '../src/theme';
 
 import { BACKEND_URL } from '../src/config';
 const { width } = Dimensions.get('window');
@@ -21,6 +22,7 @@ type Review = {
 };
 
 export default function CarDetailScreen() {
+  const { colors } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [car, setCar] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -107,7 +109,7 @@ export default function CarDetailScreen() {
   const userReview = reviews.find(r => r.user_id === userId);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.bg }]}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           <View style={styles.heroContainer}>

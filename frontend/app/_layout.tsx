@@ -8,6 +8,7 @@ import {
   registerForPushNotifications,
   unregisterPushToken,
 } from '../src/notifications';
+import { ThemeProvider } from '../src/theme';
 
 import { BACKEND_URL } from '../src/config';
 
@@ -138,17 +139,19 @@ export default function RootLayout() {
   return (
     <AuthContext.Provider value={{ user, loading, login, register, logout, setUser, locale, changeLocale }}>
       <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="car-detail" options={{ headerShown: false }} />
-        <Stack.Screen name="booking" options={{ headerShown: false }} />
-        <Stack.Screen name="booking-success" options={{ headerShown: false }} />
-        <Stack.Screen name="map-view" options={{ headerShown: false }} />
-        <Stack.Screen name="admin" options={{ headerShown: false }} />
-        <Stack.Screen name="admin-locations" options={{ headerShown: false }} />
-      </Stack>
+      <ThemeProvider>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="car-detail" options={{ headerShown: false }} />
+          <Stack.Screen name="booking" options={{ headerShown: false }} />
+          <Stack.Screen name="booking-success" options={{ headerShown: false }} />
+          <Stack.Screen name="map-view" options={{ headerShown: false }} />
+          <Stack.Screen name="admin" options={{ headerShown: false }} />
+          <Stack.Screen name="admin-locations" options={{ headerShown: false }} />
+        </Stack>
+      </ThemeProvider>
     </AuthContext.Provider>
   );
 }

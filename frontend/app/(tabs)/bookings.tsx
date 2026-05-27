@@ -7,6 +7,7 @@ import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../_layout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { t as tr } from '../../src/i18n';
+import { useTheme } from '../../src/theme';
 
 import { BACKEND_URL } from '../../src/config';
 
@@ -47,6 +48,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function BookingsScreen() {
+  const { colors } = useTheme();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -165,7 +167,7 @@ export default function BookingsScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>{tr('myBookings')}</Text>
       </View>

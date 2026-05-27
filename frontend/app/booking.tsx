@@ -6,10 +6,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatePickerField from '../components/DatePickerField';
 import { t as tr } from '../src/i18n';
+import { useTheme } from '../src/theme';
 
 import { BACKEND_URL } from '../src/config';
 
 export default function BookingScreen() {
+  const { colors } = useTheme();
   const { carId } = useLocalSearchParams<{ carId: string }>();
   const [car, setCar] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -440,7 +442,7 @@ export default function BookingScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]} edges={['top']}>
       <View style={styles.topBar}>
         <TouchableOpacity testID="booking-back-btn" onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#0A0A0A" />
