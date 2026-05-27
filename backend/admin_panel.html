@@ -347,28 +347,38 @@ function toggleTheme() {
 // ==================== SIDEBAR ====================
 const SIDEBAR_ITEMS = [
   { section: 'Operations' },
-  { id: 'dashboard',  label: 'Dashboard',  icon: '🏠', fn: 'showDashboard' },
-  { id: 'cars',       label: 'Vehicles',   icon: '🚗', fn: 'showCars' },
-  { id: 'bookings',   label: 'Bookings',   icon: '📋', fn: 'showBookings' },
-  { id: 'pickups',    label: 'Pickups',    icon: '🔑', fn: 'showOperations' },
-  { id: 'locations',  label: 'Locations',  icon: '📍', fn: 'showLocations' },
-  { id: 'customers',  label: 'Customers',  icon: '👥', fn: 'showCustomers' },
+  { id: 'dashboard',  label: 'Dashboard',  icon: '🏠', fn: 'showDashboard', perm: 'dashboard.view' },
+  { id: 'cars',       label: 'Vehicles',   icon: '🚗', fn: 'showCars', perm: 'cars.view' },
+  { id: 'bookings',   label: 'Bookings',   icon: '📋', fn: 'showBookings', perm: 'bookings.view' },
+  { id: 'pickups',    label: 'Pickups',    icon: '🔑', fn: 'showOperations', perm: 'pickups.view' },
+  { id: 'locations',  label: 'Locations',  icon: '📍', fn: 'showLocations', perm: 'locations.view' },
+  { id: 'customers',  label: 'Customers',  icon: '👥', fn: 'showCustomers', perm: 'customers.view' },
   { section: 'Reports & Marketing' },
-  { id: 'analytics',  label: 'Analytics',  icon: '📈', fn: 'showAnalytics' },
-  { id: 'reminders',  label: 'Payment reminders', icon: '💸', fn: 'showPaymentReminders' },
-  { id: 'promos',     label: 'Promo codes', icon: '🎟️', fn: 'showPromos' },
-  { id: 'push',       label: 'Push notifications', icon: '📣', fn: 'showNotifications' },
+  { id: 'analytics',  label: 'Analytics',  icon: '📈', fn: 'showAnalytics', perm: 'reports.view' },
+  { id: 'reminders',  label: 'Payment reminders', icon: '💸', fn: 'showPaymentReminders', perm: 'settings.view' },
+  { id: 'promos',     label: 'Promo codes', icon: '🎟️', fn: 'showPromos', perm: 'promo.view' },
+  { id: 'push',       label: 'Push notifications', icon: '📣', fn: 'showNotifications', perm: 'notifications.send' },
   { section: 'Content' },
-  { id: 'terms',      label: 'Terms & Conditions', icon: '📜', fn: 'showTerms' },
-  { id: 'privacy',    label: 'Privacy Policy', icon: '🔒', fn: 'showPrivacy' },
+  { id: 'terms',      label: 'Terms & Conditions', icon: '📜', fn: 'showTerms', perm: 'settings.view' },
+  { id: 'privacy',    label: 'Privacy Policy', icon: '🔒', fn: 'showPrivacy', perm: 'settings.view' },
   { section: 'Settings' },
   { id: 'password',   label: 'Change password', icon: '🔑', fn: 'showChangePassword' },
-  { id: 'migration',  label: 'Import / Export', icon: '📦', fn: 'showMigration' },
+  { id: 'migration',  label: 'Import / Export', icon: '📦', fn: 'showMigration', perm: 'admins.manage' },
   { id: 'backup',     label: 'Backup & Restore DB', icon: '💾', fn: 'showDbBackup', superOnly: true },
   { section: 'Security', superOrAudit: true },
   { id: 'admins',     label: 'Admin users', icon: '👮', fn: 'showAdminUsers', superOnly: true },
   { id: 'audit',      label: 'Audit log',   icon: '📜', fn: 'showAuditLog', auditOrSuper: true },
 ];
+
+// Helper — does the current admin have a given permission?
+function adminHasPerm(p) {
+  if (!p) return true; // unrestricted item
+  if (!currentAdmin) return false;
+  // Super admins implicitly have everything
+  if (currentAdmin.is_super_admin) return true;
+  const list = currentAdmin.permissions || [];
+  return list.indexOf(p) !== -1;
+}
 
 function buildSidebar() {
   const sb = document.getElementById('app-sidebar');
@@ -379,6 +389,15 @@ function buildSidebar() {
   const isSuper = !!(currentAdmin && currentAdmin.is_super_admin);
   const hasAudit = !!(currentAdmin && (currentAdmin.permissions || []).includes('audit.view'));
 
+  // Pre-compute which items are visible for the current admin.
+  const visible = SIDEBAR_ITEMS.map(item => {
+    if (item.section) return true; // sections decided per-render below
+    if (item.superOnly && !isSuper) return false;
+    if (item.auditOrSuper && !(isSuper || hasAudit)) return false;
+    if (item.perm && !adminHasPerm(item.perm)) return false;
+    return true;
+  });
+
   let html = `
     <div class="sb-brand">
       <img src="/api/assets/logo.png" alt="DAMS"/>
@@ -386,14 +405,21 @@ function buildSidebar() {
     </div>
     <div style="flex:1; overflow-y:auto; padding: 0 2px;">`;
 
-  for (const item of SIDEBAR_ITEMS) {
+  for (let i = 0; i < SIDEBAR_ITEMS.length; i++) {
+    const item = SIDEBAR_ITEMS[i];
     if (item.section) {
       if (item.superOrAudit && !(isSuper || hasAudit)) continue;
+      // Skip section header if EVERY item below it (until next section) is hidden
+      let anyVisible = false;
+      for (let j = i + 1; j < SIDEBAR_ITEMS.length; j++) {
+        if (SIDEBAR_ITEMS[j].section) break;
+        if (visible[j]) { anyVisible = true; break; }
+      }
+      if (!anyVisible) continue;
       html += `<div class="sb-section">${item.section}</div>`;
       continue;
     }
-    if (item.superOnly && !isSuper) continue;
-    if (item.auditOrSuper && !(isSuper || hasAudit)) continue;
+    if (!visible[i]) continue;
     const active = (activePage === item.id) ? 'active' : '';
     html += `<div class="sb-item ${active}" data-id="${item.id}" onclick="navigate('${item.id}','${item.fn}')">
       <span class="sb-icon">${item.icon}</span><span>${item.label}</span>

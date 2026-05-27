@@ -92,7 +92,7 @@ export default function ForgotPasswordScreen() {
           </View>
 
           <View style={styles.header}>
-            <BrandLogo size="large" />
+            <BrandLogo size="large" variant="light" />
             <Text style={styles.title}>{step === 'request' ? 'Forgot password?' : 'Enter reset code'}</Text>
             <Text style={styles.subtitle}>
               {step === 'request'

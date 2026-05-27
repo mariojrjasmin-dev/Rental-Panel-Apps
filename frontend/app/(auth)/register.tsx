@@ -55,7 +55,7 @@ export default function RegisterScreen() {
       <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <BrandLogo size="large" />
+            <BrandLogo size="large" variant="light" />
             <Text style={styles.subtitle}>Create your account</Text>
           </View>
 

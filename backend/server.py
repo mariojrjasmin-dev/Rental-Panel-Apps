@@ -1374,9 +1374,7 @@ async def get_car(car_id: str):
 
 @api_router.post("/cars")
 async def create_car(car: CarCreate, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "cars.create")
     car_dict = car.dict()
     # ---- Multi-location backward-compat layer ----
     # If admin sent plural lists, mirror the first one back to the singular
@@ -1406,9 +1404,7 @@ async def create_car(car: CarCreate, request: Request):
 
 @api_router.put("/cars/{car_id}")
 async def update_car(car_id: str, car: CarUpdate, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "cars.edit")
     update_data = {k: v for k, v in car.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -1694,9 +1690,7 @@ async def backfill_booking_taxes(request: Request):
         prevent unbounded DB scans / lockups in production.
       * Batched ``bulk_write`` updates instead of N round-trips.
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "admins.manage")
 
     # Safety cap — prevents accidental multi-hour scans on large collections.
     try:
@@ -1783,9 +1777,7 @@ async def backfill_booking_taxes(request: Request):
 @api_router.get("/admin/bookings")
 async def admin_list_bookings(request: Request, status: Optional[str] = None, q: Optional[str] = None):
     """List all bookings for admin with optional status filter and customer search."""
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "bookings.view")
     query = {}
     if status and status != "all":
         query["status"] = status
@@ -2479,9 +2471,7 @@ async def stripe_webhook(request: Request):
 
 @api_router.get("/admin/stats")
 async def get_admin_stats(request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "dashboard.view")
     
     total_cars = await db.cars.count_documents({})
     total_bookings = await db.bookings.count_documents({})
@@ -2523,9 +2513,7 @@ async def admin_send_notification(req: AdminBroadcastRequest, request: Request):
       - "admins"     → admin users with push tokens
       - "user:<id>"  → a single specific user
     """
-    admin = await get_authenticated_user(request)
-    if admin.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    admin = await require_permission(request, "notifications.send")
 
     title = (req.title or "").strip()
     body = (req.body or "").strip()
@@ -2579,9 +2567,7 @@ async def admin_audience_stats(request: Request):
     """Return how many users have push tokens, segmented by role.
     Useful so the admin sees how many devices a broadcast will reach.
     """
-    admin = await get_authenticated_user(request)
-    if admin.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    admin = await require_permission(request, "notifications.send")
     base = {"push_tokens": {"$exists": True, "$ne": []}}
     total = await db.users.count_documents(base)
     customers = await db.users.count_documents({**base, "role": {"$ne": "admin"}})
@@ -2602,9 +2588,7 @@ class TestEmailRequest(BaseModel):
 @api_router.post("/admin/email/test")
 async def admin_test_email(req: TestEmailRequest, request: Request):
     """Send a test email to verify SMTP credentials are working. Admin-only."""
-    admin = await get_authenticated_user(request)
-    if admin.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    admin = await require_permission(request, "settings.manage")
     if not req.to or "@" not in req.to:
         raise HTTPException(status_code=400, detail="Invalid recipient email")
     html = _email_template(
@@ -2655,9 +2639,7 @@ async def get_rental_terms():
 @api_router.put("/admin/settings/rental-terms")
 async def update_rental_terms(body: RentalTermsUpdate, request: Request):
     """Admin: update the rental terms text. Stored in settings collection (singleton)."""
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "settings.manage")
     text = (body.terms or "").strip()
     if not text or len(text) < 10:
         raise HTTPException(status_code=400, detail="Terms text is too short")
@@ -2696,9 +2678,7 @@ async def get_privacy_policy():
 @api_router.put("/admin/settings/privacy-policy")
 async def update_privacy_policy(body: PrivacyPolicyUpdate, request: Request):
     """Admin: update the privacy policy text. Stored in settings collection (singleton)."""
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "settings.manage")
     text = (body.text or "").strip()
     if not text or len(text) < 10:
         raise HTTPException(status_code=400, detail="Privacy policy text is too short (min 10 chars)")
@@ -2728,9 +2708,7 @@ async def get_admin_analytics(request: Request):
       - status_breakdown: {status: count}
       - payment_breakdown: {payment_status: count}
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "reports.view")
 
     now = datetime.now(timezone.utc)
     # First day of the current month (UTC)
@@ -2987,9 +2965,7 @@ async def get_location(location_id: str):
 
 @api_router.post("/locations")
 async def create_location(loc: LocationCreate, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "locations.edit")
     loc_dict = loc.dict()
     loc_dict["created_at"] = datetime.now(timezone.utc)
     result = await db.locations.insert_one(loc_dict)
@@ -2999,9 +2975,7 @@ async def create_location(loc: LocationCreate, request: Request):
 
 @api_router.put("/locations/{location_id}")
 async def update_location(location_id: str, loc: LocationUpdate, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "locations.edit")
     update_data = {k: v for k, v in loc.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -3013,9 +2987,7 @@ async def update_location(location_id: str, loc: LocationUpdate, request: Reques
 
 @api_router.delete("/locations/{location_id}")
 async def delete_location(location_id: str, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "locations.edit")
     result = await db.locations.delete_one({"_id": ObjectId(location_id)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Location not found")
@@ -3189,9 +3161,7 @@ async def export_data(request: Request):
     Car images stored as file URLs are embedded as base64 data URLs so they
     travel with the export and don't break on the destination environment.
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "reports.export")
     
     cars = await db.cars.find({}, {"_id": 0, "created_at": 0}).to_list(500)
     locations_data = await db.locations.find({}, {"_id": 0, "created_at": 0}).to_list(500)
@@ -3210,9 +3180,7 @@ async def migrate_images(request: Request):
     (/api/uploads/xxx.jpg) into embedded base64 data URLs stored in MongoDB.
     This makes images deploy-safe and portable across environments.
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "admins.manage")
     
     converted = 0
     failed = 0
@@ -3247,9 +3215,7 @@ async def migrate_images(request: Request):
 @api_router.post("/admin/import")
 async def import_data(request: Request):
     """Import cars and locations from another environment. Replaces existing data."""
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "admins.manage")
     
     body = await request.json()
     imported_cars = 0
@@ -3346,9 +3312,7 @@ async def db_backup(request: Request, format: str = "json"):
       - format=json (default) → single .json file
       - format=zip            → .zip with one .json per collection
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Super-admin only")
+    user = await require_permission(request, "admins.manage")
 
     data = await _collect_backup_data()
     counts = {k: len(v) for k, v in data.items()}
@@ -3407,9 +3371,7 @@ async def db_restore(request: Request, file: UploadFile = File(...), wipe_first:
       - wipe_first  : if true, each collection is DROPPED before inserting (true replace).
                       if false, documents are upserted by _id (safer; merges with existing data).
     """
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Super-admin only")
+    user = await require_permission(request, "admins.manage")
 
     raw = await file.read()
     if not raw:
@@ -3913,25 +3875,19 @@ class PaymentReminderConfig(BaseModel):
 
 @api_router.get("/admin/payment-reminders/config")
 async def admin_get_payment_reminders_config(request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "settings.view")
     return {"days": await get_payment_reminder_days(), "cooldown_hours": PAYMENT_REMINDER_COOLDOWN_HOURS}
 
 @api_router.put("/admin/payment-reminders/config")
 async def admin_set_payment_reminders_config(cfg: PaymentReminderConfig, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "settings.manage")
     days = max(0, int(cfg.days))
     await db.settings.update_one({"key": "payment_reminder_days"}, {"$set": {"key": "payment_reminder_days", "value": days, "updated_at": datetime.now(timezone.utc)}}, upsert=True)
     return {"ok": True, "days": days, "note": "0 disables automatic reminders entirely."}
 
 @api_router.post("/admin/payment-reminders/run-now")
 async def admin_run_payment_reminders(request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "settings.manage")
     return await send_payment_reminders_once()
 
 
@@ -3940,18 +3896,14 @@ async def admin_run_payment_reminders(request: Request):
 # ==================== PROMO CODE ENDPOINTS ====================
 @api_router.get("/admin/promo-codes")
 async def admin_list_promo_codes(request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "promo.view")
     rows = await db.promo_codes.find({}).sort("created_at", -1).to_list(500)
     return [_serialize_promo(r) for r in rows]
 
 
 @api_router.post("/admin/promo-codes")
 async def admin_create_promo_code(body: PromoCodeCreate, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "promo.manage")
     code = (body.code or "").strip().upper()
     if not code or len(code) < 2:
         raise HTTPException(status_code=400, detail="Code must be at least 2 characters")
@@ -3981,9 +3933,7 @@ async def admin_create_promo_code(body: PromoCodeCreate, request: Request):
 
 @api_router.put("/admin/promo-codes/{promo_id}")
 async def admin_update_promo_code(promo_id: str, body: PromoCodeUpdate, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "promo.manage")
     if not ObjectId.is_valid(promo_id):
         raise HTTPException(status_code=400, detail="Invalid promo id")
     update_data: Dict = {k: v for k, v in body.model_dump(exclude_none=True).items()}
@@ -4004,9 +3954,7 @@ async def admin_update_promo_code(promo_id: str, body: PromoCodeUpdate, request:
 
 @api_router.delete("/admin/promo-codes/{promo_id}")
 async def admin_delete_promo_code(promo_id: str, request: Request):
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "promo.manage")
     if not ObjectId.is_valid(promo_id):
         raise HTTPException(status_code=400, detail="Invalid promo id")
     res = await db.promo_codes.delete_one({"_id": ObjectId(promo_id)})
@@ -4154,9 +4102,7 @@ app.include_router(api_router)
 async def admin_list_customers(request: Request, q: Optional[str] = None, role: Optional[str] = None, page: int = 1, limit: int = 50):
     """List all registered customers/users for the admin panel.
     Supports search by name/email/phone (case-insensitive), optional role filter, and pagination."""
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "customers.view")
 
     page = max(1, int(page or 1))
     limit = max(1, min(200, int(limit or 50)))
@@ -4206,9 +4152,7 @@ async def admin_list_customers(request: Request, q: Optional[str] = None, role: 
 @app.get("/api/admin/customers/{customer_id}")
 async def admin_customer_detail(customer_id: str, request: Request):
     """Full profile + booking history of a single customer."""
-    user = await get_authenticated_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = await require_permission(request, "customers.view")
     try:
         oid = ObjectId(customer_id)
     except Exception:
