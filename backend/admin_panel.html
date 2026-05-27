@@ -311,6 +311,139 @@ html[data-theme="dark"] .badge-blue { background: rgba(59,130,246,0.18); color: 
 
 /* Old dropdown CSS — kept for any legacy use, but global nav is now in sidebar */
 .nav-btn, .nav-dd, .nav-divider, .nav-dd-menu, .nav-dd-item, .nav-dd-sep, .nav-dd-label { display: none; }
+
+/* ==================== POLISHED UTILITIES (Phase 2) ==================== */
+/* Typography */
+.t-muted { color: var(--text-muted) !important; }
+.t-subtle { color: var(--text-subtle) !important; }
+.t-strong { color: var(--text) !important; font-weight: 800; }
+.t-mono { font-variant-numeric: tabular-nums; }
+.t-uppercase { text-transform: uppercase; letter-spacing: 0.5px; }
+.t-eyebrow { font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; }
+.t-total { color: var(--brand); font-weight: 900; }
+.t-link { color: var(--info); text-decoration: none; }
+.t-link:hover { text-decoration: underline; }
+
+/* Layout helpers */
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.divider { border-top: 1px solid var(--border); margin: 16px 0; }
+.divider-soft { border-top: 1px solid var(--border); }
+
+/* Empty state */
+.empty-state {
+  text-align: center; padding: 48px 24px; color: var(--text-muted);
+  background: var(--bg-elevated); border: 1px dashed var(--border); border-radius: var(--radius-lg);
+}
+.empty-state .icon { font-size: 32px; margin-bottom: 8px; opacity: 0.6; }
+.empty-state .title { font-weight: 800; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+.empty-state .sub { font-size: 13px; color: var(--text-muted); }
+
+/* Stat tiles (for in-modal mini stats) */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.stat-tile {
+  border-radius: var(--radius); padding: 14px; text-align: center;
+  background: var(--bg-subtle); border: 1px solid var(--border);
+}
+.stat-tile .stat-label { font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-tile .stat-value { font-size: 22px; font-weight: 900; color: var(--text); margin-top: 4px; letter-spacing: -0.3px; }
+.stat-tile.tile-blue { background: rgba(59,130,246,0.10); border-color: rgba(59,130,246,0.18); }
+.stat-tile.tile-blue .stat-value { color: var(--info); }
+.stat-tile.tile-green { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.18); }
+.stat-tile.tile-green .stat-value { color: var(--success); }
+.stat-tile.tile-amber { background: rgba(245,158,11,0.10); border-color: rgba(245,158,11,0.18); }
+.stat-tile.tile-amber .stat-value { color: var(--warning); }
+html[data-theme="dark"] .stat-tile.tile-blue { background: rgba(59,130,246,0.16); }
+html[data-theme="dark"] .stat-tile.tile-green { background: rgba(16,185,129,0.16); }
+html[data-theme="dark"] .stat-tile.tile-amber { background: rgba(245,158,11,0.16); }
+
+/* Info / warning / success callouts */
+.callout {
+  border-radius: var(--radius); padding: 12px 14px; border: 1px solid var(--border);
+  background: var(--bg-subtle); font-size: 13px; line-height: 1.5;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.callout .callout-icon { font-size: 18px; line-height: 1; }
+.callout-warning { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.28); color: #7a4500; }
+.callout-info { background: rgba(59,130,246,0.10); border-color: rgba(59,130,246,0.22); color: var(--info); }
+.callout-success { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.22); color: #065f46; }
+.callout-danger { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.22); color: #991b1b; }
+html[data-theme="dark"] .callout-warning { color: #fcd34d; }
+html[data-theme="dark"] .callout-success { color: #6ee7b7; }
+html[data-theme="dark"] .callout-danger { color: #fca5a5; }
+
+/* Polished card variants for list rows (e.g., bookings, history items) */
+.list-card {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  margin-bottom: 12px; overflow: hidden; box-shadow: var(--shadow-sm);
+  transition: box-shadow .15s ease, transform .15s ease;
+}
+.list-card:hover { box-shadow: var(--shadow-md); }
+.list-card .lc-head { display: flex; align-items: center; gap: 14px; padding: 14px; }
+.list-card .lc-foot {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; background: var(--bg-subtle); border-top: 1px solid var(--border);
+}
+.list-card .lc-img { width: 80px; height: 56px; border-radius: 10px; object-fit: cover; background: var(--bg-hover); flex: 0 0 80px; }
+.list-card .lc-title { font-size: 15px; font-weight: 700; color: var(--text); margin: 0; }
+.list-card .lc-sub { font-size: 12.5px; color: var(--text-muted); margin: 2px 0 0; }
+.list-card .lc-hint { font-size: 11.5px; color: var(--text-subtle); margin-top: 2px; }
+.list-card .lc-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Inline select used in row-actions (smaller, consistent with btn-sm) */
+.select-inline {
+  width: auto; min-height: 34px; padding: 7px 28px 7px 12px; font-size: 12.5px; margin: 0;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); color: var(--text);
+  cursor: pointer;
+}
+.select-inline:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+
+/* Modal header (replaces ad-hoc inline modal heads) */
+.modal-head {
+  position: sticky; top: 0; z-index: 1; background: var(--bg-elevated); border-bottom: 1px solid var(--border);
+  padding: 18px 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+}
+.modal-head .mh-title { font-size: 20px; font-weight: 900; color: var(--text); letter-spacing: -0.3px; }
+.modal-head .mh-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.modal-close {
+  background: var(--bg-subtle); border: 1px solid var(--border); width: 36px; height: 36px;
+  border-radius: 18px; cursor: pointer; font-size: 16px; color: var(--text);
+  display: flex; align-items: center; justify-content: center; flex: 0 0 36px;
+}
+.modal-close:hover { background: var(--bg-hover); }
+.modal-body { padding: 20px 24px; }
+.modal-shell {
+  background: var(--bg-elevated); border-radius: var(--radius-xl); width: 100%; max-width: 680px;
+  max-height: 92vh; overflow-y: auto; border: 1px solid var(--border); box-shadow: var(--shadow-lg);
+}
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15,17,21,0.55); backdrop-filter: blur(4px);
+  z-index: 1000; display: flex; align-items: flex-start; justify-content: center;
+  padding: 24px 16px; overflow-y: auto; animation: modalFade .18s ease;
+}
+
+/* Status pills (smaller, neutral) — alongside .badge for finer-grained states */
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 50px; font-size: 10.5px; font-weight: 800;
+  letter-spacing: 0.4px; text-transform: uppercase; white-space: nowrap;
+}
+.pill-green  { background: rgba(16,185,129,0.16); color: #047857; }
+.pill-amber  { background: rgba(245,158,11,0.18); color: #92400e; }
+.pill-red    { background: rgba(239,68,68,0.16);  color: #991b1b; }
+.pill-blue   { background: rgba(59,130,246,0.16); color: #1e3a8a; }
+.pill-purple { background: rgba(139,92,246,0.16); color: #5b21b6; }
+.pill-gray   { background: var(--bg-hover); color: var(--text-muted); }
+html[data-theme="dark"] .pill-green  { color: #6ee7b7; }
+html[data-theme="dark"] .pill-amber  { color: #fcd34d; }
+html[data-theme="dark"] .pill-red    { color: #fca5a5; }
+html[data-theme="dark"] .pill-blue   { color: #93c5fd; }
+html[data-theme="dark"] .pill-purple { color: #c4b5fd; }
+
+/* Top page-search input — used in customers/bookings */
+.page-search { max-width: 320px; margin: 0; }
+
 </style>
 </head>
 <body>
@@ -2511,54 +2644,86 @@ async function viewCustomer(id) {
   try { d = await api('/admin/customers/' + id); } catch(e) { alert(e.message); return; }
   const root = document.getElementById('modal-root');
   if (!root) return;
+  const name = (d.name || '(no name)').replace(/</g, '&lt;');
+  const email = (d.email || '').replace(/</g, '&lt;');
+  const emailAttr = (d.email || '').replace(/"/g, '&quot;');
+  const phoneAttr = (d.phone || '').replace(/"/g, '&quot;');
+  const phone = (d.phone || '').replace(/</g, '&lt;');
+  const isAdmin = d.role === 'admin';
+  const adminPill = isAdmin ? ' <span class="pill pill-red" style="vertical-align:middle">ADMIN</span>' : '';
+  const accountTypeLine = isAdmin
+    ? '<span class="pill pill-red">Admin / Staff</span>'
+    : '<span class="t-strong">Customer</span>';
+  const passwordResetBlock = isAdmin ? '' : `
+    <div class="callout callout-warning" style="margin-bottom:18px;justify-content:space-between;align-items:center">
+      <div style="flex:1;min-width:200px">
+        <div class="t-eyebrow" style="margin-bottom:2px;color:inherit">🔑 Reset customer password</div>
+        <div style="font-size:12.5px;opacity:0.85">The customer's current password will be replaced immediately. Share the new one with them securely.</div>
+      </div>
+      <button class="btn btn-sm" style="background:var(--warning);color:#fff;border-color:var(--warning);font-weight:800" onclick="adminResetCustomerPassword('${d.id}','${(d.email || '').replace(/'/g, "\\'")}','${(d.name || '').replace(/'/g, "\\'")}')">Reset password</button>
+    </div>`;
+  const bookingsCount = d.bookings_count || 0;
+  const bookings = d.bookings || [];
+  const bookingsHtml = bookings.length === 0
+    ? `<div class="empty-state"><div class="icon">📋</div><div class="title">No bookings yet</div><div class="sub">This customer hasn't made any reservations.</div></div>`
+    : `<div class="col" style="gap:8px">${bookings.map(b => {
+        const bStatus = (b.status || 'pending').toLowerCase();
+        const bPay = (b.payment_status || 'unpaid').toLowerCase();
+        const sClass = bStatus === 'confirmed' ? 'pill-green' : bStatus === 'cancelled' ? 'pill-red' : bStatus === 'completed' ? 'pill-purple' : bStatus === 'active' ? 'pill-green' : 'pill-amber';
+        const pClass = bPay === 'paid' ? 'pill-green' : bPay === 'refunded' ? 'pill-gray' : 'pill-amber';
+        const car = ((b.car_brand || '') + ' ' + (b.car_name || '')).trim().replace(/</g, '&lt;') || '(deleted car)';
+        const pickupTxt = b.pickup_date ? new Date(b.pickup_date).toLocaleDateString() : '?';
+        const dropoffTxt = b.dropoff_date ? new Date(b.dropoff_date).toLocaleDateString() : '?';
+        return `
+          <div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--bg-elevated)">
+            <div class="col" style="flex:1;gap:2px">
+              <div class="t-strong" style="font-size:14px">${car}</div>
+              <div class="t-muted" style="font-size:12px">${pickupTxt} → ${dropoffTxt} · ${(b.payment_method || 'cash').toUpperCase()}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="t-strong t-mono" style="font-size:14px">$${(b.total_price || 0).toFixed(2)}</div>
+              <div class="row" style="gap:4px;justify-content:flex-end;margin-top:4px">
+                <span class="pill ${sClass}">${(b.status || 'pending').toUpperCase()}</span>
+                <span class="pill ${pClass}">${(b.payment_status || 'unpaid').toUpperCase()}</span>
+              </div>
+            </div>
+          </div>`;
+      }).join('')}</div>`;
   root.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)document.getElementById('modal-root').innerHTML=''">
-      <div style="background:#fff;border-radius:18px;width:100%;max-width:680px;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3)">
-        <div style="padding:20px 24px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;position:sticky;top:0;background:#fff;z-index:1">
-          <div>
-            <h2 style="margin:0;font-size:22px;font-weight:900;color:#0a0a0a">${(d.name||'(no name)').replace(/</g,'&lt;')}${d.role==='admin'?' <span style="background:#FFF0F0;color:#FF3B30;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:800;margin-left:6px;vertical-align:middle">ADMIN</span>':''}</h2>
-            <div style="color:#666;margin-top:4px;font-size:13px"><a href="mailto:${(d.email||'').replace(/"/g,'&quot;')}" style="color:#007aff;text-decoration:none">${(d.email||'').replace(/</g,'&lt;')}</a>${d.phone?' · <a href="tel:'+(d.phone||'').replace(/"/g,'&quot;')+'" style="color:#007aff;text-decoration:none">'+d.phone.replace(/</g,'&lt;')+'</a>':''}</div>
+    <div class="modal-backdrop" onclick="if(event.target===this)document.getElementById('modal-root').innerHTML=''">
+      <div class="modal-shell">
+        <div class="modal-head">
+          <div class="col" style="flex:1;gap:4px">
+            <div class="mh-title">${name}${adminPill}</div>
+            <div class="row" style="gap:6px;font-size:13px">
+              <a href="mailto:${emailAttr}" class="t-link">${email}</a>
+              ${d.phone ? `<span class="t-subtle">·</span><a href="tel:${phoneAttr}" class="t-link">${phone}</a>` : ''}
+            </div>
           </div>
-          <button onclick="document.getElementById('modal-root').innerHTML=''" style="background:#f5f5f5;border:none;width:36px;height:36px;border-radius:18px;cursor:pointer;font-size:18px">✕</button>
+          <button class="modal-close" onclick="document.getElementById('modal-root').innerHTML=''">✕</button>
         </div>
-        <div style="padding:24px">
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px">
-            <div style="background:#f0f8ff;border-radius:12px;padding:14px;text-align:center"><div style="font-size:11px;color:#666;font-weight:700;letter-spacing:0.5px;text-transform:uppercase">Bookings</div><div style="font-size:24px;font-weight:900;color:#007aff;margin-top:4px">${d.bookings_count||0}</div></div>
-            <div style="background:#e6f9ed;border-radius:12px;padding:14px;text-align:center"><div style="font-size:11px;color:#666;font-weight:700;letter-spacing:0.5px;text-transform:uppercase">Total Spent</div><div style="font-size:24px;font-weight:900;color:#0a5d2b;margin-top:4px">$${(d.total_spent||0).toFixed(2)}</div></div>
-            <div style="background:#fafafa;border-radius:12px;padding:14px;text-align:center"><div style="font-size:11px;color:#666;font-weight:700;letter-spacing:0.5px;text-transform:uppercase">Joined</div><div style="font-size:15px;font-weight:800;color:#0a0a0a;margin-top:8px">${d.created_at?new Date(d.created_at).toLocaleDateString():'—'}</div></div>
-          </div>
-          <div style="background:#fafafa;border-radius:12px;padding:16px;font-size:13px;color:#555;line-height:1.7;margin-bottom:20px">
-            <div><strong>Terms accepted:</strong> ${d.terms_accepted_at?new Date(d.terms_accepted_at).toLocaleString():'—'}</div>
-            <div><strong>Account type:</strong> ${d.role==='admin' ? '<span style="color:#FF3B30;font-weight:800">Admin / Staff</span>' : 'Customer'}</div>
-          </div>
-          ${d.role==='admin' ? '' : `
-          <div style="background:#fff5e6;border:1px solid #ffd48a;border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-            <div style="flex:1;min-width:200px">
-              <div style="font-weight:800;color:#a05a00;font-size:13px;margin-bottom:2px">🔑 Reset customer password</div>
-              <div style="font-size:12px;color:#7a4500">The customer's current password will be replaced immediately. Share the new password with them securely.</div>
+        <div class="modal-body">
+          <div class="stat-grid" style="margin-bottom:18px">
+            <div class="stat-tile tile-blue">
+              <div class="stat-label">Bookings</div>
+              <div class="stat-value">${bookingsCount}</div>
             </div>
-            <button class="btn btn-sm" style="background:#ff9500;color:#fff;font-weight:800" onclick="adminResetCustomerPassword('${d.id}','${(d.email||'').replace(/'/g,"\\'")}','${(d.name||'').replace(/'/g,"\\'")}')">Reset password</button>
-          </div>`}
-          <h3 style="font-size:14px;font-weight:800;color:#0a0a0a;margin:0 0 12px;text-transform:uppercase;letter-spacing:0.5px">Booking history (${d.bookings_count||0})</h3>
-          ${(d.bookings||[]).length===0 ? '<div style="text-align:center;color:#999;padding:24px;background:#fafafa;border-radius:12px">No bookings yet.</div>' : `
-            <div style="display:flex;flex-direction:column;gap:8px">
-              ${(d.bookings||[]).map(b => `
-                <div style="border:1px solid #e5e5e5;border-radius:12px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px">
-                  <div style="flex:1;min-width:0">
-                    <div style="font-weight:800;color:#0a0a0a;font-size:14px">${((b.car_brand||'') + ' ' + (b.car_name||'')).trim().replace(/</g,'&lt;')||'(deleted car)'}</div>
-                    <div style="color:#666;font-size:12px;margin-top:2px">${b.pickup_date?new Date(b.pickup_date).toLocaleDateString():'?'} → ${b.dropoff_date?new Date(b.dropoff_date).toLocaleDateString():'?'} · ${b.payment_method||'cash'}</div>
-                  </div>
-                  <div style="text-align:right">
-                    <div style="font-weight:900;color:#0a0a0a;font-size:14px">$${(b.total_price||0).toFixed(2)}</div>
-                    <div style="display:flex;gap:4px;justify-content:flex-end;margin-top:3px">
-                      <span style="font-size:10px;padding:2px 6px;border-radius:6px;font-weight:800;background:${b.status==='confirmed'?'#e6f9ed':b.status==='cancelled'?'#FFF0F0':'#fff5e6'};color:${b.status==='confirmed'?'#0a5d2b':b.status==='cancelled'?'#FF3B30':'#a05a00'}">${(b.status||'pending').toUpperCase()}</span>
-                      <span style="font-size:10px;padding:2px 6px;border-radius:6px;font-weight:800;background:${b.payment_status==='paid'?'#e6f9ed':'#FFF0F0'};color:${b.payment_status==='paid'?'#0a5d2b':'#FF3B30'}">${(b.payment_status||'unpaid').toUpperCase()}</span>
-                    </div>
-                  </div>
-                </div>
-              `).join('')}
+            <div class="stat-tile tile-green">
+              <div class="stat-label">Total Spent</div>
+              <div class="stat-value t-mono">$${(d.total_spent || 0).toFixed(2)}</div>
             </div>
-          `}
+            <div class="stat-tile">
+              <div class="stat-label">Joined</div>
+              <div class="stat-value" style="font-size:15px;margin-top:8px">${d.created_at ? new Date(d.created_at).toLocaleDateString() : '—'}</div>
+            </div>
+          </div>
+          <div class="callout callout-info" style="margin-bottom:18px;flex-direction:column;align-items:stretch;gap:6px;font-size:13px;color:var(--text)">
+            <div><strong class="t-strong">Terms accepted:</strong> <span class="t-muted">${d.terms_accepted_at ? new Date(d.terms_accepted_at).toLocaleString() : '—'}</span></div>
+            <div><strong class="t-strong">Account type:</strong> ${accountTypeLine}</div>
+          </div>
+          ${passwordResetBlock}
+          <div class="t-eyebrow" style="margin-bottom:10px">Booking history (${bookingsCount})</div>
+          ${bookingsHtml}
         </div>
       </div>
     </div>
@@ -2665,81 +2830,81 @@ async function showBookings() {
       {k:'cancelled', label:'Cancelled', color:'#ff3b30'}
     ];
     render(`
-      <div class="header">
-        <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
-          <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+      <div class="page-title">
+        <div>
+          <h2>Bookings (${bookings.length})</h2>
+          <div class="pt-sub">Manage reservations, status changes, cash payments and receipts.</div>
         </div>
+        <input class="input page-search" id="bk-search" placeholder="🔎 Search by customer / car…" value="${(bookingsSearch || '').replace(/"/g, '&quot;')}" onkeydown="if(event.key==='Enter'){bookingsSearch=this.value;showBookings()}">
       </div>
-      <div class="container">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <h2 style="font-size:20px;font-weight:800">Bookings (${bookings.length})</h2>
-          <input class="input" id="bk-search" placeholder="🔎 Search by customer / car..." value="${bookingsSearch||''}" style="max-width:280px;margin:0" onkeydown="if(event.key==='Enter'){bookingsSearch=this.value;showBookings()}">
-        </div>
-        <div class="tabs" style="flex-wrap:wrap">
-          ${statuses.map(s => `<span class="tab ${bookingsFilter===s.k?'active':''}" onclick="bookingsFilter='${s.k}';showBookings()">${s.label}</span>`).join('')}
-        </div>
-        ${bookings.length === 0 ? '<p style="color:#999;text-align:center;padding:40px">No bookings found.</p>' : bookings.map(b => bookingCard(b)).join('')}
+      <div class="tabs" style="flex-wrap:wrap">
+        ${statuses.map(s => `<span class="tab ${bookingsFilter===s.k?'active':''}" onclick="bookingsFilter='${s.k}';showBookings()">${s.label}</span>`).join('')}
       </div>
+      ${bookings.length === 0
+        ? `<div class="empty-state"><div class="icon">📋</div><div class="title">No bookings yet</div><div class="sub">When customers book a vehicle, their reservations will appear here.</div></div>`
+        : bookings.map(b => bookingCard(b)).join('')}
       <div id="modal-root"></div>
     `);
   } catch(e) { alert('Failed: '+e.message); }
 }
 
 function bookingCard(b) {
-  const statusColors = {
-    pending_payment:'#ff9500', pending:'#ff9500',
-    confirmed:'#007aff', active:'#34c759',
-    completed:'#5856d6', cancelled:'#ff3b30'
+  const statusPills = {
+    pending_payment: 'pill-amber', pending: 'pill-amber',
+    confirmed: 'pill-blue', active: 'pill-green',
+    completed: 'pill-purple', cancelled: 'pill-red'
   };
-  const payColors = {
-    paid:'#34c759', succeeded:'#34c759', cash_paid:'#34c759',
-    pending:'#ff9500', unpaid:'#ff9500',
-    refunded:'#8e8e93', failed:'#ff3b30'
+  const payPills = {
+    paid: 'pill-green', succeeded: 'pill-green', cash_paid: 'pill-green',
+    pending: 'pill-amber', unpaid: 'pill-amber',
+    refunded: 'pill-gray', failed: 'pill-red'
   };
   const payLabels = {
-    paid:'PAID', succeeded:'PAID', cash_paid:'PAID',
-    pending:'UNPAID', unpaid:'UNPAID',
-    refunded:'REFUNDED', failed:'FAILED'
+    paid: 'PAID', succeeded: 'PAID', cash_paid: 'PAID',
+    pending: 'UNPAID', unpaid: 'UNPAID',
+    refunded: 'REFUNDED', failed: 'FAILED'
   };
-  const color = statusColors[b.status] || '#666';
-  const statusLabel = (b.status||'').replace(/_/g,' ').toUpperCase();
-  const payCol = payColors[b.payment_status] || '#999';
+  const statusClass = statusPills[b.status] || 'pill-gray';
+  const statusLabel = (b.status || '').replace(/_/g, ' ').toUpperCase();
+  const payClass = payPills[b.payment_status] || 'pill-gray';
   const payLab = payLabels[b.payment_status] || (b.payment_method === 'cash' ? 'CASH PENDING' : 'UNKNOWN');
-  const pickup = (b.pickup_date||'').substring(0,10);
-  const dropoff = (b.dropoff_date||'').substring(0,10);
+  const pickup = (b.pickup_date || '').substring(0, 10);
+  const dropoff = (b.dropoff_date || '').substring(0, 10);
   const created = b.created_at ? new Date(b.created_at).toLocaleDateString() : '';
-  return `<div class="card" style="flex-direction:column;align-items:stretch;gap:0;padding:0;overflow:hidden">
-    <div style="display:flex;align-items:center;gap:14px;padding:14px">
-      <img src="${b.car_image || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'}" style="width:80px;height:56px;border-radius:10px;object-fit:cover;background:#f5f5f5">
-      <div style="flex:1;min-width:0">
-        <h3 style="font-size:15px;font-weight:700;margin-bottom:2px">${b.car_name||'Car'}</h3>
-        <p style="font-size:12px;color:#666">${b.user_name||'Customer'} · ${b.user_email||''}</p>
-        <p style="font-size:11px;color:#999;margin-top:2px">${pickup} → ${dropoff} · ${b.days||0} days · ${created}</p>
+  const country = ((b.pickup_location || {}).country || '').toLowerCase();
+  const taxLab = (country.indexOf('dominican') !== -1 || country === 'rd' || country === 'do') ? 'ITBIS' : 'Tax';
+  return `<div class="list-card">
+    <div class="lc-head">
+      <img class="lc-img" src="${b.car_image || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'}" alt="">
+      <div class="col" style="flex:1">
+        <h3 class="lc-title">${b.car_name || 'Car'}</h3>
+        <p class="lc-sub">${b.user_name || 'Customer'} · ${b.user_email || ''}</p>
+        <p class="lc-hint">${pickup} → ${dropoff} · ${b.days || 0} days · ${created}</p>
       </div>
-      <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
-        <span style="background:${color}1a;color:${color};padding:4px 10px;border-radius:50px;font-size:10px;font-weight:800;white-space:nowrap">${statusLabel}</span>
-        <span style="background:${payCol}1a;color:${payCol};padding:4px 10px;border-radius:50px;font-size:10px;font-weight:800;white-space:nowrap">💳 ${payLab}</span>
+      <div class="col" style="align-items:flex-end;gap:4px;flex:0 0 auto">
+        <span class="pill ${statusClass}">${statusLabel}</span>
+        <span class="pill ${payClass}">💳 ${payLab}</span>
       </div>
     </div>
-    <div style="display:flex;border-top:1px solid #f0f0f0;background:#fafafa;padding:10px 14px;align-items:center;gap:8px;flex-wrap:wrap">
-      <div style="flex:1;min-width:200px;font-size:12px;color:#666">
-        Subtotal <strong style="color:#0a0a0a">$${(b.subtotal||0).toFixed(2)}</strong>
-        · Tax ${b.tax_rate||0}% <strong style="color:#0a0a0a">$${(b.tax_amount||0).toFixed(2)}</strong>
-        · <span style="color:#ff3b30;font-weight:800">Total $${(b.total_price||0).toFixed(2)}</span>
-        · ${(b.payment_method||'cash').toUpperCase()}
+    <div class="lc-foot">
+      <div style="flex:1;min-width:200px;font-size:12.5px" class="t-muted t-mono">
+        Subtotal <strong class="t-strong">$${(b.subtotal || 0).toFixed(2)}</strong>
+        · ${taxLab} ${b.tax_rate || 0}% <strong class="t-strong">$${(b.tax_amount || 0).toFixed(2)}</strong>
+        · <span class="t-total">Total $${(b.total_price || 0).toFixed(2)}</span>
+        · ${(b.payment_method || 'cash').toUpperCase()}
       </div>
-      <button class="btn btn-sm btn-blue" onclick="downloadReceipt('${b.id}')">📄 Receipt</button>
-      ${(b.payment_status !== 'paid' && (b.payment_method||'cash') === 'cash') ? `<button class="btn btn-sm" style="background:#34c759;color:#fff" onclick="markCashPaid('${b.id}')">💰 Mark Cash Paid</button>` : ''}
-      <select class="input" style="width:auto;padding:6px 10px;margin:0;font-size:12px" onchange="updateBookingStatus('${b.id}', this.value)">
-        <option value="">Change status...</option>
-        <option value="pending_payment">Pending Payment</option>
-        <option value="confirmed">Confirmed</option>
-        <option value="active">Active</option>
-        <option value="completed">Completed</option>
-        <option value="cancelled">Cancelled</option>
-      </select>
+      <div class="lc-actions">
+        <button class="btn btn-sm btn-blue" onclick="downloadReceipt('${b.id}')">📄 Receipt</button>
+        ${(b.payment_status !== 'paid' && (b.payment_method || 'cash') === 'cash') ? `<button class="btn btn-sm" style="background:var(--success);color:#fff;border-color:var(--success)" onclick="markCashPaid('${b.id}')">💰 Mark Cash Paid</button>` : ''}
+        <select class="select-inline" onchange="updateBookingStatus('${b.id}', this.value)">
+          <option value="">Change status…</option>
+          <option value="pending_payment">Pending Payment</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
     </div>
   </div>`;
 }
