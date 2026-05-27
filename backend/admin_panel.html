@@ -1,95 +1,466 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dams Car Rental - Admin</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;color:#0a0a0a}
-.header{background:#0a0a0a;color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
-.header h1{font-size:20px;font-weight:900;letter-spacing:-0.5px}
-.header span{color:#ff3b30;font-size:12px;font-weight:700;letter-spacing:4px}
-.brand-logo{height:42px;width:auto;max-width:200px;object-fit:contain;display:block}
-.login-logo{height:80px;width:auto;max-width:260px;object-fit:contain;display:block;margin:0 auto 8px}
-.btn{padding:10px 20px;border:none;border-radius:50px;cursor:pointer;font-weight:700;font-size:14px}
-.btn-red{background:#ff3b30;color:#fff}
-.btn-gray{background:#e5e5e5;color:#666}
-.btn-blue{background:#007aff;color:#fff}
-.btn-sm{padding:6px 14px;font-size:12px}
-.container{max-width:900px;margin:0 auto;padding:24px}
-.login-box{max-width:400px;margin:100px auto;background:#fff;border-radius:24px;padding:40px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
-.login-box h2{font-size:28px;font-weight:900;margin-bottom:8px}
-.login-box p{color:#666;margin-bottom:24px}
-.input{width:100%;padding:14px;border:1px solid #e5e5e5;border-radius:12px;font-size:15px;background:#f5f5f5;margin-bottom:12px}
-.tabs{display:flex;gap:8px;margin-bottom:20px}
-.tab{padding:8px 16px;border-radius:50px;border:1px solid #e5e5e5;background:#fff;cursor:pointer;font-weight:600;font-size:13px}
-.tab.active{background:#0a0a0a;color:#fff;border-color:#0a0a0a}
-.card{background:#fff;border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid #e5e5e5;display:flex;align-items:center;gap:14px}
-.card img{width:80px;height:56px;border-radius:10px;object-fit:cover;background:#f5f5f5}
-.card-info{flex:1}
-.card-info h3{font-size:15px;font-weight:700}
-.card-info p{font-size:12px;color:#666;margin-top:2px}
-.card-actions{display:flex;gap:6px}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px}
-.stat{background:#fff;border-radius:14px;padding:16px;text-align:center;border:1px solid #e5e5e5}
-.stat .num{font-size:24px;font-weight:900}
-.stat .label{font-size:11px;color:#999;text-transform:uppercase;margin-top:4px}
-.form-group{margin-bottom:14px}
-.form-group label{display:block;font-size:11px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px}
-.form-row{display:flex;gap:12px}
-.form-row .form-group{flex:1}
-.loc-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
-.loc-pill{padding:6px 12px;border-radius:50px;border:1px solid #d5f5e3;background:#f0fff4;cursor:pointer;font-size:11px;font-weight:600}
-.loc-pill.active-green{background:#34c759;color:#fff;border-color:#34c759}
-.loc-pill.active-red{background:#ff3b30;color:#fff;border-color:#ff3b30}
-.selected-loc{background:#f5f5f5;border-radius:10px;padding:8px 12px;margin-bottom:6px;font-size:13px;display:flex;align-items:center;gap:8px}
-.selected-loc .dot{width:10px;height:10px;border-radius:5px}
-.selected-loc .clear{cursor:pointer;color:#999;margin-left:auto}
-.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);display:flex;justify-content:center;align-items:flex-start;padding-top:60px;z-index:100}
-.modal{background:#fff;border-radius:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;padding:28px}
-.modal h2{font-size:20px;font-weight:800;margin-bottom:20px}
-.hidden{display:none}
-.error{color:#ff3b30;font-size:13px;margin-bottom:12px;background:#fff0f0;padding:10px;border-radius:10px}
-.section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1px;margin:20px 0 8px}
+/* ==================== DESIGN TOKENS (LIGHT + DARK) ==================== */
+:root {
+  --brand: #ff3b30;
+  --brand-hover: #e0332b;
+  --brand-soft: #ffe9e8;
 
-/* ===== Admin Header / Menu (professional layout) ===== */
-.admin-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.admin-nav-group{display:flex;align-items:center;gap:4px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);padding:4px;border-radius:12px}
-.nav-btn{appearance:none;background:transparent;border:1px solid transparent;color:#ffffff;padding:8px 13px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px;letter-spacing:0.1px;transition:background 0.12s ease,border-color 0.12s ease;white-space:nowrap}
-.nav-btn:hover{background:rgba(255,255,255,0.14)}
-.nav-btn.primary{background:#ffffff;color:#0a0a0a;font-weight:800;border-color:#ffffff;box-shadow:0 1px 6px rgba(255,255,255,0.18)}
-.nav-btn.primary:hover{background:#f5f5f5;color:#0a0a0a}
-.nav-btn.ghost{background:transparent;color:#ffffff;border:1px solid rgba(255,255,255,0.28)}
-.nav-btn.ghost:hover{background:rgba(255,255,255,0.14);border-color:rgba(255,255,255,0.5)}
-.nav-btn.danger-ghost{color:#ffffff;background:transparent;border:1px solid rgba(255,255,255,0.28);font-weight:700}
-.nav-btn.danger-ghost:hover{background:#ff3b30;border-color:#ff3b30;color:#ffffff}
-.nav-divider{width:1px;height:22px;background:rgba(255,255,255,0.12);margin:0 4px}
-.nav-dd{position:relative}
-.nav-dd-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:230px;background:#fff;color:#0a0a0a;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,0.18);padding:6px;z-index:50;display:none}
-.nav-dd.open .nav-dd-menu{display:block}
-.nav-dd-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:#0a0a0a}
-.nav-dd-item:hover{background:#f5f5f5}
-.nav-dd-item .dd-emoji{font-size:15px;width:20px;text-align:center}
-.nav-dd-sep{height:1px;background:#eee;margin:4px 0}
-.nav-dd-label{font-size:10px;color:#999;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;padding:8px 12px 4px}
-.admin-id-pill{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);padding:6px 10px;border-radius:50px;font-size:12px;color:#fff;font-weight:600}
-.admin-id-pill .dot{width:8px;height:8px;border-radius:4px;background:#34c759}
-@media (max-width: 920px){
-  .admin-nav-group{padding:3px}
-  .nav-btn{padding:7px 9px;font-size:12px}
-  .nav-dd-menu{right:auto;left:0}
+  --bg: #f5f6f8;
+  --bg-elevated: #ffffff;
+  --bg-subtle: #fafafa;
+  --bg-hover: #f0f0f3;
+
+  --text: #0a0a0a;
+  --text-muted: #6b7280;
+  --text-subtle: #9ca3af;
+
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+
+  --sidebar-bg: #0f1115;
+  --sidebar-text: #d6d8de;
+  --sidebar-text-active: #ffffff;
+  --sidebar-active-bg: rgba(255,255,255,0.08);
+  --sidebar-active-bar: #ff3b30;
+  --sidebar-section: #6e7280;
+  --sidebar-divider: rgba(255,255,255,0.08);
+
+  --topbar-bg: rgba(255,255,255,0.92);
+  --topbar-border: #ececef;
+
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
+
+  --shadow-sm: 0 1px 2px rgba(15,17,21,0.04), 0 1px 1px rgba(15,17,21,0.04);
+  --shadow-md: 0 4px 12px rgba(15,17,21,0.06), 0 2px 4px rgba(15,17,21,0.04);
+  --shadow-lg: 0 12px 32px rgba(15,17,21,0.12), 0 4px 8px rgba(15,17,21,0.06);
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --sidebar-w: 248px;
+  --topbar-h: 60px;
 }
+html[data-theme="dark"] {
+  --bg: #0b0d12;
+  --bg-elevated: #14171d;
+  --bg-subtle: #1a1e25;
+  --bg-hover: #1f242c;
+
+  --text: #f5f5f7;
+  --text-muted: #a4a8b3;
+  --text-subtle: #71757f;
+
+  --border: #242932;
+  --border-strong: #2f3540;
+
+  --sidebar-bg: #07090c;
+  --sidebar-text: #c6c9d1;
+  --sidebar-active-bg: rgba(255,255,255,0.06);
+
+  --topbar-bg: rgba(20,23,29,0.92);
+  --topbar-border: #1f242c;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.5);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; min-height: 100vh; }
+button, input, select, textarea { font-family: inherit; color: inherit; }
+
+/* ==================== APP SHELL (SIDEBAR + TOPBAR + MAIN) ==================== */
+.app-shell { display: flex; min-height: 100vh; }
+.app-sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-w);
+  background: var(--sidebar-bg); color: var(--sidebar-text);
+  display: flex; flex-direction: column; padding: 18px 12px 12px;
+  z-index: 100; transition: transform .25s ease;
+  border-right: 1px solid var(--sidebar-divider);
+}
+.app-sidebar .sb-brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 16px; border-bottom: 1px solid var(--sidebar-divider); margin-bottom: 12px; }
+.app-sidebar .sb-brand img { height: 32px; width: auto; max-width: 160px; object-fit: contain; }
+.app-sidebar .sb-brand .sb-pill { font-size: 9px; color: #fff; background: var(--brand); padding: 2px 8px; border-radius: 50px; font-weight: 800; letter-spacing: 1px; }
+.app-sidebar .sb-section { font-size: 10px; color: var(--sidebar-section); font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; padding: 14px 14px 6px; }
+.app-sidebar .sb-item {
+  display: flex; align-items: center; gap: 12px; padding: 11px 14px;
+  border-radius: 10px; color: var(--sidebar-text); cursor: pointer;
+  font-size: 13.5px; font-weight: 600; position: relative;
+  transition: background .12s ease, color .12s ease;
+  border: 1px solid transparent;
+}
+.app-sidebar .sb-item:hover { background: var(--sidebar-active-bg); color: var(--sidebar-text-active); }
+.app-sidebar .sb-item.active {
+  background: var(--sidebar-active-bg); color: var(--sidebar-text-active);
+}
+.app-sidebar .sb-item.active::before {
+  content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; background: var(--sidebar-active-bar); border-radius: 2px;
+}
+.app-sidebar .sb-item .sb-icon { font-size: 16px; width: 20px; text-align: center; }
+.app-sidebar .sb-item.danger { color: #ff9b94; margin-top: 6px; }
+.app-sidebar .sb-item.danger:hover { background: rgba(255,59,48,0.12); color: #ff5247; }
+.app-sidebar .sb-footer { margin-top: auto; padding: 12px 8px 4px; border-top: 1px solid var(--sidebar-divider); }
+.app-sidebar .sb-user { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; }
+.app-sidebar .sb-user .sb-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
+.app-sidebar .sb-user .sb-name { font-size: 12.5px; font-weight: 700; color: var(--sidebar-text-active); line-height: 1.2; }
+.app-sidebar .sb-user .sb-role { font-size: 10px; color: var(--sidebar-section); font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; }
+
+.app-main { flex: 1; min-width: 0; margin-left: var(--sidebar-w); display: flex; flex-direction: column; transition: margin-left .2s ease; }
+.app-main.no-sidebar { margin-left: 0; }
+.app-topbar {
+  position: sticky; top: 0; z-index: 50;
+  height: var(--topbar-h); background: var(--topbar-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--topbar-border);
+  display: flex; align-items: center; justify-content: space-between; padding: 0 24px;
+}
+.app-topbar .tb-title { display: flex; align-items: center; gap: 10px; }
+.app-topbar .tb-title h1 { font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: -0.3px; }
+.app-topbar .tb-title .tb-crumb { font-size: 12px; color: var(--text-subtle); font-weight: 600; }
+.app-topbar .tb-actions { display: flex; align-items: center; gap: 8px; }
+.app-topbar .tb-icon-btn {
+  width: 38px; height: 38px; border-radius: 10px; background: transparent; border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text); font-size: 16px;
+  transition: background .12s ease, border-color .12s ease;
+}
+.app-topbar .tb-icon-btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+
+.hamburger { display: none; }
+.app-content { flex: 1; padding: 28px; max-width: 1280px; width: 100%; margin: 0 auto; }
+
+/* ==================== MOBILE RESPONSIVE ==================== */
+@media (max-width: 900px) {
+  .app-sidebar { transform: translateX(-100%); width: 280px; box-shadow: var(--shadow-lg); }
+  .app-sidebar.open { transform: translateX(0); }
+  .app-main { margin-left: 0; }
+  .hamburger { display: flex !important; }
+  .app-content { padding: 16px; }
+  .sb-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99; display: none; }
+  .sb-overlay.show { display: block; }
+}
+
+/* ==================== LEGACY HEADER SUPPRESSION ==================== */
+/* Hide the old in-page .header & .admin-nav (now provided by sidebar+topbar). */
+.app-content .header, .app-content .admin-nav,
+#app .header, #app .admin-nav { display: none !important; }
+.app-content .container, #app .container { max-width: 100%; padding: 0 28px 28px; margin: 0; }
+#app .container .header { display: none !important; }
+
+/* When sidebar is hidden (login), let the app fill the screen */
+.app-main.no-sidebar { padding: 0; }
+
+/* ==================== KPI CARDS (Dashboard) ==================== */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
+.kpi {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-sm);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.kpi:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.kpi .kpi-row { display: flex; align-items: center; justify-content: space-between; }
+.kpi .kpi-label { font-size: 11px; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+.kpi .kpi-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+.kpi .kpi-value { font-size: 28px; font-weight: 900; color: var(--text); letter-spacing: -0.5px; line-height: 1.1; }
+.kpi .kpi-delta { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.kpi .kpi-delta.up { color: var(--success); }
+.kpi .kpi-delta.down { color: var(--danger); }
+
+/* Color-coded kpi backgrounds (icon only) */
+.kpi-icon.kpi-red { background: var(--brand-soft); color: var(--brand); }
+.kpi-icon.kpi-blue { background: #e0eaff; color: var(--info); }
+.kpi-icon.kpi-green { background: #d1fae5; color: var(--success); }
+.kpi-icon.kpi-amber { background: #fef3c7; color: var(--warning); }
+.kpi-icon.kpi-purple { background: #ede9fe; color: #8b5cf6; }
+html[data-theme="dark"] .kpi-icon.kpi-red { background: rgba(255,59,48,0.18); }
+html[data-theme="dark"] .kpi-icon.kpi-blue { background: rgba(59,130,246,0.18); }
+html[data-theme="dark"] .kpi-icon.kpi-green { background: rgba(16,185,129,0.18); }
+html[data-theme="dark"] .kpi-icon.kpi-amber { background: rgba(245,158,11,0.18); }
+html[data-theme="dark"] .kpi-icon.kpi-purple { background: rgba(139,92,246,0.18); }
+
+/* ==================== SECTION TITLES & TOOLBARS ==================== */
+.page-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 12px; }
+.page-title h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; color: var(--text); }
+.page-title .pt-sub { font-size: 13px; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
+
+/* ==================== BUTTONS ==================== */
+.btn {
+  padding: 10px 18px; border: 1px solid transparent; border-radius: 10px; cursor: pointer;
+  font-weight: 700; font-size: 13.5px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  transition: background .12s ease, border-color .12s ease, transform .08s ease, box-shadow .12s ease;
+  white-space: nowrap;
+}
+.btn:active { transform: translateY(1px); }
+.btn-red { background: var(--brand); color: #fff; border-color: var(--brand); box-shadow: 0 1px 2px rgba(255,59,48,0.25); }
+.btn-red:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
+.btn-gray { background: var(--bg-elevated); color: var(--text); border-color: var(--border); }
+.btn-gray:hover { background: var(--bg-hover); }
+.btn-blue { background: var(--info); color: #fff; border-color: var(--info); }
+.btn-blue:hover { filter: brightness(0.95); }
+.btn-sm { padding: 7px 12px; font-size: 12.5px; min-height: 34px; border-radius: 8px; }
+.btn-icon { width: 38px; height: 38px; padding: 0; }
+
+/* ==================== INPUTS & FORMS ==================== */
+.input, input[type="text"].input, input[type="email"].input, input[type="password"].input, input[type="number"].input, input[type="date"].input, input[type="time"].input, input[type="file"].input, textarea.input, select.input {
+  width: 100%; padding: 11px 14px; min-height: 42px;
+  border: 1px solid var(--border); border-radius: 10px; font-size: 14px;
+  background: var(--bg-elevated); color: var(--text);
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(255,59,48,0.12); }
+.input::placeholder { color: var(--text-subtle); }
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.form-row .form-group { flex: 1 1 180px; }
+
+/* ==================== TABS ==================== */
+.tabs { display: flex; gap: 4px; margin-bottom: 20px; padding: 4px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; }
+.tab { padding: 8px 16px; border-radius: 8px; border: none; background: transparent; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--text-muted); min-height: 36px; white-space: nowrap; }
+.tab:hover { background: var(--bg-hover); color: var(--text); }
+.tab.active { background: var(--brand); color: #fff; }
+
+/* ==================== CARDS / LIST ITEMS ==================== */
+.card {
+  background: var(--bg-elevated); border-radius: var(--radius-lg); padding: 16px;
+  margin-bottom: 12px; border: 1px solid var(--border); display: flex; align-items: center; gap: 14px;
+  box-shadow: var(--shadow-sm); transition: box-shadow .15s ease, transform .15s ease;
+}
+.card:hover { box-shadow: var(--shadow-md); }
+.card img { width: 88px; height: 64px; border-radius: 12px; object-fit: cover; background: var(--bg-hover); }
+.card-info { flex: 1; min-width: 0; }
+.card-info h3 { font-size: 15px; font-weight: 700; color: var(--text); }
+.card-info p { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
+.card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Legacy .stats grid — restyle to look like KPI cards */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.stat { background: var(--bg-elevated); border-radius: var(--radius-lg); padding: 18px 16px; text-align: left; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.stat .num { font-size: 26px; font-weight: 900; color: var(--text); letter-spacing: -0.4px; }
+.stat .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-top: 4px; }
+
+/* ==================== TABLES (modernized, less dense) ==================== */
+table { width: 100%; border-collapse: collapse; background: var(--bg-elevated); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
+th, td { padding: 14px 16px; font-size: 13px; text-align: left; border-bottom: 1px solid var(--border); color: var(--text); }
+thead th { background: var(--bg-subtle); color: var(--text-muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; }
+tbody tr:hover { background: var(--bg-hover); }
+tbody tr:last-child td { border-bottom: none; }
+
+/* ==================== BADGES ==================== */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 50px; font-size: 11px; font-weight: 700; letter-spacing: 0.2px; }
+.badge-green { background: #d1fae5; color: #065f46; }
+.badge-red { background: #fee2e2; color: #991b1b; }
+.badge-amber { background: #fef3c7; color: #92400e; }
+.badge-blue { background: #e0eaff; color: #1e3a8a; }
+.badge-gray { background: var(--bg-hover); color: var(--text-muted); }
+html[data-theme="dark"] .badge-green { background: rgba(16,185,129,0.18); color: #6ee7b7; }
+html[data-theme="dark"] .badge-red { background: rgba(239,68,68,0.18); color: #fca5a5; }
+html[data-theme="dark"] .badge-amber { background: rgba(245,158,11,0.18); color: #fcd34d; }
+html[data-theme="dark"] .badge-blue { background: rgba(59,130,246,0.18); color: #93c5fd; }
+
+/* ==================== MODALS ==================== */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15,17,21,0.5); backdrop-filter: blur(4px);
+  display: flex; justify-content: center; align-items: flex-start; padding: 60px 16px 16px; z-index: 200; overflow-y: auto;
+  animation: modalFade .18s ease;
+}
+@keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  background: var(--bg-elevated); border-radius: var(--radius-xl); width: 100%; max-width: 600px;
+  padding: 28px; border: 1px solid var(--border); box-shadow: var(--shadow-lg);
+  animation: modalSlide .22s ease;
+}
+@keyframes modalSlide { from { transform: translateY(-12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal h2 { font-size: 20px; font-weight: 800; margin-bottom: 18px; color: var(--text); }
+
+/* ==================== LOGIN ==================== */
+.login-bg { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; background: linear-gradient(135deg, var(--bg) 0%, var(--bg-elevated) 100%); }
+.login-box { max-width: 420px; width: 100%; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: 36px; box-shadow: var(--shadow-md); }
+.login-box h2 { font-size: 26px; font-weight: 900; margin-bottom: 6px; color: var(--text); letter-spacing: -0.5px; }
+.login-box p { color: var(--text-muted); margin-bottom: 24px; font-size: 14px; }
+.login-logo { height: 64px; width: auto; max-width: 240px; object-fit: contain; display: block; margin: 0 auto 16px; }
+.brand-logo { height: 36px; }
+
+/* ==================== UTILITIES ==================== */
+.hidden { display: none; }
+.error { color: var(--brand); font-size: 13px; margin-bottom: 12px; background: var(--brand-soft); padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,59,48,0.2); }
+.section-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; margin: 24px 0 12px; color: var(--text-muted); }
+.loc-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.loc-pill { padding: 7px 14px; border-radius: 50px; border: 1px solid var(--border); background: var(--bg-elevated); cursor: pointer; font-size: 11.5px; font-weight: 600; color: var(--text); }
+.loc-pill:hover { background: var(--bg-hover); }
+.loc-pill.active-green { background: var(--success); color: #fff; border-color: var(--success); }
+.loc-pill.active-red { background: var(--brand); color: #fff; border-color: var(--brand); }
+.selected-loc { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.selected-loc .dot { width: 10px; height: 10px; border-radius: 5px; }
+.selected-loc .clear { cursor: pointer; color: var(--text-muted); margin-left: auto; }
+
+/* Legacy admin-nav (now hidden by .app-content rule above, but keep style for back-compat) */
+.admin-nav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.admin-id-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--bg-hover); padding: 6px 10px; border-radius: 50px; font-size: 12px; color: var(--text); font-weight: 600; }
+.admin-id-pill .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--success); }
+
+/* Old dropdown CSS — kept for any legacy use, but global nav is now in sidebar */
+.nav-btn, .nav-dd, .nav-divider, .nav-dd-menu, .nav-dd-item, .nav-dd-sep, .nav-dd-label { display: none; }
 </style>
 </head>
 <body>
-<div id="app"></div>
+<aside id="app-sidebar" class="app-sidebar" style="display:none"></aside>
+<div id="sb-overlay" class="sb-overlay" onclick="toggleSidebar(false)"></div>
+<div class="app-main" id="app-main">
+  <div id="app"></div>
+</div>
 <script>
 const API = window.location.origin + '/api';
 let token = localStorage.getItem('admin_token');
 let locations = [];
+let activePage = 'dashboard';   // tracks the currently active sidebar item
 
+// ==================== THEME (LIGHT / DARK) ====================
+function applyTheme(theme) {
+  const t = (theme === 'dark') ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('admin_theme', t); } catch(e) {}
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = (t === 'dark') ? '☀️' : '🌙';
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') || 'light';
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+}
+// Initialize theme on first load
+(function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem('admin_theme'); } catch(e) {}
+  applyTheme(saved || 'light');
+})();
+
+// ==================== SIDEBAR ====================
+const SIDEBAR_ITEMS = [
+  { section: 'Operations' },
+  { id: 'dashboard',  label: 'Dashboard',  icon: '🏠', fn: 'showDashboard' },
+  { id: 'cars',       label: 'Vehicles',   icon: '🚗', fn: 'showCars' },
+  { id: 'bookings',   label: 'Bookings',   icon: '📋', fn: 'showBookings' },
+  { id: 'pickups',    label: 'Pickups',    icon: '🔑', fn: 'showOperations' },
+  { id: 'locations',  label: 'Locations',  icon: '📍', fn: 'showLocations' },
+  { id: 'customers',  label: 'Customers',  icon: '👥', fn: 'showCustomers' },
+  { section: 'Reports & Marketing' },
+  { id: 'analytics',  label: 'Analytics',  icon: '📈', fn: 'showAnalytics' },
+  { id: 'reminders',  label: 'Payment reminders', icon: '💸', fn: 'showPaymentReminders' },
+  { id: 'promos',     label: 'Promo codes', icon: '🎟️', fn: 'showPromos' },
+  { id: 'push',       label: 'Push notifications', icon: '📣', fn: 'showNotifications' },
+  { section: 'Content' },
+  { id: 'terms',      label: 'Terms & Conditions', icon: '📜', fn: 'showTerms' },
+  { id: 'privacy',    label: 'Privacy Policy', icon: '🔒', fn: 'showPrivacy' },
+  { section: 'Settings' },
+  { id: 'password',   label: 'Change password', icon: '🔑', fn: 'showChangePassword' },
+  { id: 'migration',  label: 'Import / Export', icon: '📦', fn: 'showMigration' },
+  { id: 'backup',     label: 'Backup & Restore DB', icon: '💾', fn: 'showDbBackup', superOnly: true },
+  { section: 'Security', superOrAudit: true },
+  { id: 'admins',     label: 'Admin users', icon: '👮', fn: 'showAdminUsers', superOnly: true },
+  { id: 'audit',      label: 'Audit log',   icon: '📜', fn: 'showAuditLog', auditOrSuper: true },
+];
+
+function buildSidebar() {
+  const sb = document.getElementById('app-sidebar');
+  if (!sb) return;
+  sb.style.display = 'flex';
+  const name = (currentAdmin && (currentAdmin.name || currentAdmin.email)) || 'Admin';
+  const role = (currentAdmin && (currentAdmin.is_super_admin ? 'Super admin' : 'Admin')) || '';
+  const isSuper = !!(currentAdmin && currentAdmin.is_super_admin);
+  const hasAudit = !!(currentAdmin && (currentAdmin.permissions || []).includes('audit.view'));
+
+  let html = `
+    <div class="sb-brand">
+      <img src="/api/assets/logo.png" alt="DAMS"/>
+      <span class="sb-pill">ADMIN</span>
+    </div>
+    <div style="flex:1; overflow-y:auto; padding: 0 2px;">`;
+
+  for (const item of SIDEBAR_ITEMS) {
+    if (item.section) {
+      if (item.superOrAudit && !(isSuper || hasAudit)) continue;
+      html += `<div class="sb-section">${item.section}</div>`;
+      continue;
+    }
+    if (item.superOnly && !isSuper) continue;
+    if (item.auditOrSuper && !(isSuper || hasAudit)) continue;
+    const active = (activePage === item.id) ? 'active' : '';
+    html += `<div class="sb-item ${active}" data-id="${item.id}" onclick="navigate('${item.id}','${item.fn}')">
+      <span class="sb-icon">${item.icon}</span><span>${item.label}</span>
+    </div>`;
+  }
+  html += `</div>
+    <div class="sb-footer">
+      <div class="sb-user">
+        <div class="sb-avatar">${(name[0] || 'A').toUpperCase()}</div>
+        <div style="flex:1; min-width:0;">
+          <div class="sb-name" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${name}</div>
+          <div class="sb-role">${role}</div>
+        </div>
+      </div>
+      <div class="sb-item danger" onclick="doLogout()"><span class="sb-icon">⎋</span><span>Logout</span></div>
+    </div>`;
+  sb.innerHTML = html;
+}
+
+function navigate(id, fnName) {
+  activePage = id;
+  // Close mobile sidebar if open
+  toggleSidebar(false);
+  // Mark active in sidebar (light update without rebuilding)
+  document.querySelectorAll('#app-sidebar .sb-item').forEach(el => {
+    el.classList.toggle('active', el.getAttribute('data-id') === id);
+  });
+  try {
+    const fn = window[fnName];
+    if (typeof fn === 'function') fn();
+  } catch (e) { console.error(e); }
+}
+
+function toggleSidebar(force) {
+  const sb = document.getElementById('app-sidebar');
+  const ov = document.getElementById('sb-overlay');
+  if (!sb) return;
+  const willOpen = (typeof force === 'boolean') ? force : !sb.classList.contains('open');
+  sb.classList.toggle('open', willOpen);
+  if (ov) ov.classList.toggle('show', willOpen);
+}
+
+// ==================== TOPBAR ====================
+function topbar(title, subtitle, rightHtml) {
+  return `
+    <div class="app-topbar">
+      <div class="tb-title">
+        <button class="tb-icon-btn hamburger" onclick="toggleSidebar(true)" title="Menu" aria-label="Menu">☰</button>
+        <div>
+          <h1>${title || ''}</h1>
+          ${subtitle ? `<div class="tb-crumb">${subtitle}</div>` : ''}
+        </div>
+      </div>
+      <div class="tb-actions">
+        ${rightHtml || ''}
+        <button id="theme-toggle" class="tb-icon-btn" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle theme">${document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'}</button>
+      </div>
+    </div>`;
+}
+
+// Shell wrapper. Pages call: render(shell({title:'X'}, contentHtml))
+function shell(opts, content) {
+  return `${topbar((opts && opts.title) || '', (opts && opts.subtitle) || '', (opts && opts.right) || '')}
+    <div class="app-content">${content}</div>`;
+}
+
+// Helper: page functions can still pass their own .header + .container HTML; CSS hides those.
 async function api(path, opts = {}) {
   const headers = {'Content-Type':'application/json', ...(opts.headers||{})};
   if (token) headers['Authorization'] = 'Bearer ' + token;
@@ -102,7 +473,19 @@ function render(html) {
   // Safety: remove any stray modals appended directly to <body> (from older bugs)
   // so they can't persist across page navigations.
   document.querySelectorAll('body > .modal, body > .modal-overlay').forEach(n => n.remove());
-  document.getElementById('app').innerHTML = html;
+
+  // Auto-inject the modern topbar when user is logged in AND content doesn't already include it.
+  const sb = document.getElementById('app-sidebar');
+  const isLoggedIn = !!token && sb && sb.style.display !== 'none';
+  const hasTopbar = html.includes('app-topbar');
+  let finalHtml = html;
+  if (isLoggedIn && !hasTopbar) {
+    // Look up a default title from the active sidebar item
+    const item = SIDEBAR_ITEMS.find(i => i.id === activePage) || {};
+    const title = item.label || 'Admin';
+    finalHtml = `${topbar(title, '', '')}<div class="app-content">${html}</div>`;
+  }
+  document.getElementById('app').innerHTML = finalHtml;
 }
 
 // ===== Dropdown helpers for the admin top nav =====
@@ -123,14 +506,30 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDDs()
 
 // LOGIN
 function showLogin(err='') {
+  // Hide sidebar on login page + remove sidebar offset
+  const sb = document.getElementById('app-sidebar');
+  const ov = document.getElementById('sb-overlay');
+  const main = document.getElementById('app-main');
+  if (sb) { sb.style.display = 'none'; sb.classList.remove('open'); }
+  if (ov) ov.classList.remove('show');
+  if (main) main.classList.add('no-sidebar');
   render(`
-    <div class="login-box">
-      <img class="login-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/>
-      <p style="margin-top:12px">Admin Panel Login</p>
-      ${err ? '<div class="error">'+err+'</div>' : ''}
-      <input class="input" id="email" placeholder="Email" value="admin@damscarrental.com">
-      <input class="input" id="pass" type="password" placeholder="Password">
-      <button class="btn btn-red" style="width:100%;padding:16px" onclick="doLogin()">Sign In</button>
+    <div class="login-bg">
+      <div class="login-box">
+        <img class="login-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/>
+        <h2 style="text-align:center">Welcome back</h2>
+        <p style="text-align:center">Sign in to the Admin Panel</p>
+        ${err ? '<div class="error">'+err+'</div>' : ''}
+        <div class="form-group">
+          <label>Email</label>
+          <input class="input" id="email" placeholder="you@example.com" value="admin@damscarrental.com">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input class="input" id="pass" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()">
+        </div>
+        <button class="btn btn-red" style="width:100%;margin-top:8px" onclick="doLogin()">Sign in →</button>
+      </div>
     </div>
   `);
 }
@@ -144,107 +543,153 @@ async function doLogin() {
   } catch(e) { showLogin(e.message); }
 }
 
-// DASHBOARD
+// Helper: ensure shell is set up before rendering pages
+async function ensureShell() {
+  const main = document.getElementById('app-main');
+  if (main) main.classList.remove('no-sidebar');
+  const sb = document.getElementById('app-sidebar');
+  if (sb) sb.style.display = 'flex';
+  if (!currentAdmin) {
+    await loadCurrentAdmin();
+  }
+  buildSidebar();
+}
+
+// ==================== DASHBOARD (new — KPI cards + recent activity) ====================
 async function showDashboard() {
+  activePage = 'dashboard';
+  await ensureShell();
+
+  let stats = {total_cars: '—', total_bookings: '—', total_users: '—', active_bookings: '—'};
+  let cars = [];
+  let bookings = [];
   try {
-    const [stats, cars, locs] = await Promise.all([api('/admin/stats'), api('/cars/all'), api('/locations')]);
-    locations = locs;
-    render(`
-      <div class="header">
-        <div style="display:flex;align-items:center;gap:14px">
-          <img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/>
-          <span class="admin-id-pill" title="Logged in as admin"><span class="dot"></span>Admin</span>
+    const [s, c, b] = await Promise.all([api('/admin/stats'), api('/cars/all'), api('/admin/bookings').catch(()=>[])]);
+    stats = s; cars = c; bookings = b;
+    locations = await api('/locations');
+  } catch(e) {
+    token = null; localStorage.removeItem('admin_token');
+    showLogin(e.message || 'Session expired. Please login again.');
+    return;
+  }
+
+  // Compute revenue (this month) + active rentals + pending pickups
+  const now = new Date();
+  const ym = now.toISOString().slice(0,7);
+  let revThisMonth = 0;
+  let pendingPickups = 0;
+  let activeRentals = 0;
+  for (const b of bookings) {
+    const c = (b.created_at || '').slice(0,7);
+    if (c === ym && (b.payment_status === 'paid' || b.status === 'confirmed' || b.status === 'active' || b.status === 'completed')) {
+      revThisMonth += Number(b.total_price || 0);
+    }
+    if (b.status === 'confirmed') pendingPickups++;
+    if (b.status === 'active') activeRentals++;
+  }
+
+  // Recent bookings (latest 5)
+  const recentRows = bookings.slice().sort((a,b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0,5).map(b => `
+    <tr>
+      <td><strong>${b.car_name || '—'}</strong><div style="font-size:11px;color:var(--text-muted)">${b.user_name || b.user_email || ''}</div></td>
+      <td>${(b.pickup_date || '').slice(0,10)}</td>
+      <td>$${Number(b.total_price || 0).toFixed(2)}</td>
+      <td>${statusBadge(b.status)}</td>
+    </tr>`).join('');
+
+  render(shell(
+    { title: 'Dashboard', subtitle: 'Overview & activity' },
+    `
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-row"><div class="kpi-label">Vehicles</div><div class="kpi-icon kpi-red">🚗</div></div>
+          <div class="kpi-value">${stats.total_cars}</div>
+          <div class="kpi-delta">Fleet size</div>
         </div>
-        <nav class="admin-nav" aria-label="Admin navigation">
-          <div class="admin-nav-group" aria-label="Operations">
-            <button class="nav-btn primary" onclick="showDashboard()" title="Vehicles dashboard"><span>🚗</span><span>Cars</span></button>
-            <button class="nav-btn" onclick="showBookings()" title="Bookings list"><span>📋</span><span>Bookings</span></button>
-            <button class="nav-btn" onclick="showOperations()" title="Pickups & Drop-offs"><span>🔑</span><span>Pickups</span></button>
-            <button class="nav-btn" onclick="showLocations()" title="Locations"><span>📍</span><span>Locations</span></button>
-            <button class="nav-btn" onclick="showCustomers()" title="Customers"><span>👥</span><span>Customers</span></button>
-          </div>
-          <div class="nav-dd" id="dd-reports">
-            <button class="nav-btn ghost" onclick="toggleDD('dd-reports')" aria-haspopup="true">📊 Reports ▾</button>
-            <div class="nav-dd-menu" role="menu">
-              <div class="nav-dd-label">Insights</div>
-              <div class="nav-dd-item" onclick="closeDDs();showAnalytics()"><span class="dd-emoji">📈</span>Analytics</div>
-              <div class="nav-dd-item" onclick="closeDDs();showPaymentReminders()"><span class="dd-emoji">💸</span>Payment reminders</div>
-              <div class="nav-dd-sep"></div>
-              <div class="nav-dd-label">Marketing</div>
-              <div class="nav-dd-item" onclick="closeDDs();showPromos()"><span class="dd-emoji">🎟️</span>Promo codes</div>
-              <div class="nav-dd-item" onclick="closeDDs();showNotifications()"><span class="dd-emoji">📣</span>Push notifications</div>
-            </div>
-          </div>
-          <div class="nav-dd" id="dd-content">
-            <button class="nav-btn ghost" onclick="toggleDD('dd-content')" aria-haspopup="true">📜 Content ▾</button>
-            <div class="nav-dd-menu" role="menu">
-              <div class="nav-dd-label">Legal pages</div>
-              <div class="nav-dd-item" onclick="closeDDs();showTerms()"><span class="dd-emoji">📜</span>Terms &amp; Conditions</div>
-              <div class="nav-dd-item" onclick="closeDDs();showPrivacy()"><span class="dd-emoji">🔒</span>Privacy Policy</div>
-            </div>
-          </div>
-          <div class="nav-dd" id="dd-settings">
-            <button class="nav-btn ghost" onclick="toggleDD('dd-settings')" aria-haspopup="true">⚙️ Settings ▾</button>
-            <div class="nav-dd-menu" role="menu">
-              <div class="nav-dd-label">Account</div>
-              <div class="nav-dd-item" onclick="closeDDs();showChangePassword()"><span class="dd-emoji">🔑</span>Change password</div>
-              <div class="nav-dd-sep"></div>
-              <div class="nav-dd-label">Data</div>
-              <div class="nav-dd-item" onclick="closeDDs();showMigration()"><span class="dd-emoji">📦</span>Import / Export</div>
-              <div class="nav-dd-item" id="rbac-backup" style="display:none" onclick="closeDDs();showDbBackup()"><span class="dd-emoji">💾</span>Backup &amp; Restore DB</div>
-              <div class="nav-dd-sep" id="rbac-sep" style="display:none"></div>
-              <div class="nav-dd-label" id="rbac-label" style="display:none">Security</div>
-              <div class="nav-dd-item" id="rbac-admins" style="display:none" onclick="closeDDs();showAdminUsers()"><span class="dd-emoji">👮</span>Admin users</div>
-              <div class="nav-dd-item" id="rbac-audit" style="display:none" onclick="closeDDs();showAuditLog()"><span class="dd-emoji">📜</span>Audit log</div>
-            </div>
-          </div>
-          <div class="nav-divider"></div>
-          <button class="nav-btn danger-ghost" onclick="doLogout()" title="Sign out">⎋ Logout</button>
-        </nav>
+        <div class="kpi">
+          <div class="kpi-row"><div class="kpi-label">Active rentals</div><div class="kpi-icon kpi-green">🔑</div></div>
+          <div class="kpi-value">${activeRentals}</div>
+          <div class="kpi-delta">Currently on the road</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-row"><div class="kpi-label">Pending pickups</div><div class="kpi-icon kpi-amber">⏰</div></div>
+          <div class="kpi-value">${pendingPickups}</div>
+          <div class="kpi-delta">Awaiting confirmation</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-row"><div class="kpi-label">Revenue this month</div><div class="kpi-icon kpi-blue">💰</div></div>
+          <div class="kpi-value">$${revThisMonth.toFixed(0).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',')}</div>
+          <div class="kpi-delta">${ym}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-row"><div class="kpi-label">Total bookings</div><div class="kpi-icon kpi-purple">📋</div></div>
+          <div class="kpi-value">${stats.total_bookings}</div>
+          <div class="kpi-delta">All time</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-row"><div class="kpi-label">Registered customers</div><div class="kpi-icon kpi-blue">👥</div></div>
+          <div class="kpi-value">${stats.total_users}</div>
+          <div class="kpi-delta">All time</div>
+        </div>
       </div>
-      <div class="container">
-        <div class="stats">
-          <div class="stat"><div class="num">${stats.total_cars}</div><div class="label">Cars</div></div>
-          <div class="stat"><div class="num">${stats.total_bookings}</div><div class="label">Bookings</div></div>
-          <div class="stat"><div class="num">${stats.total_users}</div><div class="label">Users</div></div>
-          <div class="stat"><div class="num">${stats.active_bookings}</div><div class="label">Active</div></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <h2 style="font-size:20px;font-weight:800">Vehicles</h2>
-          <button class="btn btn-red btn-sm" onclick="showCarForm()">+ Add Car</button>
-        </div>
-        <div id="car-list">${cars.map(c => carCard(c)).join('')}</div>
+
+      <div class="page-title">
+        <h2>Recent activity</h2>
+        <button class="btn btn-gray btn-sm" onclick="navigate('bookings','showBookings')">View all bookings →</button>
       </div>
+      <table>
+        <thead><tr><th>Booking</th><th>Pickup</th><th>Amount</th><th>Status</th></tr></thead>
+        <tbody>${recentRows || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No bookings yet.</td></tr>'}</tbody>
+      </table>
       <div id="modal-root"></div>
-    `);
-    // Load RBAC state and show/hide admin-only menu items
-    loadCurrentAdmin();
-  } catch(e) { 
-    // Clear stale token and show actual error
-    token=null; localStorage.removeItem('admin_token'); 
-    showLogin(e.message || 'Session expired. Please login again.'); 
+    `
+  ));
+}
+
+// Status badge helper used by dashboard + other lists
+function statusBadge(status) {
+  const map = {
+    pending: 'badge-gray', pending_payment: 'badge-amber',
+    confirmed: 'badge-blue', active: 'badge-green',
+    completed: 'badge-gray', cancelled: 'badge-red',
+  };
+  const cls = map[status] || 'badge-gray';
+  const label = (status || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || '—';
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// Alias: sidebar uses "showCars" but the legacy car management page is the dashboard.
+async function showCars() {
+  activePage = 'cars';
+  await ensureShell();
+  try {
+    const [cars, locs] = await Promise.all([api('/cars/all'), api('/locations')]);
+    locations = locs;
+    render(shell(
+      { title: 'Vehicles', subtitle: `${cars.length} car${cars.length === 1 ? '' : 's'} in your fleet` },
+      `
+        <div class="page-title">
+          <h2>Fleet</h2>
+          <button class="btn btn-red" onclick="showCarForm()">+ Add Vehicle</button>
+        </div>
+        <div id="car-list">${cars.map(c => carCard(c)).join('') || '<div style="text-align:center;color:var(--text-muted);padding:40px">No vehicles yet. Click "Add Vehicle" to get started.</div>'}</div>
+        <div id="modal-root"></div>
+      `
+    ));
+  } catch(e) {
+    token = null; localStorage.removeItem('admin_token');
+    showLogin(e.message || 'Session expired. Please login again.');
   }
 }
 
 // ==================== RBAC: current admin + permission gating ====================
-let currentAdmin = null;
+let currentAdmin = null;   // (declared earlier; this line is a no-op kept for clarity)
 async function loadCurrentAdmin() {
   try {
     const me = await api('/admin/me');
     currentAdmin = me;
-    const isSuper = !!me.is_super_admin;
-    const hasAudit = (me.permissions || []).includes('audit.view');
-    const adminItem = document.getElementById('rbac-admins');
-    const auditItem = document.getElementById('rbac-audit');
-    const backupItem = document.getElementById('rbac-backup');
-    const sep = document.getElementById('rbac-sep');
-    const lbl = document.getElementById('rbac-label');
-    if (adminItem) adminItem.style.display = isSuper ? 'flex' : 'none';
-    if (auditItem) auditItem.style.display = (isSuper || hasAudit) ? 'flex' : 'none';
-    if (backupItem) backupItem.style.display = isSuper ? 'flex' : 'none';
-    const anyShown = isSuper || hasAudit;
-    if (sep) sep.style.display = anyShown ? 'block' : 'none';
-    if (lbl) lbl.style.display = anyShown ? 'block' : 'none';
+    // Now that we know permissions, rebuild the sidebar with appropriate items.
+    buildSidebar();
   } catch(e) { /* non-fatal */ }
 }
 function can(perm) {
@@ -2089,7 +2534,52 @@ async function viewCustomer(id) {
   `;
 }
 
-function doLogout() { token=null; localStorage.removeItem('admin_token'); showLogin(); }
+function doLogout() {
+  token = null;
+  localStorage.removeItem('admin_token');
+  currentAdmin = null;
+  // Hide sidebar before showing login
+  const sb = document.getElementById('app-sidebar');
+  if (sb) { sb.style.display = 'none'; sb.classList.remove('open'); }
+  const ov = document.getElementById('sb-overlay');
+  if (ov) ov.classList.remove('show');
+  showLogin();
+}
+
+// Alias: sidebar uses "showCars" but the legacy car management page is the dashboard.
+// New behavior: "Vehicles" tab shows the car list (without KPI cards), while "Dashboard" shows KPIs + recent activity.
+async function showCars() {
+  activePage = 'cars';
+  // Make sure the shell is built
+  if (!document.getElementById('app-sidebar') || document.getElementById('app-sidebar').style.display === 'none') {
+    document.body.innerHTML = `
+      <div id="app"></div>
+      <aside id="app-sidebar" class="app-sidebar"></aside>
+      <div id="sb-overlay" class="sb-overlay" onclick="toggleSidebar(false)"></div>
+    `;
+    buildSidebar();
+    await loadCurrentAdmin();
+    buildSidebar();
+  }
+  try {
+    const [cars, locs] = await Promise.all([api('/cars/all'), api('/locations')]);
+    locations = locs;
+    render(shell(
+      { title: 'Vehicles', subtitle: `${cars.length} car${cars.length === 1 ? '' : 's'} in your fleet` },
+      `
+        <div class="page-title">
+          <h2>Fleet</h2>
+          <button class="btn btn-red" onclick="showCarForm()">+ Add Vehicle</button>
+        </div>
+        <div id="car-list">${cars.map(c => carCard(c)).join('') || '<div style="text-align:center;color:var(--text-muted);padding:40px">No vehicles yet. Click "Add Vehicle" to get started.</div>'}</div>
+        <div id="modal-root"></div>
+      `
+    ));
+  } catch(e) {
+    token = null; localStorage.removeItem('admin_token');
+    showLogin(e.message || 'Session expired. Please login again.');
+  }
+}
 
 async function adminResetCustomerPassword(customerId, email, name) {
   const label = (name && name.trim()) ? (name + ' (' + email + ')') : email;
@@ -2489,7 +2979,17 @@ async function backfillTaxes() {
 }
 
 // INIT
-if (token) { showDashboard(); } else { showLogin(); }
+// Bootstrap: build sidebar shell if logged in, otherwise show login.
+(async function bootstrap() {
+  if (token) {
+    const sb = document.getElementById('app-sidebar');
+    if (sb) sb.style.display = 'flex';
+    await loadCurrentAdmin();
+    showDashboard();
+  } else {
+    showLogin();
+  }
+})();
 </script>
 </body>
 </html>
