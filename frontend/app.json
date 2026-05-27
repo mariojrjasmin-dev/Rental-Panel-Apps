@@ -2,7 +2,7 @@
   "expo": {
     "name": "frontend",
     "slug": "frontend",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.damsrentacar.app",
+      "buildNumber": "10",
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos of cars for listings",
         "NSPhotoLibraryUsageDescription": "Select car photos from gallery",
@@ -20,6 +21,7 @@
     },
     "android": {
       "package": "com.damsrentacar.app",
+      "versionCode": 10,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
