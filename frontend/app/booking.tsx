@@ -570,7 +570,7 @@ export default function BookingScreen() {
                           style={[styles.locChip, active && !outOfStock && styles.locChipPickupActive, outOfStock && styles.locChipDisabled]}
                         >
                           <View style={[styles.locDot, { backgroundColor: outOfStock ? '#C7C7CC' : '#34C759' }]} />
-                          <View style={{ flex: 1, minWidth: 0 }}>
+                          <View style={styles.locChipBody}>
                             <Text style={[styles.locChipText, active && !outOfStock && styles.locChipTextActive, outOfStock && styles.locChipTextDisabled]} numberOfLines={1}>{loc.name}</Text>
                             <Text style={[styles.locChipCountry, outOfStock && styles.locChipCountryDisabled, !outOfStock && left <= LOW_STOCK_THRESHOLD && { color: '#a05a00', fontWeight: '800' }]} numberOfLines={1}>
                               {sublabelParts.join(' · ')}
@@ -612,7 +612,7 @@ export default function BookingScreen() {
                           style={[styles.locChip, active && styles.locChipDropoffActive, disabled && styles.locChipDisabled]}
                         >
                           <View style={[styles.locDot, { backgroundColor: disabled ? '#C7C7CC' : '#FF3B30' }]} />
-                          <View style={{ flex: 1, minWidth: 0 }}>
+                          <View style={styles.locChipBody}>
                             <Text style={[styles.locChipText, active && styles.locChipTextActive, disabled && styles.locChipTextDisabled]} numberOfLines={1}>{loc.name}</Text>
                             {!!co && <Text style={[styles.locChipCountry, disabled && styles.locChipCountryDisabled]} numberOfLines={1}>{co}{disabled ? ' · unavailable' : ''}</Text>}
                           </View>
@@ -1053,7 +1053,8 @@ const styles = StyleSheet.create({
   modalBtnPrimaryText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
   // Multi-location picker chips
   locPickerLabel: { fontSize: 11, fontWeight: '800', color: '#666', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
-  locChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 50, backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E5E5E5', maxWidth: 220 },
+  locChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 50, backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E5E5E5', maxWidth: 260 },
+  locChipBody: { flexShrink: 1, maxWidth: 200 },
   locChipPickupActive: { backgroundColor: '#e6f9ed', borderColor: '#34C759' },
   locChipDropoffActive: { backgroundColor: '#FFE9E7', borderColor: '#FF3B30' },
   locChipDisabled: { backgroundColor: '#FAFAFA', borderColor: '#EFEFEF', opacity: 0.6 },
