@@ -626,17 +626,17 @@ export default function BookingScreen() {
               )}
               {/* Selected summary (always visible, even with single option) */}
               {(selectedPickup || selectedDropoff) && (
-                <View style={styles.locSummary}>
+                <View style={[styles.locSummary, { borderTopColor: colors.border }]}>
                   {selectedPickup && (
                     <View style={styles.locSummaryRow}>
                       <View style={[styles.locDot, { backgroundColor: '#34C759' }]} />
-                      <Text style={styles.locSummaryText} numberOfLines={1}>Pickup: <Text style={styles.locSummaryBold}>{selectedPickup.name}</Text></Text>
+                      <Text style={[styles.locSummaryText, { color: colors.textMuted }]} numberOfLines={1}>Pickup: <Text style={[styles.locSummaryBold, { color: colors.text }]}>{selectedPickup.name}</Text></Text>
                     </View>
                   )}
                   {selectedDropoff && (
                     <View style={styles.locSummaryRow}>
                       <View style={[styles.locDot, { backgroundColor: '#FF3B30' }]} />
-                      <Text style={styles.locSummaryText} numberOfLines={1}>Drop-off: <Text style={styles.locSummaryBold}>{selectedDropoff.name}</Text></Text>
+                      <Text style={[styles.locSummaryText, { color: colors.textMuted }]} numberOfLines={1}>Drop-off: <Text style={[styles.locSummaryBold, { color: colors.text }]}>{selectedDropoff.name}</Text></Text>
                     </View>
                   )}
                 </View>
@@ -693,7 +693,7 @@ export default function BookingScreen() {
               <Ionicons name="cash-outline" size={26} color="#FF3B30" />
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.cashOnlyTitle}>{tr('cash')}</Text>
-                <Text style={styles.cashOnlySub}>Paid in cash at pickup. Our agent will provide a receipt.</Text>
+                <Text style={styles.cashOnlySub}>Paid in cash or card at pickup. Our agent will provide a receipt.</Text>
               </View>
             </View>
           )}
