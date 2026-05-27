@@ -191,6 +191,7 @@ async function showDashboard() {
               <div class="nav-dd-sep"></div>
               <div class="nav-dd-label">Data</div>
               <div class="nav-dd-item" onclick="closeDDs();showMigration()"><span class="dd-emoji">📦</span>Import / Export</div>
+              <div class="nav-dd-item" id="rbac-backup" style="display:none" onclick="closeDDs();showDbBackup()"><span class="dd-emoji">💾</span>Backup &amp; Restore DB</div>
               <div class="nav-dd-sep" id="rbac-sep" style="display:none"></div>
               <div class="nav-dd-label" id="rbac-label" style="display:none">Security</div>
               <div class="nav-dd-item" id="rbac-admins" style="display:none" onclick="closeDDs();showAdminUsers()"><span class="dd-emoji">👮</span>Admin users</div>
@@ -235,10 +236,12 @@ async function loadCurrentAdmin() {
     const hasAudit = (me.permissions || []).includes('audit.view');
     const adminItem = document.getElementById('rbac-admins');
     const auditItem = document.getElementById('rbac-audit');
+    const backupItem = document.getElementById('rbac-backup');
     const sep = document.getElementById('rbac-sep');
     const lbl = document.getElementById('rbac-label');
     if (adminItem) adminItem.style.display = isSuper ? 'flex' : 'none';
     if (auditItem) auditItem.style.display = (isSuper || hasAudit) ? 'flex' : 'none';
+    if (backupItem) backupItem.style.display = isSuper ? 'flex' : 'none';
     const anyShown = isSuper || hasAudit;
     if (sep) sep.style.display = anyShown ? 'block' : 'none';
     if (lbl) lbl.style.display = anyShown ? 'block' : 'none';
@@ -2251,6 +2254,135 @@ async function downloadReceipt(id) {
 }
 
 // MIGRATION
+// ==================== DB BACKUP & RESTORE (Super Admin only) ====================
+async function showDbBackup() {
+  render(`
+    <div class="header">
+      <div><img class="brand-logo" src="/api/assets/logo.png" alt="DAMS Rent a Car"/></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-gray" onclick="showDashboard()">← Cars</button>
+        <button class="btn btn-sm btn-gray" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+    <div class="container">
+      <h2 style="font-size:20px;font-weight:800;margin-bottom:8px">💾 Database Backup &amp; Restore</h2>
+      <div style="background:#fff5e6;border:1px solid #ffd48a;border-radius:10px;padding:12px 14px;margin-bottom:20px;font-size:13px;color:#a05a00;font-weight:600">
+        ⚠️ <strong>Super-admin only.</strong> Backups include users, cars, bookings, locations, promo codes, reviews, audit logs, and settings.
+        Payment transactions and uploaded files are NOT included. Keep backups secure — they contain customer PII.
+      </div>
+
+      <!-- BACKUP -->
+      <div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e5e5e5;margin-bottom:16px">
+        <h3 style="font-size:16px;font-weight:800;margin:0 0 8px">📥 Backup database</h3>
+        <p style="font-size:13px;color:#666;margin:0 0 14px">Download a snapshot of the current database. Choose JSON for a single file or ZIP for one file per collection.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-red" onclick="downloadBackup('json')">⬇️ Download .JSON backup</button>
+          <button class="btn btn-gray" onclick="downloadBackup('zip')">📦 Download .ZIP backup</button>
+        </div>
+        <div id="backup-msg" style="font-size:12px;color:#0a5d2b;margin-top:10px;font-weight:600"></div>
+      </div>
+
+      <!-- RESTORE -->
+      <div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e5e5e5;margin-bottom:16px">
+        <h3 style="font-size:16px;font-weight:800;margin:0 0 8px">📤 Restore database</h3>
+        <p style="font-size:13px;color:#666;margin:0 0 14px">Upload a previously downloaded <code>.json</code> or <code>.zip</code> backup file.</p>
+        <div style="background:#fff0f0;border:1px solid #ff3b30;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#7a1e1e;font-weight:700">
+          ⚠️ <strong>DANGER:</strong> Restoring will <u>OVERWRITE</u> current data. Always download a fresh backup first.
+        </div>
+        <div class="form-group">
+          <label style="font-weight:800">Backup file</label>
+          <input class="input" id="restore-file" type="file" accept=".json,.zip" />
+        </div>
+        <div style="background:#fafafa;border-radius:10px;padding:12px;margin-bottom:14px">
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+            <input type="checkbox" id="restore-wipe" style="margin-top:3px;width:18px;height:18px"/>
+            <span style="font-size:13px;color:#333;font-weight:600">
+              <strong>Wipe collections before restore</strong> (true replace)
+              <div style="font-size:11px;color:#888;font-weight:500;margin-top:2px">
+                If checked, each collection is DROPPED and replaced. If unchecked, documents are merged by _id (safer).
+              </div>
+            </span>
+          </label>
+        </div>
+        <button class="btn btn-red" onclick="doRestore()" id="restore-btn">🔄 Restore database</button>
+        <div id="restore-msg" style="font-size:12px;margin-top:10px;font-weight:700"></div>
+      </div>
+    </div>
+  `);
+}
+
+async function downloadBackup(format) {
+  const msg = document.getElementById('backup-msg');
+  if (msg) { msg.style.color = '#666'; msg.textContent = 'Generating backup…'; }
+  try {
+    const url = `${API}/admin/db-backup?format=${encodeURIComponent(format)}`;
+    const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) {
+      const err = await r.text();
+      throw new Error(err || ('HTTP ' + r.status));
+    }
+    const blob = await r.blob();
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.href = dlUrl;
+    a.download = `dams-db-backup-${ts}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(dlUrl);
+    if (msg) { msg.style.color = '#0a5d2b'; msg.textContent = `✅ Backup downloaded (${(blob.size/1024).toFixed(1)} KB).`; }
+  } catch (e) {
+    if (msg) { msg.style.color = '#d70015'; msg.textContent = '❌ ' + (e.message || 'Backup failed'); }
+  }
+}
+
+async function doRestore() {
+  const fileEl = document.getElementById('restore-file');
+  const wipeEl = document.getElementById('restore-wipe');
+  const msg = document.getElementById('restore-msg');
+  const btn = document.getElementById('restore-btn');
+  if (!fileEl || !fileEl.files || !fileEl.files[0]) {
+    if (msg) { msg.style.color = '#d70015'; msg.textContent = 'Please choose a backup file first.'; }
+    return;
+  }
+  const file = fileEl.files[0];
+  const wipe = !!(wipeEl && wipeEl.checked);
+  const confirmText = `Restore database from "${file.name}"?\n\n` +
+    (wipe ? '⚠️ WIPE FIRST is ENABLED — current data will be DELETED before the restore.\n\n' : 'Documents will be merged by _id.\n\n') +
+    'Continue?';
+  if (!confirm(confirmText)) return;
+
+  if (msg) { msg.style.color = '#666'; msg.textContent = 'Restoring database… do not close this tab.'; }
+  if (btn) btn.disabled = true;
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('wipe_first', wipe ? 'true' : 'false');
+    const r = await fetch(`${API}/admin/db-restore`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token },
+      body: fd,
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Restore failed');
+    let html = '✅ ' + (data.message || 'Restore complete.') + '<br/><br/><strong>Per-collection summary:</strong><br/>';
+    for (const [col, info] of Object.entries(data.summary || {})) {
+      if (info.error) {
+        html += `&nbsp;&nbsp;❌ <strong>${col}</strong>: ${info.error}<br/>`;
+      } else {
+        html += `&nbsp;&nbsp;✓ <strong>${col}</strong>: ${info.total || 0} document(s) processed (inserted ${info.inserted || 0}, updated ${info.updated || 0})<br/>`;
+      }
+    }
+    if (msg) { msg.style.color = '#0a5d2b'; msg.innerHTML = html; }
+  } catch (e) {
+    if (msg) { msg.style.color = '#d70015'; msg.textContent = '❌ ' + (e.message || 'Restore failed'); }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function showMigration() {
   render(`
     <div class="header">

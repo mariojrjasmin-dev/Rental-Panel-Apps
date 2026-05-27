@@ -2,14 +2,15 @@ from dotenv import load_dotenv
 from pathlib import Path as _Path
 load_dotenv(_Path(__file__).parent / '.env')
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
 from bson import ObjectId
 import os
+import json
 import logging
 import uuid
 import secrets
@@ -2353,18 +2354,46 @@ async def get_payment_status(session_id: str, request: Request):
     api_key = os.environ["STRIPE_API_KEY"]
     webhook_url = f"{str(request.base_url).rstrip('/')}/api/webhook/stripe"
     stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
-    
-    status: CheckoutStatusResponse = await stripe_checkout.get_checkout_status(session_id)
-    
+
+    # Try emergentintegrations first; if its pydantic validator chokes on
+    # Stripe's StripeObject-shaped `metadata`, fall back to a direct Stripe REST call.
+    payment_status = None
+    session_status = None
+    amount_total = None
+    currency = None
+    try:
+        status_obj: CheckoutStatusResponse = await stripe_checkout.get_checkout_status(session_id)
+        payment_status = status_obj.payment_status
+        session_status = status_obj.status
+        amount_total = status_obj.amount_total
+        currency = status_obj.currency
+    except Exception as lib_err:
+        logger.warning(f"emergentintegrations get_checkout_status failed ({lib_err}); falling back to direct Stripe API.")
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(
+                    f"https://api.stripe.com/v1/checkout/sessions/{session_id}",
+                    auth=(api_key, ""),
+                )
+                r.raise_for_status()
+                data = r.json()
+                payment_status = data.get("payment_status")  # e.g. "paid", "unpaid", "no_payment_required"
+                session_status = data.get("status")          # e.g. "complete", "open", "expired"
+                amount_total = data.get("amount_total")
+                currency = data.get("currency")
+        except Exception as api_err:
+            logger.error(f"Direct Stripe API fallback also failed: {api_err}")
+            raise HTTPException(status_code=502, detail="Could not retrieve payment status from Stripe.")
+
     # Update transaction
     tx = await db.payment_transactions.find_one({"session_id": session_id})
     if tx:
-        new_status = "paid" if status.payment_status == "paid" else status.payment_status
+        new_status = "paid" if payment_status == "paid" else (payment_status or "unknown")
         await db.payment_transactions.update_one(
             {"session_id": session_id},
             {"$set": {"payment_status": new_status, "updated_at": datetime.now(timezone.utc)}}
         )
-        
+
         if new_status == "paid":
             # Only update booking once
             booking = await db.bookings.find_one({"_id": ObjectId(tx["booking_id"])})
@@ -2373,12 +2402,21 @@ async def get_payment_status(session_id: str, request: Request):
                     {"_id": ObjectId(tx["booking_id"])},
                     {"$set": {"payment_status": "paid", "status": "confirmed"}}
                 )
-    
+                # Notify customer (best-effort — copied from webhook handler)
+                try:
+                    refreshed = await db.bookings.find_one({"_id": ObjectId(tx["booking_id"])})
+                    if refreshed:
+                        booking_payload = serialize_booking(refreshed)
+                        if booking_payload.get("user_email"):
+                            await send_booking_email("payment_confirmed", booking_payload, booking_payload.get("user_email"))
+                except Exception as _e:
+                    logger.warning(f"post-payment email notify error: {_e}")
+
     return {
-        "status": status.status,
-        "payment_status": status.payment_status,
-        "amount_total": status.amount_total,
-        "currency": status.currency
+        "status": session_status,
+        "payment_status": payment_status,
+        "amount_total": amount_total,
+        "currency": currency,
     }
 
 @api_router.post("/webhook/stripe")
@@ -3216,6 +3254,224 @@ async def import_data(request: Request):
                 imported_cars += 1
     
     return {"message": f"Imported {imported_cars} cars and {imported_locs} locations", "imported_cars": imported_cars, "imported_locations": imported_locs}
+
+
+# ==================== DB BACKUP & RESTORE ====================
+# Full database backup/restore — exports/imports EVERY collection.
+# Available formats: JSON (single file) or ZIP (one .json per collection).
+# Permission gate: super-admin role only (writes everywhere → destructive).
+
+# Collections to include in the backup. Excludes payment_transactions for PCI safety.
+BACKUP_COLLECTIONS = [
+    "users",
+    "cars",
+    "locations",
+    "bookings",
+    "promo_codes",
+    "reviews",
+    "audit_log",
+    "settings",
+]
+
+def _json_default(o):
+    """JSON serializer that handles MongoDB-specific types."""
+    from bson import ObjectId as _OID
+    if isinstance(o, _OID):
+        return {"$oid": str(o)}
+    if isinstance(o, datetime):
+        return {"$date": o.isoformat()}
+    if isinstance(o, bytes):
+        try:
+            return o.decode("utf-8")
+        except Exception:
+            import base64 as _b64
+            return {"$binary": _b64.b64encode(o).decode("ascii")}
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
+def _json_object_hook(d):
+    """Reverse the encoding done by _json_default."""
+    from bson import ObjectId as _OID
+    if isinstance(d, dict):
+        if set(d.keys()) == {"$oid"}:
+            try:
+                return _OID(d["$oid"])
+            except Exception:
+                return d["$oid"]
+        if set(d.keys()) == {"$date"}:
+            try:
+                return datetime.fromisoformat(d["$date"])
+            except Exception:
+                return d["$date"]
+    return d
+
+
+async def _collect_backup_data() -> dict:
+    """Return {collection_name: [docs]} for every collection in BACKUP_COLLECTIONS."""
+    data = {}
+    for col in BACKUP_COLLECTIONS:
+        try:
+            docs = await db[col].find({}).to_list(length=None)
+            data[col] = docs
+        except Exception as e:
+            logger.warning(f"Backup: failed to read collection '{col}': {e}")
+            data[col] = []
+    return data
+
+
+@api_router.get("/admin/db-backup")
+async def db_backup(request: Request, format: str = "json"):
+    """Export the entire database as JSON or ZIP.
+    Query params:
+      - format=json (default) → single .json file
+      - format=zip            → .zip with one .json per collection
+    """
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Super-admin only")
+
+    data = await _collect_backup_data()
+    counts = {k: len(v) for k, v in data.items()}
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    fmt = (format or "json").lower().strip()
+
+    await log_admin_action(
+        user, "db.backup", target="",
+        meta={"format": fmt, "counts": counts}, request=request,
+    )
+
+    if fmt == "zip":
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            # One JSON file per collection
+            for col, docs in data.items():
+                zf.writestr(f"{col}.json", json.dumps(docs, default=_json_default, ensure_ascii=False, indent=2))
+            # Manifest
+            manifest = {
+                "type": "dams_car_rental_db_backup",
+                "version": 1,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "collections": BACKUP_COLLECTIONS,
+                "counts": counts,
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+        buf.seek(0)
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="dams-db-backup-{ts}.zip"'},
+        )
+
+    # Default: JSON
+    payload = {
+        "type": "dams_car_rental_db_backup",
+        "version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "counts": counts,
+        "data": data,
+    }
+    return StreamingResponse(
+        iter([json.dumps(payload, default=_json_default, ensure_ascii=False, indent=2).encode("utf-8")]),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="dams-db-backup-{ts}.json"'},
+    )
+
+
+@api_router.post("/admin/db-restore")
+async def db_restore(request: Request, file: UploadFile = File(...), wipe_first: bool = Form(False)):
+    """Restore the database from a backup file (.json or .zip from /admin/db-backup).
+    Form params:
+      - file        : the backup file (multipart upload)
+      - wipe_first  : if true, each collection is DROPPED before inserting (true replace).
+                      if false, documents are upserted by _id (safer; merges with existing data).
+    """
+    user = await get_authenticated_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Super-admin only")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file uploaded.")
+
+    # ---- Detect format ----
+    collections_payload: dict = {}
+    name = (file.filename or "").lower()
+    is_zip = name.endswith(".zip") or raw[:2] == b"PK"
+
+    try:
+        if is_zip:
+            import io
+            import zipfile
+            with zipfile.ZipFile(io.BytesIO(raw), "r") as zf:
+                for member in zf.namelist():
+                    if not member.endswith(".json") or member == "manifest.json":
+                        continue
+                    col_name = member.rsplit("/", 1)[-1][:-5]  # strip .json
+                    if col_name not in BACKUP_COLLECTIONS:
+                        continue
+                    with zf.open(member) as fh:
+                        docs = json.loads(fh.read().decode("utf-8"), object_hook=_json_object_hook)
+                        if isinstance(docs, list):
+                            collections_payload[col_name] = docs
+        else:
+            parsed = json.loads(raw.decode("utf-8"), object_hook=_json_object_hook)
+            # Accept either {data: {col: [docs]}} (our format) OR a flat {col: [docs]} dict
+            if isinstance(parsed, dict) and "data" in parsed and isinstance(parsed["data"], dict):
+                src = parsed["data"]
+            elif isinstance(parsed, dict):
+                src = parsed
+            else:
+                raise ValueError("Unrecognized JSON shape")
+            for col, docs in src.items():
+                if col in BACKUP_COLLECTIONS and isinstance(docs, list):
+                    collections_payload[col] = docs
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse backup file: {e}")
+
+    if not collections_payload:
+        raise HTTPException(status_code=400, detail="No restorable collections found in the backup file.")
+
+    # ---- Apply the restore ----
+    summary = {}
+    for col_name, docs in collections_payload.items():
+        try:
+            inserted = 0
+            updated = 0
+            if wipe_first:
+                await db[col_name].delete_many({})
+                if docs:
+                    # Bulk insert. Mongo's insert_many is fine since we're starting clean.
+                    await db[col_name].insert_many(docs)
+                    inserted = len(docs)
+            else:
+                # Upsert by _id. If no _id, just insert.
+                from bson import ObjectId as _OID
+                from pymongo import UpdateOne, InsertOne
+                ops = []
+                for d in docs:
+                    _id = d.get("_id")
+                    if _id is not None:
+                        ops.append(UpdateOne({"_id": _id}, {"$set": d}, upsert=True))
+                    else:
+                        ops.append(InsertOne(d))
+                if ops:
+                    res = await db[col_name].bulk_write(ops, ordered=False)
+                    inserted = (res.inserted_count or 0) + (res.upserted_count or 0)
+                    updated = res.modified_count or 0
+            summary[col_name] = {"inserted": inserted, "updated": updated, "total": len(docs)}
+        except Exception as e:
+            logger.exception(f"Restore failed for collection '{col_name}': {e}")
+            summary[col_name] = {"error": str(e), "total": len(docs)}
+
+    await log_admin_action(
+        user, "db.restore", target="",
+        meta={"wipe_first": wipe_first, "summary": summary, "source_file": file.filename or ""},
+        request=request,
+    )
+    return {"message": "Restore completed.", "wipe_first": wipe_first, "summary": summary}
+
 
 # ==================== SEED DATA ====================
 
