@@ -13,6 +13,7 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [adultConfirmed, setAdultConfirmed] = useState(false);
   const [termsModalVisible, setTermsModalVisible] = useState(false);
   const [termsText, setTermsText] = useState('');
   const [error, setError] = useState('');
@@ -36,11 +37,12 @@ export default function RegisterScreen() {
   const handleRegister = async () => {
     if (!name || !email || !password) { setError('Please fill all fields.'); return; }
     if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (!adultConfirmed) { setError('You must confirm you are 18 years or older to register.'); return; }
     if (!termsAccepted) { setError('Please accept the Rental Terms & Conditions to continue.'); return; }
     setLoading(true);
     setError('');
     try {
-      await register(name.trim(), email.trim().toLowerCase(), password, true);
+      await register(name.trim(), email.trim().toLowerCase(), password, true, true);
       router.replace('/(tabs)/home');
     } catch (e: any) {
       setError(e.message || 'Registration failed');
@@ -78,6 +80,21 @@ export default function RegisterScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Adult (18+) confirmation — required for car rental */}
+            <TouchableOpacity
+              testID="register-adult-toggle"
+              activeOpacity={0.7}
+              style={styles.termsRow}
+              onPress={() => setAdultConfirmed(!adultConfirmed)}
+            >
+              <View style={[styles.termsBox, adultConfirmed && styles.termsBoxChecked]}>
+                {adultConfirmed && <Ionicons name="checkmark" size={16} color="#FFF" />}
+              </View>
+              <Text style={styles.termsLabel}>
+                I confirm that I am <Text style={{ fontWeight: '800' }}>18 years or older</Text> and legally able to enter a rental agreement.
+              </Text>
+            </TouchableOpacity>
+
             {/* Terms & Conditions checkbox (required for store compliance & legal proof) */}
             <TouchableOpacity
               testID="register-terms-toggle"
@@ -101,12 +118,12 @@ export default function RegisterScreen() {
 
             <TouchableOpacity
               testID="register-submit-button"
-              style={[styles.primaryBtn, (!termsAccepted || loading) && styles.primaryBtnDisabled]}
+              style={[styles.primaryBtn, (!termsAccepted || !adultConfirmed || loading) && styles.primaryBtnDisabled]}
               onPress={handleRegister}
-              disabled={loading || !termsAccepted}
+              disabled={loading || !termsAccepted || !adultConfirmed}
               activeOpacity={0.7}
             >
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{!termsAccepted ? 'Accept terms to continue' : 'Create Account'}</Text>}
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{(!termsAccepted || !adultConfirmed) ? 'Confirm details above to continue' : 'Create Account'}</Text>}
             </TouchableOpacity>
 
             <TouchableOpacity testID="go-to-login" onPress={() => router.push('/(auth)/login')} style={styles.linkBtn}>

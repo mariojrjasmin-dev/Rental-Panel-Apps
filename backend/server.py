@@ -580,6 +580,7 @@ class RegisterRequest(BaseModel):
     name: str
     phone: Optional[str] = None
     terms_accepted: bool = False
+    adult_confirmed: bool = False  # 18+ self-declaration (required by rental law)
 
 class LoginRequest(BaseModel):
     email: str
@@ -811,6 +812,9 @@ async def register(req: RegisterRequest, response: Response):
     # Terms must be explicitly accepted at signup (required for app store / legal compliance)
     if not req.terms_accepted:
         raise HTTPException(status_code=400, detail="You must accept the Rental Terms & Conditions to create an account.")
+    # 18+ self-declaration (required by car rental industry / DR law)
+    if not req.adult_confirmed:
+        raise HTTPException(status_code=400, detail="You must confirm you are 18 years or older to register.")
     if not req.password or len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
     if not req.name or not req.name.strip():
@@ -827,6 +831,7 @@ async def register(req: RegisterRequest, response: Response):
         "phone": (req.phone or "").strip() or None,
         "role": "user",
         "terms_accepted_at": datetime.now(timezone.utc),
+        "adult_confirmed_at": datetime.now(timezone.utc),  # legal proof of 18+ self-declaration
         "created_at": datetime.now(timezone.utc),
     }
     result = await db.users.insert_one(user_doc)
