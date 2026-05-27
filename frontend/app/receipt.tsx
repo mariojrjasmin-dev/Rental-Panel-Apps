@@ -150,7 +150,7 @@ export default function ReceiptScreen() {
           <Ionicons name="arrow-back" size={22} color="#0A0A0A" />
         </TouchableOpacity>
         <View style={styles.headerTitle}>
-          <BrandLogo size="small" testID="receipt-header-logo" imageStyle={{ width: 100, height: 38 }} />
+          <BrandLogo size="small" testID="receipt-header-logo" imageStyle={{ width: 110, height: 33 }} />
           <Text style={styles.headerSub}>RECEIPT</Text>
         </View>
         <TouchableOpacity style={styles.downloadIconBtn} onPress={downloadPdf} disabled={downloading} activeOpacity={0.6}>
