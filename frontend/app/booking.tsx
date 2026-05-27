@@ -14,6 +14,9 @@ export default function BookingScreen() {
   const [car, setCar] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(false);
+  // 💳 Card payment via Stripe is currently HIDDEN on the customer app.
+  // Flip this to `true` to re-enable the on-app card option.
+  const SHOW_CARD_PAYMENT = false;
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('cash');
   const [taxRate, setTaxRate] = useState(0);
   const [locMinDays, setLocMinDays] = useState(1);
@@ -664,24 +667,34 @@ export default function BookingScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{tr('paymentMethod')}</Text>
-          <View style={styles.paymentOptions}>
-            <TouchableOpacity
-              testID="payment-cash-btn"
-              style={[styles.paymentOption, paymentMethod === 'cash' && styles.paymentOptionActive]}
-              onPress={() => setPaymentMethod('cash')}
-            >
-              <Ionicons name="cash-outline" size={24} color={paymentMethod === 'cash' ? '#FF3B30' : '#666'} />
-              <Text style={[styles.paymentLabel, paymentMethod === 'cash' && styles.paymentLabelActive]}>{tr('cash')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              testID="payment-stripe-btn"
-              style={[styles.paymentOption, paymentMethod === 'stripe' && styles.paymentOptionActive]}
-              onPress={() => setPaymentMethod('stripe')}
-            >
-              <Ionicons name="card-outline" size={24} color={paymentMethod === 'stripe' ? '#FF3B30' : '#666'} />
-              <Text style={[styles.paymentLabel, paymentMethod === 'stripe' && styles.paymentLabelActive]}>{tr('card')}</Text>
-            </TouchableOpacity>
-          </View>
+          {SHOW_CARD_PAYMENT ? (
+            <View style={styles.paymentOptions}>
+              <TouchableOpacity
+                testID="payment-cash-btn"
+                style={[styles.paymentOption, paymentMethod === 'cash' && styles.paymentOptionActive]}
+                onPress={() => setPaymentMethod('cash')}
+              >
+                <Ionicons name="cash-outline" size={24} color={paymentMethod === 'cash' ? '#FF3B30' : '#666'} />
+                <Text style={[styles.paymentLabel, paymentMethod === 'cash' && styles.paymentLabelActive]}>{tr('cash')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="payment-stripe-btn"
+                style={[styles.paymentOption, paymentMethod === 'stripe' && styles.paymentOptionActive]}
+                onPress={() => setPaymentMethod('stripe')}
+              >
+                <Ionicons name="card-outline" size={24} color={paymentMethod === 'stripe' ? '#FF3B30' : '#666'} />
+                <Text style={[styles.paymentLabel, paymentMethod === 'stripe' && styles.paymentLabelActive]}>{tr('card')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.cashOnlyCard}>
+              <Ionicons name="cash-outline" size={26} color="#FF3B30" />
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.cashOnlyTitle}>{tr('cash')}</Text>
+                <Text style={styles.cashOnlySub}>Paid in cash at pickup. Our agent will provide a receipt.</Text>
+              </View>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -990,6 +1003,9 @@ const styles = StyleSheet.create({
   mileageTitle: { fontSize: 14, fontWeight: '800' },
   mileageSub: { fontSize: 12, marginTop: 4, lineHeight: 16 },
   depositCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#eaf3ff', borderWidth: 1, borderColor: '#0a84ff', borderRadius: 12, padding: 14 },
+  cashOnlyCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF5F4', borderWidth: 1, borderColor: '#FF3B30', borderRadius: 12, padding: 14 },
+  cashOnlyTitle: { fontSize: 15, fontWeight: '800', color: '#0A0A0A' },
+  cashOnlySub: { fontSize: 12, color: '#666', marginTop: 2, lineHeight: 16, fontWeight: '500' },
   depositTitle: { fontSize: 14, fontWeight: '800', color: '#0a3d80' },
   depositSub: { fontSize: 12, marginTop: 4, lineHeight: 16, color: '#1d4f8f' },
   promoRow: { flexDirection: 'row', gap: 10 },
