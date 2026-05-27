@@ -307,10 +307,21 @@ export default function BookingScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickupCountry, car?.id, countryByName]);
 
-  // Tax rate refreshes whenever the *selected* pickup location changes
+  // Tax rate refreshes whenever the *selected* pickup location changes.
   useEffect(() => {
     const locName = selectedPickup?.name;
     if (!locName) return;
+
+    // 🔑 STEP 1 — Set the country *synchronously* from the prefetched map so the
+    // tax label (ITBIS vs Tax) updates in the same render cycle as the chip tap.
+    // This prevents a flicker where the previous selection's label briefly
+    // remains visible while the API call below is in-flight.
+    const eagerCountry = (countryByName[locName.toLowerCase()] || '').trim();
+    setPickupCountry(eagerCountry);
+    // Also clear stale tax rate so the user doesn't see e.g. "8.875%" leftover
+    // from a US pickup while transitioning to a DR pickup.
+    setTaxRate(0);
+
     const ctrl = new AbortController();
     (async () => {
       try {
@@ -334,7 +345,7 @@ export default function BookingScreen() {
           // Falls back to the {name → country} map if tax-by-name didn't resolve a country.
           const co = (taxData.country || '').trim();
           if (co) setPickupCountry(co);
-          else setPickupCountry((countryByName[(locName || '').toLowerCase()] || '').trim());
+          else if (eagerCountry) setPickupCountry(eagerCountry);
         } else {
           setTaxRate(0);
           setLocMinDays(1);
@@ -344,14 +355,14 @@ export default function BookingScreen() {
           setUnlimitedMileage(true);
           setMileageLimitPerDay(0);
           setExtraMileageCharge(0);
-          setPickupCountry((countryByName[(locName || '').toLowerCase()] || '').trim());
+          if (eagerCountry) setPickupCountry(eagerCountry);
         }
       } catch (e: any) {
         if (e?.name !== 'AbortError') console.log('Tax fetch error:', e);
       }
     })();
     return () => ctrl.abort();
-  }, [selectedPickup?.name]);
+  }, [selectedPickup?.name, countryByName]);
 
   const handleBooking = async () => {
     if (!car) return;
