@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { BACKEND_URL } from '../src/config';
+import { taxLabel } from '../src/tax';
 
 export default function BookingSuccessScreen() {
   const { bookingId, session_id } = useLocalSearchParams<{ bookingId?: string; session_id?: string }>();
@@ -81,7 +82,7 @@ export default function BookingSuccessScreen() {
                       <Text style={styles.breakdownValue}>${(booking.subtotal ?? booking.total_price).toFixed(2)}</Text>
                     </View>
                     <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownLabel}>Tax ({booking.tax_rate ?? 0}%)</Text>
+                      <Text style={styles.breakdownLabel}>{taxLabel(booking?.pickup_location?.country)} ({booking.tax_rate ?? 0}%)</Text>
                       <Text style={styles.breakdownValue}>${(booking.tax_amount ?? 0).toFixed(2)}</Text>
                     </View>
                   </View>

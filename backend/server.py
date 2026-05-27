@@ -229,6 +229,20 @@ def _email_template(title: str, intro: str, body_blocks_html: str, cta_label: Op
 </body></html>"""
 
 
+def _tax_label(country: str | None) -> str:
+    """Return the localized name of the sales/VAT tax for a country.
+
+    - Dominican Republic → ITBIS
+    - everything else    → Tax
+    """
+    if not country:
+        return "Tax"
+    c = country.strip().lower()
+    if c in ("dominican republic", "republica dominicana", "república dominicana", "do", "dom", "rd", "dr"):
+        return "ITBIS"
+    return "Tax"
+
+
 def _booking_summary_block(booking: dict) -> str:
     car = booking.get("car_name") or "Vehicle"
     pickup_date = (str(booking.get("pickup_date") or ""))[:10]
@@ -251,7 +265,7 @@ def _booking_summary_block(booking: dict) -> str:
         rate = float(booking.get("extra_mileage_rate") or 0)
         rows.append((f"Extra Mileage ({extra_km} km × ${rate:.2f})", f"<strong style='color:#a05a00'>${extra_fee:,.2f}</strong>"))
     rows += [
-        ("Tax", f"${float(tax):,.2f}"),
+        (_tax_label((booking.get("pickup_location") or {}).get("country")), f"${float(tax):,.2f}"),
         ("Total", f"<strong style='color:#FF3B30'>${float(total):,.2f}</strong>"),
         ("Payment", (booking.get("payment_method") or "—").upper()),
     ]
@@ -1595,7 +1609,17 @@ async def create_booking(booking: BookingCreate, request: Request):
     taxable_amount = round(discounted_subtotal + refuel_charge, 2)
     tax_amount = round(taxable_amount * (tax_rate / 100), 2)
     total = round(taxable_amount + tax_amount, 2)
-    
+
+    # ---- Enrich pickup/dropoff dicts with country & city so the receipt/email
+    # can render the correct tax label (ITBIS for DR, Tax for US, etc.) even
+    # if the mobile client only sent {name, lat, lng}. ----
+    pickup_loc_full = dict(booking.pickup_location or {})
+    if pickup_country and not pickup_loc_full.get("country"):
+        pickup_loc_full["country"] = pickup_country
+    dropoff_loc_full = dict(booking.dropoff_location or {})
+    if dropoff_country and not dropoff_loc_full.get("country"):
+        dropoff_loc_full["country"] = dropoff_country
+
     booking_doc = {
         "user_id": str(user_id),
         "user_email": user.get("email", ""),
@@ -1605,8 +1629,8 @@ async def create_booking(booking: BookingCreate, request: Request):
         "car_image": car.get("image_url", ""),
         "pickup_date": booking.pickup_date,
         "dropoff_date": booking.dropoff_date,
-        "pickup_location": booking.pickup_location,
-        "dropoff_location": booking.dropoff_location,
+        "pickup_location": pickup_loc_full,
+        "dropoff_location": dropoff_loc_full,
         "days": days,
         "price_per_day": car["price_per_day"],
         "subtotal": subtotal,
@@ -2265,7 +2289,7 @@ def _generate_receipt_pdf(booking: dict) -> bytes:
         extra_km = booking.get("extra_mileage_km") or 0
         rate = booking.get("extra_mileage_rate") or 0
         row(f"Extra Mileage ({extra_km} km × ${rate:.2f})", f"${extra_mileage_fee:,.2f}")
-    row(f"Tax ({tax_rate}%)", f"${tax_amount:,.2f}")
+    row(f"{_tax_label((booking.get('pickup_location') or {}).get('country'))} ({tax_rate}%)", f"${tax_amount:,.2f}")
 
     # Grand total (highlighted)
     y -= 4 * mm

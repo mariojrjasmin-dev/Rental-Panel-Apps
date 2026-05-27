@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import BrandLogo from '../components/BrandLogo';
+import { taxLabel } from '../src/tax';
 
 import { BACKEND_URL } from '../src/config';
 
@@ -235,7 +236,7 @@ export default function ReceiptScreen() {
             />
           )}
           <Row
-            label={`Tax (${booking.tax_rate || 0}%)`}
+            label={`${taxLabel((booking.pickup_location as any)?.country)} (${booking.tax_rate || 0}%)`}
             value={`$${(booking.tax_amount || 0).toFixed(2)}`}
             hint={booking.pickup_location?.name}
           />
