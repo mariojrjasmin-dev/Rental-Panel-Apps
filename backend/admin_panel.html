@@ -629,7 +629,12 @@ async function showDashboard() {
         <div class="kpi">
           <div class="kpi-row"><div class="kpi-label">Registered customers</div><div class="kpi-icon kpi-blue">👥</div></div>
           <div class="kpi-value">${stats.total_users}</div>
-          <div class="kpi-delta">All time</div>
+          <div class="kpi-delta">Customer accounts (excl. admins)</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-row"><div class="kpi-label">Customers who booked</div><div class="kpi-icon kpi-green">🛒</div></div>
+          <div class="kpi-value">${stats.unique_booking_customers ?? '—'}</div>
+          <div class="kpi-delta">Unique by email</div>
         </div>
       </div>
 

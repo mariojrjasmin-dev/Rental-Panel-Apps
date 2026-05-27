@@ -2474,7 +2474,15 @@ async def get_admin_stats(request: Request):
     
     total_cars = await db.cars.count_documents({})
     total_bookings = await db.bookings.count_documents({})
-    total_users = await db.users.count_documents({})
+    # "Registered customers" should ONLY count end-customers — not admins/staff.
+    # Falls back to all users for legacy installs where role is missing.
+    total_users = await db.users.count_documents({"$or": [{"role": "user"}, {"role": {"$exists": False}}]})
+    # Deduplicate booking customers by lowercase email so casing/whitespace
+    # variants don't inflate the count.
+    booking_emails = await db.bookings.distinct("user_email")
+    unique_emails = {(e or "").strip().lower() for e in booking_emails if e}
+    unique_emails.discard("")
+    unique_booking_customers = len(unique_emails)
     active_bookings = await db.bookings.count_documents({"status": "confirmed"})
     total_locations = await db.locations.count_documents({})
     
@@ -2482,6 +2490,7 @@ async def get_admin_stats(request: Request):
         "total_cars": total_cars,
         "total_bookings": total_bookings,
         "total_users": total_users,
+        "unique_booking_customers": unique_booking_customers,
         "active_bookings": active_bookings,
         "total_locations": total_locations
     }
