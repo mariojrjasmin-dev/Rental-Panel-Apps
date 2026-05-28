@@ -1566,10 +1566,62 @@ async function showCarForm(id) {
   let car = {name:'',brand:'',model:'',year:2024,category:'Sedan',price_per_day:0,seats:5,transmission:'Automatic',fuel_type:'Gasoline',description:'',image_url:'',pickup_location:{name:'',lat:0,lng:0},dropoff_location:{name:'',lat:0,lng:0}};
   if (id) { try { car = await api('/cars/'+id); } catch(e){} }
   const cats = ['Sedan','SUV','Luxury','Electric','Sports','Compact'];
+
+  // --- Prune deleted / inactive locations from the car's saved data ---
+  // The car may reference locations that have since been deleted or
+  // deactivated. Filter them out so the form starts in a clean state:
+  // the stock-input rows, hidden form inputs, and saved payload all
+  // only carry references to currently-ACTIVE locations. (The global
+  // `locations` array is already filtered to active-only via
+  // GET /api/locations.) Detected stale entries are reported via a
+  // small banner so the admin knows to click Save to commit the cleanup.
+  const _activeLocSet = new Set((locations || []).map(l => String(l.name || '').trim().toLowerCase()));
+  const _pruneLocs = (arr) => {
+    if (!Array.isArray(arr)) return { kept: [], removed: [] };
+    const kept = [], removed = [];
+    for (const x of arr) {
+      const nm = String((x && x.name) || '').trim();
+      if (!nm) continue;
+      if (_activeLocSet.has(nm.toLowerCase())) kept.push(x);
+      else removed.push(nm);
+    }
+    return { kept, removed };
+  };
+  const _origPickups = (car.pickup_locations && car.pickup_locations.length)
+    ? car.pickup_locations
+    : (car.pickup_location && car.pickup_location.name ? [car.pickup_location] : []);
+  const _origDropoffs = (car.dropoff_locations && car.dropoff_locations.length)
+    ? car.dropoff_locations
+    : (car.dropoff_location && car.dropoff_location.name ? [car.dropoff_location] : []);
+  const _prunedPickups = _pruneLocs(_origPickups);
+  const _prunedDropoffs = _pruneLocs(_origDropoffs);
+  // Also prune the stock dict so deleted-location stock entries disappear.
+  const _stockClean = {};
+  const _stockRemoved = [];
+  Object.entries(car.stock || {}).forEach(([k, v]) => {
+    const lower = String(k || '').trim().toLowerCase();
+    if (_activeLocSet.has(lower)) _stockClean[k] = v;
+    else if (k) _stockRemoved.push(k);
+  });
+  const _staleNames = Array.from(new Set([
+    ..._prunedPickups.removed,
+    ..._prunedDropoffs.removed,
+    ..._stockRemoved,
+  ]));
+  const _staleBanner = _staleNames.length ? `
+        <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:10px 12px;margin:10px 0;font-size:12px;color:#9a3412;font-weight:600;line-height:1.5">
+          🧹 <strong>Cleaned up ${_staleNames.length} deleted/inactive location reference${_staleNames.length>1?'s':''}</strong> on this vehicle: ${_staleNames.map(n => '<code style="background:#fed7aa;padding:1px 6px;border-radius:6px;color:#7c2d12">' + String(n).replace(/</g,'&lt;') + '</code>').join(' ')}. Click <strong>Save</strong> to commit, or pick replacement location${_staleNames.length>1?'s':''} below first.
+        </div>` : '';
+  // The car object below uses the PRUNED arrays/stock everywhere.
+  car.pickup_locations = _prunedPickups.kept;
+  car.dropoff_locations = _prunedDropoffs.kept;
+  car.stock = _stockClean;
+
   document.getElementById('modal-root').innerHTML = `
     <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
       <div class="modal">
         <h2>${id?'Edit':'Add'} Vehicle</h2>
+        ${_staleBanner}
         <div class="form-group"><label>Vehicle Photos <span style="color:#999;font-weight:normal;font-size:12px">(First photo is the main image)</span></label>
           <div id="gallery-wrap" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:10px"></div>
           <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -1782,6 +1834,24 @@ async function saveCar(id) {
   };
   try { body.pickup_locations = JSON.parse(document.getElementById('f-pickups').value || '[]'); } catch(e) { body.pickup_locations = []; }
   try { body.dropoff_locations = JSON.parse(document.getElementById('f-dropoffs').value || '[]'); } catch(e) { body.dropoff_locations = []; }
+  // Defensive prune at save-time: ensure no stale/deleted/inactive location
+  // names sneak back into the DB even if `locations` was refreshed while
+  // this form was open. Same filter as the form-open prune.
+  {
+    const _activeAtSave = new Set((locations || []).map(l => String(l.name || '').trim().toLowerCase()));
+    body.pickup_locations = (body.pickup_locations || []).filter(
+      x => x && x.name && _activeAtSave.has(String(x.name).trim().toLowerCase())
+    );
+    body.dropoff_locations = (body.dropoff_locations || []).filter(
+      x => x && x.name && _activeAtSave.has(String(x.name).trim().toLowerCase())
+    );
+    // Also strip stock keys that don't match any active location.
+    const cleanStock = {};
+    Object.entries(body.stock || {}).forEach(([k, v]) => {
+      if (k && _activeAtSave.has(String(k).trim().toLowerCase())) cleanStock[k] = v;
+    });
+    body.stock = cleanStock;
+  }
   if (!body.name||!body.brand||!body.price_per_day) { alert('Name, brand and price required'); return; }
   if (!body.pickup_locations.length) { alert('❌ Please select at least one Pickup Location before saving the vehicle.'); return; }
   if (!body.dropoff_locations.length) { alert('❌ Please select at least one Drop-off Location before saving the vehicle.'); return; }
