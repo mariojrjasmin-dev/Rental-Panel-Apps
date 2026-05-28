@@ -8,6 +8,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import BrandLogo from '../components/BrandLogo';
 import { taxLabel } from '../src/tax';
+import { useTheme } from '../src/theme';
 
 import { BACKEND_URL } from '../src/config';
 
@@ -45,6 +46,7 @@ export default function ReceiptScreen() {
   const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const { colors, isDark } = useTheme();
 
   useEffect(() => {
     const load = async () => {
@@ -142,25 +144,25 @@ export default function ReceiptScreen() {
   const shortId = (booking.id || '').slice(-10).toUpperCase();
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: colors.bgElevated, borderBottomColor: colors.border }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.6}>
-          <Ionicons name="arrow-back" size={22} color="#0A0A0A" />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerTitle}>
           <BrandLogo size="small" testID="receipt-header-logo" imageStyle={{ width: 110, height: 33 }} />
           <Text style={styles.headerSub}>RECEIPT</Text>
         </View>
         <TouchableOpacity style={styles.downloadIconBtn} onPress={downloadPdf} disabled={downloading} activeOpacity={0.6}>
-          {downloading ? <ActivityIndicator size="small" color="#FF3B30" /> : <Ionicons name="share-outline" size={22} color="#FF3B30" />}
+          {downloading ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="share-outline" size={22} color={colors.brand} />}
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Receipt header card */}
+        {/* Receipt header card — intentionally always dark for paper-receipt feel */}
         <View style={styles.receiptHeader}>
           <View style={styles.receiptHeaderRow}>
             <View>
@@ -181,75 +183,79 @@ export default function ReceiptScreen() {
         </View>
 
         {/* Vehicle card */}
-        <View style={styles.vehicleCard}>
+        <View style={[styles.vehicleCard, { backgroundColor: colors.bgElevated }]}>
           {!!booking.car_image && (
-            <Image source={{ uri: booking.car_image }} style={styles.vehicleImage} resizeMode="cover" />
+            <Image source={{ uri: booking.car_image }} style={[styles.vehicleImage, { backgroundColor: colors.bgSubtle }]} resizeMode="cover" />
           )}
           <View style={styles.vehicleInfo}>
-            <Text style={styles.sectionLabel}>VEHICLE</Text>
-            <Text style={styles.vehicleName}>{booking.car_name}</Text>
+            <Text style={[styles.sectionLabel, { color: colors.textSubtle }]}>VEHICLE</Text>
+            <Text style={[styles.vehicleName, { color: colors.text }]}>{booking.car_name}</Text>
           </View>
         </View>
 
         {/* Customer */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>BILLED TO</Text>
-          <Text style={styles.value}>{booking.user_name || 'Customer'}</Text>
-          <Text style={styles.muted}>{booking.user_email || ''}</Text>
+        <View style={[styles.section, { backgroundColor: colors.bgElevated }]}>
+          <Text style={[styles.sectionLabel, { color: colors.textSubtle }]}>BILLED TO</Text>
+          <Text style={[styles.value, { color: colors.text }]}>{booking.user_name || 'Customer'}</Text>
+          <Text style={[styles.muted, { color: colors.textMuted }]}>{booking.user_email || ''}</Text>
         </View>
 
         {/* Rental details */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>RENTAL DETAILS</Text>
-          <Row label="Pickup" value={fmt(booking.pickup_date)} />
-          <Row label="Drop-off" value={fmt(booking.dropoff_date)} />
-          {!!booking.pickup_location?.name && <Row label="Pickup Location" value={booking.pickup_location.name} />}
-          {!!booking.dropoff_location?.name && <Row label="Drop-off Location" value={booking.dropoff_location.name} />}
-          <Row label="Duration" value={`${booking.days} day${booking.days === 1 ? '' : 's'}`} />
-          <Row label="Payment" value={(booking.payment_method || 'cash').toUpperCase()} />
+        <View style={[styles.section, { backgroundColor: colors.bgElevated }]}>
+          <Text style={[styles.sectionLabel, { color: colors.textSubtle }]}>RENTAL DETAILS</Text>
+          <Row colors={colors} label="Pickup" value={fmt(booking.pickup_date)} />
+          <Row colors={colors} label="Drop-off" value={fmt(booking.dropoff_date)} />
+          {!!booking.pickup_location?.name && <Row colors={colors} label="Pickup Location" value={booking.pickup_location.name} />}
+          {!!booking.dropoff_location?.name && <Row colors={colors} label="Drop-off Location" value={booking.dropoff_location.name} />}
+          <Row colors={colors} label="Duration" value={`${booking.days} day${booking.days === 1 ? '' : 's'}`} />
+          <Row colors={colors} label="Payment" value={(booking.payment_method || 'cash').toUpperCase()} />
           {booking.odometer_in != null && (
-            <Row label="Odometer (Pickup)" value={`${Number(booking.odometer_in).toLocaleString()} km`} />
+            <Row colors={colors} label="Odometer (Pickup)" value={`${Number(booking.odometer_in).toLocaleString()} km`} />
           )}
           {booking.odometer_out != null && (
-            <Row label="Odometer (Drop-off)" value={`${Number(booking.odometer_out).toLocaleString()} km`} />
+            <Row colors={colors} label="Odometer (Drop-off)" value={`${Number(booking.odometer_out).toLocaleString()} km`} />
           )}
         </View>
 
         {/* Cost breakdown */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>COST BREAKDOWN</Text>
+        <View style={[styles.section, { backgroundColor: colors.bgElevated }]}>
+          <Text style={[styles.sectionLabel, { color: colors.textSubtle }]}>COST BREAKDOWN</Text>
           <Row
+            colors={colors}
             label={`Daily Rate × ${booking.days}`}
             value={`$${(booking.days ? (booking.subtotal || 0) / booking.days : 0).toFixed(2)} × ${booking.days}`}
           />
-          <Row label="Subtotal" value={`$${(booking.subtotal || 0).toFixed(2)}`} bold />
+          <Row colors={colors} label="Subtotal" value={`$${(booking.subtotal || 0).toFixed(2)}`} bold />
           {(booking as any).promo_code && (booking as any).discount_amount > 0 && (
             <Row
+              colors={colors}
               label={`Promo (${(booking as any).promo_code})`}
               value={`−$${((booking as any).discount_amount || 0).toFixed(2)}`}
             />
           )}
           {!!booking.extra_mileage_fee && booking.extra_mileage_fee > 0 && (
             <Row
+              colors={colors}
               label={`Extra Mileage (${booking.extra_mileage_km || 0} km × $${(booking.extra_mileage_rate || 0).toFixed(2)})`}
               value={`$${booking.extra_mileage_fee.toFixed(2)}`}
             />
           )}
           <Row
+            colors={colors}
             label={`${taxLabel((booking.pickup_location as any)?.country)} (${booking.tax_rate || 0}%)`}
             value={`$${(booking.tax_amount || 0).toFixed(2)}`}
             hint={booking.pickup_location?.name}
           />
         </View>
 
-        {/* Grand total */}
+        {/* Grand total — intentionally always brand-red */}
         <View style={styles.totalCard}>
           <Text style={styles.totalLabel}>GRAND TOTAL</Text>
           <Text style={styles.totalValue}>${(booking.total_price || 0).toFixed(2)}</Text>
           <Text style={styles.totalCurrency}>USD</Text>
         </View>
 
-        {/* Refundable security deposit (separate — not added to grand total) */}
+        {/* Refundable security deposit */}
         {!!booking.deposit && booking.deposit > 0 && (
           <View style={styles.depositCard}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -264,7 +270,7 @@ export default function ReceiptScreen() {
         )}
 
         {/* Actions */}
-        <TouchableOpacity style={styles.downloadBtn} onPress={downloadPdf} disabled={downloading} activeOpacity={0.7}>
+        <TouchableOpacity style={[styles.downloadBtn, { backgroundColor: isDark ? colors.bgElevated : '#0A0A0A', borderWidth: isDark ? 1 : 0, borderColor: colors.border }]} onPress={downloadPdf} disabled={downloading} activeOpacity={0.7}>
           {downloading ? (
             <ActivityIndicator color="#FFF" />
           ) : (
@@ -277,21 +283,21 @@ export default function ReceiptScreen() {
           )}
         </TouchableOpacity>
 
-        <Text style={styles.footer}>Thank you for choosing DAMS Car Rental.</Text>
-        <Text style={styles.footerSmall}>support@damscarrental.com</Text>
+        <Text style={[styles.footer, { color: colors.textMuted }]}>Thank you for choosing DAMS Car Rental.</Text>
+        <Text style={[styles.footerSmall, { color: colors.textSubtle }]}>support@damscarrental.com</Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function Row({ label, value, bold, hint }: { label: string; value: string; bold?: boolean; hint?: string }) {
+function Row({ label, value, bold, hint, colors }: { label: string; value: string; bold?: boolean; hint?: string; colors: any }) {
   return (
     <View style={styles.row}>
-      <Text style={styles.rowLabel}>
+      <Text style={[styles.rowLabel, { color: colors.textMuted }]}>
         {label}
-        {hint ? <Text style={styles.rowHint}>  · {hint}</Text> : null}
+        {hint ? <Text style={[styles.rowHint, { color: colors.textSubtle }]}>  · {hint}</Text> : null}
       </Text>
-      <Text style={[styles.rowValue, bold && { fontWeight: '800' }]}>{value}</Text>
+      <Text style={[styles.rowValue, { color: colors.text }, bold && { fontWeight: '800' }]}>{value}</Text>
     </View>
   );
 }

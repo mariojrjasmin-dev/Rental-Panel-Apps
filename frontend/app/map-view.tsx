@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
+import { useTheme } from '../src/theme';
 
 type Coords = { latitude: number; longitude: number };
 
@@ -46,6 +47,7 @@ export default function MapViewScreen() {
   const [userLocation, setUserLocation] = useState<Coords | null>(null);
   const [permissionStatus, setPermissionStatus] = useState<'idle' | 'requesting' | 'granted' | 'denied' | 'unavailable'>('idle');
   const [locating, setLocating] = useState(false);
+  const { colors, isDark } = useTheme();
 
   // Request location permission + fetch position
   const requestAndFetchLocation = async (silent = false) => {
@@ -176,13 +178,13 @@ export default function MapViewScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity testID="map-back-btn" style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#0A0A0A" />
+        <TouchableOpacity testID="map-back-btn" style={[styles.backBtn, { backgroundColor: colors.bgSubtle }]} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Directions</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Directions</Text>
         <View style={{ width: 44 }} />
       </View>
 
@@ -194,27 +196,27 @@ export default function MapViewScreen() {
         {/* User "You are here" card — only when we have location */}
         {userLocation && (
           <>
-            <View style={styles.locationCardSelf}>
+            <View style={[styles.locationCardSelf, { backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#F0F8FF', borderColor: isDark ? 'rgba(59,130,246,0.35)' : '#cfe3ff' }]}>
               <View style={styles.pinLineWrap}>
-                <View style={[styles.pinDot, { backgroundColor: '#007AFF' }]} />
-                <View style={styles.pinLine} />
+                <View style={[styles.pinDot, { backgroundColor: colors.info }]} />
+                <View style={[styles.pinLine, { backgroundColor: colors.border }]} />
               </View>
               <View style={styles.locationInfo}>
-                <Text style={styles.locationLabel}>YOU ARE HERE</Text>
-                <Text style={styles.locationName}>Your current location</Text>
-                <Text style={styles.locationCoords}>
+                <Text style={[styles.locationLabel, { color: colors.textSubtle }]}>YOU ARE HERE</Text>
+                <Text style={[styles.locationName, { color: colors.text }]}>Your current location</Text>
+                <Text style={[styles.locationCoords, { color: colors.textSubtle }]}>
                   {userLocation.latitude.toFixed(4)}, {userLocation.longitude.toFixed(4)}
                 </Text>
               </View>
-              <Ionicons name="locate" size={22} color="#007AFF" />
+              <Ionicons name="locate" size={22} color={colors.info} />
             </View>
 
             <View style={styles.connector}>
-              <View style={styles.connectorLine} />
-              <View style={styles.connectorBadge}>
-                <Ionicons name="walk" size={14} color="#FFF" />
+              <View style={[styles.connectorLine, { backgroundColor: colors.border }]} />
+              <View style={[styles.connectorBadge, { backgroundColor: colors.text }]}>
+                <Ionicons name="walk" size={14} color={colors.bg} />
               </View>
-              <View style={styles.connectorLine} />
+              <View style={[styles.connectorLine, { backgroundColor: colors.border }]} />
             </View>
           </>
         )}
@@ -222,59 +224,59 @@ export default function MapViewScreen() {
         {/* Pickup card */}
         <TouchableOpacity
           testID="directions-pickup-btn"
-          style={styles.locationCard}
+          style={[styles.locationCard, { backgroundColor: colors.bgElevated, borderColor: colors.border, borderWidth: 1 }]}
           activeOpacity={0.7}
           onPress={() => navigateTo(pickupLat, pickupLng, pickupName)}
         >
           <View style={styles.pinLineWrap}>
-            <View style={[styles.pinDot, { backgroundColor: '#34C759' }]} />
-            <View style={styles.pinLine} />
+            <View style={[styles.pinDot, { backgroundColor: colors.success }]} />
+            <View style={[styles.pinLine, { backgroundColor: colors.border }]} />
           </View>
           <View style={styles.locationInfo}>
-            <Text style={styles.locationLabel}>PICKUP LOCATION</Text>
-            <Text style={styles.locationName}>{pickupName}</Text>
-            <Text style={styles.locationCoords}>
+            <Text style={[styles.locationLabel, { color: colors.textSubtle }]}>PICKUP LOCATION</Text>
+            <Text style={[styles.locationName, { color: colors.text }]}>{pickupName}</Text>
+            <Text style={[styles.locationCoords, { color: colors.textSubtle }]}>
               {pickupLat.toFixed(4)}, {pickupLng.toFixed(4)}
               {distanceToPickup !== null && (
-                <Text style={styles.distanceText}>{`  ·  ${formatDistance(distanceToPickup)} away`}</Text>
+                <Text style={[styles.distanceText, { color: colors.info }]}>{`  ·  ${formatDistance(distanceToPickup)} away`}</Text>
               )}
             </Text>
           </View>
-          <View style={[styles.goBtn, { backgroundColor: '#34C759' }]}>
+          <View style={[styles.goBtn, { backgroundColor: colors.success }]}>
             <Ionicons name="navigate" size={18} color="#FFF" />
           </View>
         </TouchableOpacity>
 
         {/* Route connector */}
         <View style={styles.connector}>
-          <View style={styles.connectorLine} />
-          <View style={styles.connectorBadge}>
-            <Ionicons name="car-sport" size={16} color="#FFF" />
+          <View style={[styles.connectorLine, { backgroundColor: colors.border }]} />
+          <View style={[styles.connectorBadge, { backgroundColor: colors.text }]}>
+            <Ionicons name="car-sport" size={16} color={colors.bg} />
           </View>
-          <View style={styles.connectorLine} />
+          <View style={[styles.connectorLine, { backgroundColor: colors.border }]} />
         </View>
 
         {/* Dropoff card */}
         <TouchableOpacity
           testID="directions-dropoff-btn"
-          style={styles.locationCard}
+          style={[styles.locationCard, { backgroundColor: colors.bgElevated, borderColor: colors.border, borderWidth: 1 }]}
           activeOpacity={0.7}
           onPress={() => navigateTo(dropoffLat, dropoffLng, dropoffName)}
         >
           <View style={styles.pinLineWrap}>
-            <View style={[styles.pinDot, { backgroundColor: '#FF3B30' }]} />
+            <View style={[styles.pinDot, { backgroundColor: colors.brand }]} />
           </View>
           <View style={styles.locationInfo}>
-            <Text style={styles.locationLabel}>DROP-OFF LOCATION</Text>
-            <Text style={styles.locationName}>{dropoffName}</Text>
-            <Text style={styles.locationCoords}>
+            <Text style={[styles.locationLabel, { color: colors.textSubtle }]}>DROP-OFF LOCATION</Text>
+            <Text style={[styles.locationName, { color: colors.text }]}>{dropoffName}</Text>
+            <Text style={[styles.locationCoords, { color: colors.textSubtle }]}>
               {dropoffLat.toFixed(4)}, {dropoffLng.toFixed(4)}
               {distanceToDropoff !== null && (
-                <Text style={styles.distanceText}>{`  ·  ${formatDistance(distanceToDropoff)} away`}</Text>
+                <Text style={[styles.distanceText, { color: colors.info }]}>{`  ·  ${formatDistance(distanceToDropoff)} away`}</Text>
               )}
             </Text>
           </View>
-          <View style={[styles.goBtn, { backgroundColor: '#FF3B30' }]}>
+          <View style={[styles.goBtn, { backgroundColor: colors.brand }]}>
             <Ionicons name="navigate" size={18} color="#FFF" />
           </View>
         </TouchableOpacity>
@@ -284,7 +286,7 @@ export default function MapViewScreen() {
       <View style={styles.actions}>
         <TouchableOpacity
           testID="open-full-route-btn"
-          style={styles.primaryBtn}
+          style={[styles.primaryBtn, { backgroundColor: colors.info }]}
           onPress={openFullRoute}
           activeOpacity={0.7}
         >
@@ -296,28 +298,28 @@ export default function MapViewScreen() {
 
         <TouchableOpacity
           testID="pickup-navigate-btn"
-          style={styles.secondaryBtn}
+          style={[styles.secondaryBtn, { backgroundColor: colors.bgElevated, borderColor: colors.border, borderWidth: 1 }]}
           onPress={() => navigateTo(pickupLat, pickupLng, pickupName)}
           activeOpacity={0.7}
         >
-          <View style={[styles.miniDot, { backgroundColor: '#34C759' }]} />
-          <Text style={styles.secondaryBtnText}>
+          <View style={[styles.miniDot, { backgroundColor: colors.success }]} />
+          <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
             {userLocation ? 'Navigate from here → Pickup' : 'Navigate to Pickup'}
           </Text>
-          <Ionicons name="open-outline" size={16} color="#666" />
+          <Ionicons name="open-outline" size={16} color={colors.textMuted} />
         </TouchableOpacity>
 
         <TouchableOpacity
           testID="dropoff-navigate-btn"
-          style={styles.secondaryBtn}
+          style={[styles.secondaryBtn, { backgroundColor: colors.bgElevated, borderColor: colors.border, borderWidth: 1 }]}
           onPress={() => navigateTo(dropoffLat, dropoffLng, dropoffName)}
           activeOpacity={0.7}
         >
-          <View style={[styles.miniDot, { backgroundColor: '#FF3B30' }]} />
-          <Text style={styles.secondaryBtnText}>
+          <View style={[styles.miniDot, { backgroundColor: colors.brand }]} />
+          <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
             {userLocation ? 'Navigate from here → Drop-off' : 'Navigate to Drop-off'}
           </Text>
-          <Ionicons name="open-outline" size={16} color="#666" />
+          <Ionicons name="open-outline" size={16} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
     </SafeAreaView>
