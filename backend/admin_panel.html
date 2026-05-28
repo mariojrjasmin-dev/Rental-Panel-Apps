@@ -1616,12 +1616,46 @@ async function showCarForm(id) {
   car.pickup_locations = _prunedPickups.kept;
   car.dropoff_locations = _prunedDropoffs.kept;
   car.stock = _stockClean;
+  // Also prune the DEPRECATED SINGULAR mirrors (pickup_location /
+  // dropoff_location). The form-render template still falls back to
+  // these when the plural arrays are empty — so if they hold a stale
+  // (now-deleted/inactive) name, that ghost would leak through into
+  // the pills + stock-input section. Track the stale singular names
+  // so they show up in the banner too.
+  const _singularPruned = [];
+  if (car.pickup_location && car.pickup_location.name) {
+    const sname = String(car.pickup_location.name).trim();
+    if (sname && !_activeLocSet.has(sname.toLowerCase())) {
+      _singularPruned.push(sname);
+      car.pickup_location = null;
+    }
+  }
+  if (car.dropoff_location && car.dropoff_location.name) {
+    const sname = String(car.dropoff_location.name).trim();
+    if (sname && !_activeLocSet.has(sname.toLowerCase())) {
+      _singularPruned.push(sname);
+      car.dropoff_location = null;
+    }
+  }
+  // Merge any newly-discovered stale singular names into the banner.
+  if (_singularPruned.length) {
+    const _allStale = Array.from(new Set([..._staleNames, ..._singularPruned]));
+    _staleNames.length = 0;
+    _allStale.forEach(n => _staleNames.push(n));
+  }
+  // Re-build the banner string if we just discovered MORE stale names
+  // from the singular fields (only relevant when the plural arrays
+  // were already empty/clean but the singular still had ghost data).
+  const _staleBannerFinal = _staleNames.length ? `
+        <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:10px 12px;margin:10px 0;font-size:12px;color:#9a3412;font-weight:600;line-height:1.5">
+          🧹 <strong>Cleaned up ${_staleNames.length} deleted/inactive location reference${_staleNames.length>1?'s':''}</strong> on this vehicle: ${_staleNames.map(n => '<code style="background:#fed7aa;padding:1px 6px;border-radius:6px;color:#7c2d12">' + String(n).replace(/</g,'&lt;') + '</code>').join(' ')}. Click <strong>Save</strong> to commit, or pick replacement location${_staleNames.length>1?'s':''} below first.
+        </div>` : '';
 
   document.getElementById('modal-root').innerHTML = `
     <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
       <div class="modal">
         <h2>${id?'Edit':'Add'} Vehicle</h2>
-        ${_staleBanner}
+        ${_staleBannerFinal}
         <div class="form-group"><label>Vehicle Photos <span style="color:#999;font-weight:normal;font-size:12px">(First photo is the main image)</span></label>
           <div id="gallery-wrap" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:10px"></div>
           <div style="display:flex;gap:8px;margin-bottom:8px">
