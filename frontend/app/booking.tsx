@@ -37,7 +37,20 @@ export default function BookingScreen() {
   const [selectedDropoff, setSelectedDropoff] = useState<LocOpt | null>(null);
   // Country lookup: name → country (used to enforce same-country pickup/dropoff)
   const [pickupCountry, setPickupCountry] = useState<string>('');
+  // Per-location metadata lookup, prefetched on mount, so we can hydrate
+  // tax rate / country / mileage policy INSTANTLY when the user taps a chip
+  // (no waiting for /tax-by-name to come back).
   const [countryByName, setCountryByName] = useState<Record<string, string>>({});
+  const [locMetaByName, setLocMetaByName] = useState<Record<string, {
+    tax_rate: number;
+    country: string;
+    min_booking_days: number;
+    insurance_included: boolean;
+    refuel_amount: number;
+    unlimited_mileage: boolean;
+    mileage_limit_per_day: number;
+    extra_mileage_charge: number;
+  }>>({});
   // Rental terms state
   const [termsText, setTermsText] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -222,13 +235,27 @@ export default function BookingScreen() {
         const r = await fetch(`${BACKEND_URL}/api/locations`);
         if (r.ok) {
           const list = await r.json();
-          const map: Record<string, string> = {};
+          const countryMap: Record<string, string> = {};
+          const metaMap: Record<string, any> = {};
           for (const l of (list || [])) {
             const nm = (l?.name || '').trim();
             const co = (l?.country || '').trim();
-            if (nm) map[nm.toLowerCase()] = co;
+            if (!nm) continue;
+            const key = nm.toLowerCase();
+            countryMap[key] = co;
+            metaMap[key] = {
+              tax_rate: Number(l?.tax_rate) || 0,
+              country: co,
+              min_booking_days: Number(l?.min_booking_days) || 1,
+              insurance_included: Boolean(l?.insurance_included),
+              refuel_amount: Number(l?.refuel_amount) || 0,
+              unlimited_mileage: l?.unlimited_mileage !== false,
+              mileage_limit_per_day: Number(l?.mileage_limit_per_day) || 0,
+              extra_mileage_charge: Number(l?.extra_mileage_charge) || 0,
+            };
           }
-          setCountryByName(map);
+          setCountryByName(countryMap);
+          setLocMetaByName(metaMap);
         }
       } catch (e) { /* ignore */ }
     })();
@@ -311,17 +338,34 @@ export default function BookingScreen() {
   useEffect(() => {
     const locName = selectedPickup?.name;
     if (!locName) return;
+    const key = locName.toLowerCase();
 
-    // 🔑 STEP 1 — Set the country *synchronously* from the prefetched map so the
-    // tax label (ITBIS vs Tax) updates in the same render cycle as the chip tap.
-    // This prevents a flicker where the previous selection's label briefly
-    // remains visible while the API call below is in-flight.
-    const eagerCountry = (countryByName[locName.toLowerCase()] || '').trim();
-    setPickupCountry(eagerCountry);
-    // Also clear stale tax rate so the user doesn't see e.g. "8.875%" leftover
-    // from a US pickup while transitioning to a DR pickup.
-    setTaxRate(0);
+    // 🔑 STEP 1 — INSTANT hydration from the prefetched per-location map.
+    // This guarantees the cost summary shows the correct tax rate + label in
+    // the SAME render cycle as the chip tap, with zero flicker and no
+    // "Tax (0%)" loading state.
+    const cached = locMetaByName[key];
+    if (cached) {
+      setTaxRate(cached.tax_rate);
+      setLocMinDays(cached.min_booking_days);
+      setInsuranceIncluded(cached.insurance_included);
+      setRefuelAmount(cached.refuel_amount);
+      if (cached.refuel_amount <= 0) setRefuelOptedIn(false);
+      setUnlimitedMileage(cached.unlimited_mileage);
+      setMileageLimitPerDay(cached.mileage_limit_per_day);
+      setExtraMileageCharge(cached.extra_mileage_charge);
+      setPickupCountry(cached.country);
+    } else {
+      // Cache miss (network race) — at least pick up country from countryByName
+      // and clear stale tax rate so the user doesn't see e.g. 8.875% from the
+      // previous pickup while the freshness fetch is in flight.
+      const eagerCountry = (countryByName[key] || '').trim();
+      setPickupCountry(eagerCountry);
+      setTaxRate(0);
+    }
 
+    // 🔑 STEP 2 — also do an async refresh from the source-of-truth endpoint
+    // in case admin changed tax/refuel after the locations prefetch.
     const ctrl = new AbortController();
     (async () => {
       try {
@@ -329,40 +373,28 @@ export default function BookingScreen() {
           `${BACKEND_URL}/api/locations/tax-by-name?name=${encodeURIComponent(locName)}`,
           { signal: ctrl.signal }
         );
-        if (taxRes.ok) {
-          const taxData = await taxRes.json();
-          setTaxRate(Number(taxData.tax_rate) || 0);
-          setLocMinDays(Number(taxData.min_booking_days) || 1);
-          setInsuranceIncluded(Boolean(taxData.insurance_included));
-          const refuel = Number(taxData.refuel_amount) || 0;
-          setRefuelAmount(refuel);
-          if (refuel <= 0) setRefuelOptedIn(false);
-          // Mileage policy (per-location)
-          setUnlimitedMileage(taxData.unlimited_mileage !== false);
-          setMileageLimitPerDay(Number(taxData.mileage_limit_per_day) || 0);
-          setExtraMileageCharge(Number(taxData.extra_mileage_charge) || 0);
-          // Track pickup country so we can enforce same-country dropoff.
-          // Falls back to the {name → country} map if tax-by-name didn't resolve a country.
-          const co = (taxData.country || '').trim();
-          if (co) setPickupCountry(co);
-          else if (eagerCountry) setPickupCountry(eagerCountry);
-        } else {
-          setTaxRate(0);
-          setLocMinDays(1);
-          setInsuranceIncluded(false);
-          setRefuelAmount(0);
-          setRefuelOptedIn(false);
-          setUnlimitedMileage(true);
-          setMileageLimitPerDay(0);
-          setExtraMileageCharge(0);
-          if (eagerCountry) setPickupCountry(eagerCountry);
-        }
+        if (!taxRes.ok) return;
+        const taxData = await taxRes.json();
+        // Only apply if user hasn't switched away from this pickup yet.
+        // (selectedPickup.name might have changed mid-flight; cleanup
+        // aborts the request, so we'd never get here in that case.)
+        setTaxRate(Number(taxData.tax_rate) || 0);
+        setLocMinDays(Number(taxData.min_booking_days) || 1);
+        setInsuranceIncluded(Boolean(taxData.insurance_included));
+        const refuel = Number(taxData.refuel_amount) || 0;
+        setRefuelAmount(refuel);
+        if (refuel <= 0) setRefuelOptedIn(false);
+        setUnlimitedMileage(taxData.unlimited_mileage !== false);
+        setMileageLimitPerDay(Number(taxData.mileage_limit_per_day) || 0);
+        setExtraMileageCharge(Number(taxData.extra_mileage_charge) || 0);
+        const co = (taxData.country || '').trim();
+        if (co) setPickupCountry(co);
       } catch (e: any) {
         if (e?.name !== 'AbortError') console.log('Tax fetch error:', e);
       }
     })();
     return () => ctrl.abort();
-  }, [selectedPickup?.name, countryByName]);
+  }, [selectedPickup?.name, locMetaByName, countryByName]);
 
   const handleBooking = async () => {
     if (!car) return;
