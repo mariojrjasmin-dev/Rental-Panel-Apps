@@ -3274,17 +3274,187 @@ async def create_location(loc: LocationCreate, request: Request):
     del loc_dict["_id"]
     return loc_dict
 
+async def _cascade_location_change(old_loc: dict, new_loc: dict) -> dict:
+    """When an admin renames or re-countries a location, every car &
+    booking that referenced the OLD name must be updated, otherwise the
+    backend tolerant lookup for tax/min-days/etc. will silently return
+    `tax_rate=0` and the customer sees no tax on the confirmation page.
+
+    Cascades:
+      * cars.pickup_locations[].name + country        (multi-loc array)
+      * cars.dropoff_locations[].name + country       (multi-loc array)
+      * cars.pickup_location.name + country           (deprecated singular)
+      * cars.dropoff_location.name + country          (deprecated singular)
+      * bookings.pickup_location.name + country
+      * bookings.dropoff_location.name + country
+
+    Returns a dict with per-collection modified counts (for logging / response).
+    """
+    import re as _re
+    old_name = (old_loc.get("name") or "").strip()
+    new_name = (new_loc.get("name") or "").strip()
+    old_country = (old_loc.get("country") or "").strip()
+    new_country = (new_loc.get("country") or "").strip()
+
+    if not old_name:
+        return {}
+
+    name_changed = bool(new_name) and new_name.lower() != old_name.lower()
+    country_changed = new_country.lower() != old_country.lower()
+
+    if not name_changed and not country_changed:
+        return {}
+
+    # After any rename, the "current" name in downstream docs is new_name
+    # (if changed) — otherwise it remains old_name. We use this for the
+    # country-only cascade filter.
+    current_name = new_name if name_changed else old_name
+
+    old_name_re = {"$regex": f"^{_re.escape(old_name)}$", "$options": "i"}
+    current_name_re = {"$regex": f"^{_re.escape(current_name)}$", "$options": "i"}
+
+    counts: dict = {}
+
+    # ---- 1. cars.pickup_locations[] (array) ----
+    if name_changed:
+        # Rename first so subsequent country cascade can target by new name.
+        r = await db.cars.update_many(
+            {"pickup_locations.name": old_name_re},
+            {"$set": {"pickup_locations.$[el].name": new_name}},
+            array_filters=[{"el.name": old_name_re}],
+        )
+        if r.modified_count:
+            counts["cars.pickup_locations.name"] = r.modified_count
+    if country_changed:
+        r = await db.cars.update_many(
+            {"pickup_locations.name": current_name_re},
+            {"$set": {"pickup_locations.$[el].country": new_country}},
+            array_filters=[{"el.name": current_name_re}],
+        )
+        if r.modified_count:
+            counts["cars.pickup_locations.country"] = r.modified_count
+
+    # ---- 2. cars.dropoff_locations[] (array) ----
+    if name_changed:
+        r = await db.cars.update_many(
+            {"dropoff_locations.name": old_name_re},
+            {"$set": {"dropoff_locations.$[el].name": new_name}},
+            array_filters=[{"el.name": old_name_re}],
+        )
+        if r.modified_count:
+            counts["cars.dropoff_locations.name"] = r.modified_count
+    if country_changed:
+        r = await db.cars.update_many(
+            {"dropoff_locations.name": current_name_re},
+            {"$set": {"dropoff_locations.$[el].country": new_country}},
+            array_filters=[{"el.name": current_name_re}],
+        )
+        if r.modified_count:
+            counts["cars.dropoff_locations.country"] = r.modified_count
+
+    # ---- 3. cars.pickup_location (deprecated singular mirror) ----
+    if name_changed:
+        r = await db.cars.update_many(
+            {"pickup_location.name": old_name_re},
+            {"$set": {"pickup_location.name": new_name}},
+        )
+        if r.modified_count:
+            counts["cars.pickup_location.name"] = r.modified_count
+    if country_changed:
+        r = await db.cars.update_many(
+            {"pickup_location.name": current_name_re},
+            {"$set": {"pickup_location.country": new_country}},
+        )
+        if r.modified_count:
+            counts["cars.pickup_location.country"] = r.modified_count
+
+    # ---- 4. cars.dropoff_location (deprecated singular) ----
+    if name_changed:
+        r = await db.cars.update_many(
+            {"dropoff_location.name": old_name_re},
+            {"$set": {"dropoff_location.name": new_name}},
+        )
+        if r.modified_count:
+            counts["cars.dropoff_location.name"] = r.modified_count
+    if country_changed:
+        r = await db.cars.update_many(
+            {"dropoff_location.name": current_name_re},
+            {"$set": {"dropoff_location.country": new_country}},
+        )
+        if r.modified_count:
+            counts["cars.dropoff_location.country"] = r.modified_count
+
+    # ---- 5. bookings.pickup_location ----
+    if name_changed:
+        r = await db.bookings.update_many(
+            {"pickup_location.name": old_name_re},
+            {"$set": {"pickup_location.name": new_name}},
+        )
+        if r.modified_count:
+            counts["bookings.pickup_location.name"] = r.modified_count
+    if country_changed:
+        r = await db.bookings.update_many(
+            {"pickup_location.name": current_name_re},
+            {"$set": {"pickup_location.country": new_country}},
+        )
+        if r.modified_count:
+            counts["bookings.pickup_location.country"] = r.modified_count
+
+    # ---- 6. bookings.dropoff_location ----
+    if name_changed:
+        r = await db.bookings.update_many(
+            {"dropoff_location.name": old_name_re},
+            {"$set": {"dropoff_location.name": new_name}},
+        )
+        if r.modified_count:
+            counts["bookings.dropoff_location.name"] = r.modified_count
+    if country_changed:
+        r = await db.bookings.update_many(
+            {"dropoff_location.name": current_name_re},
+            {"$set": {"dropoff_location.country": new_country}},
+        )
+        if r.modified_count:
+            counts["bookings.dropoff_location.country"] = r.modified_count
+
+    if counts:
+        bits = " | ".join(f"{k}={v}" for k, v in counts.items())
+        logger.info(
+            f"location rename cascade {old_name!r} (country={old_country!r}) → "
+            f"{new_name!r} (country={new_country!r}): {bits}"
+        )
+    return counts
+
+
 @api_router.put("/locations/{location_id}")
 async def update_location(location_id: str, loc: LocationUpdate, request: Request):
     user = await require_permission(request, "locations.edit")
     update_data = {k: v for k, v in loc.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Capture the OLD doc BEFORE the $set so we can cascade name / country
+    # changes to every car & booking that references this location.
+    old_loc = await db.locations.find_one({"_id": ObjectId(location_id)})
+    if not old_loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+
     result = await db.locations.update_one({"_id": ObjectId(location_id)}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Location not found")
     updated = await db.locations.find_one({"_id": ObjectId(location_id)})
-    return serialize_location(updated)
+
+    # Cascade — failures are non-fatal so the rename still saves even if
+    # one of the bulk updates fails. We log the counts for observability.
+    cascade_counts: dict = {}
+    try:
+        cascade_counts = await _cascade_location_change(old_loc, updated)
+    except Exception as _e:
+        logger.warning(f"location rename cascade failed for {location_id}: {_e}")
+
+    out = serialize_location(updated)
+    if cascade_counts:
+        out["_cascade"] = cascade_counts
+    return out
 
 @api_router.delete("/locations/{location_id}")
 async def delete_location(location_id: str, request: Request):
@@ -3293,6 +3463,126 @@ async def delete_location(location_id: str, request: Request):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Location not found")
     return {"message": "Location deleted"}
+
+
+@api_router.post("/admin/locations/repair-references")
+async def repair_location_references(request: Request):
+    """Scan every car and booking for `pickup_location` / `dropoff_location`
+    name references that don't match a current location, attempt a tolerant
+    re-match (prefix → city → contains), and if the match is unambiguous,
+    update the stored name + country in-place.
+
+    Use this once after an admin has renamed a location WITHOUT the cascade
+    (e.g. data created before this endpoint shipped, or manual DB edits).
+
+    Returns a JSON report:
+      {
+        "orphans_found": int,
+        "repaired": int,
+        "still_orphaned": [...],
+        "details": [...]
+      }
+    """
+    user = await require_permission(request, "locations.edit")
+
+    # Snapshot all current locations
+    cur_locs = []
+    async for l in db.locations.find({}, {"_id": 0, "name": 1, "city": 1, "country": 1}):
+        cur_locs.append(l)
+    name_set = {(l.get("name") or "").strip().lower() for l in cur_locs if l.get("name")}
+
+    repaired = 0
+    orphans_found = 0
+    still_orphaned: list = []
+    details: list = []
+
+    async def _try_fix_doc(coll, doc_id, field_path: str, current_name: str):
+        nonlocal repaired, orphans_found, still_orphaned, details
+        if not current_name:
+            return
+        if current_name.strip().lower() in name_set:
+            return  # already matches a known location
+        orphans_found += 1
+        loc = await _resolve_location_tolerant(current_name)
+        if not loc:
+            still_orphaned.append({"collection": coll.name, "id": str(doc_id), "field": field_path, "name": current_name})
+            return
+        set_payload = {
+            f"{field_path}.name": loc.get("name"),
+        }
+        if loc.get("country"):
+            set_payload[f"{field_path}.country"] = loc.get("country")
+        await coll.update_one({"_id": doc_id}, {"$set": set_payload})
+        repaired += 1
+        details.append({
+            "collection": coll.name,
+            "id": str(doc_id),
+            "field": field_path,
+            "from": current_name,
+            "to": loc.get("name"),
+        })
+
+    async def _try_fix_array(coll, doc_id, array_field: str, idx: int, current_name: str):
+        nonlocal repaired, orphans_found, still_orphaned, details
+        if not current_name:
+            return
+        if current_name.strip().lower() in name_set:
+            return
+        orphans_found += 1
+        loc = await _resolve_location_tolerant(current_name)
+        if not loc:
+            still_orphaned.append({"collection": coll.name, "id": str(doc_id), "field": f"{array_field}[{idx}]", "name": current_name})
+            return
+        set_payload = {f"{array_field}.{idx}.name": loc.get("name")}
+        if loc.get("country"):
+            set_payload[f"{array_field}.{idx}.country"] = loc.get("country")
+        await coll.update_one({"_id": doc_id}, {"$set": set_payload})
+        repaired += 1
+        details.append({
+            "collection": coll.name,
+            "id": str(doc_id),
+            "field": f"{array_field}[{idx}]",
+            "from": current_name,
+            "to": loc.get("name"),
+        })
+
+    # ---- CARS ----
+    async for c in db.cars.find({}, {
+        "pickup_location": 1, "dropoff_location": 1,
+        "pickup_locations": 1, "dropoff_locations": 1,
+    }):
+        cid = c.get("_id")
+        if isinstance(c.get("pickup_location"), dict):
+            await _try_fix_doc(db.cars, cid, "pickup_location", (c["pickup_location"].get("name") or "").strip())
+        if isinstance(c.get("dropoff_location"), dict):
+            await _try_fix_doc(db.cars, cid, "dropoff_location", (c["dropoff_location"].get("name") or "").strip())
+        for i, pl in enumerate(c.get("pickup_locations") or []):
+            if isinstance(pl, dict):
+                await _try_fix_array(db.cars, cid, "pickup_locations", i, (pl.get("name") or "").strip())
+        for i, pl in enumerate(c.get("dropoff_locations") or []):
+            if isinstance(pl, dict):
+                await _try_fix_array(db.cars, cid, "dropoff_locations", i, (pl.get("name") or "").strip())
+
+    # ---- BOOKINGS ----
+    async for b in db.bookings.find({}, {"pickup_location": 1, "dropoff_location": 1}):
+        bid = b.get("_id")
+        if isinstance(b.get("pickup_location"), dict):
+            await _try_fix_doc(db.bookings, bid, "pickup_location", (b["pickup_location"].get("name") or "").strip())
+        if isinstance(b.get("dropoff_location"), dict):
+            await _try_fix_doc(db.bookings, bid, "dropoff_location", (b["dropoff_location"].get("name") or "").strip())
+
+    logger.info(
+        f"location reference repair: orphans_found={orphans_found} repaired={repaired} "
+        f"still_orphaned={len(still_orphaned)}"
+    )
+
+    return {
+        "orphans_found": orphans_found,
+        "repaired": repaired,
+        "still_orphaned": still_orphaned,
+        "details": details,
+    }
+
 
 # Browse cars by location
 @api_router.get("/cars/by-location/{location_id}")
