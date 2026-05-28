@@ -3416,6 +3416,58 @@ async def _cascade_location_change(old_loc: dict, new_loc: dict) -> dict:
         if r.modified_count:
             counts["bookings.dropoff_location.country"] = r.modified_count
 
+    # ---- 7. cars.stock keyed by location NAME ----
+    # `cars.stock` is a dict {<location_name>: <int>}. On rename, the OLD
+    # key must be renamed to the NEW key so the booking flow's
+    # `car_stock_at(car, new_name)` lookup returns the right unit count
+    # (otherwise the very next POST /bookings throws "out of stock at
+    # '<NewName>'" because the dict still has {<OldName>: N}).
+    #
+    # We use case-insensitive matching by scanning each affected car
+    # (small set — only cars that had the old name in pickup_locations
+    # or dropoff_locations) and rewriting the stock dict in-place. We
+    # have to do this in Python because MongoDB doesn't support dynamic
+    # field-rename via updateMany when the source key isn't known
+    # case-insensitively in advance.
+    if name_changed:
+        stock_renamed = 0
+        async for car in db.cars.find(
+            {
+                "$or": [
+                    {"pickup_locations.name": {"$regex": f"^{_re.escape(new_name)}$", "$options": "i"}},
+                    {"dropoff_locations.name": {"$regex": f"^{_re.escape(new_name)}$", "$options": "i"}},
+                    {"pickup_location.name": {"$regex": f"^{_re.escape(new_name)}$", "$options": "i"}},
+                    {"dropoff_location.name": {"$regex": f"^{_re.escape(new_name)}$", "$options": "i"}},
+                ]
+            },
+            {"_id": 1, "stock": 1},
+        ):
+            stock_map = car.get("stock") or {}
+            if not isinstance(stock_map, dict) or not stock_map:
+                continue
+            # Find any key matching the OLD name case-insensitively
+            old_key = None
+            for k in stock_map.keys():
+                if (k or "").strip().lower() == old_name.lower():
+                    old_key = k
+                    break
+            if not old_key:
+                continue
+            # If the NEW key already exists (e.g. case-only rename, or
+            # both old and new keys somehow coexist), merge them by
+            # summing the counts; otherwise just move the value.
+            old_val = int(stock_map.get(old_key) or 0)
+            new_val_existing = int(stock_map.get(new_name) or 0) if new_name in stock_map else 0
+            merged = old_val + new_val_existing
+            updates: dict = {"$unset": {f"stock.{old_key}": ""}, "$set": {f"stock.{new_name}": merged}}
+            try:
+                await db.cars.update_one({"_id": car["_id"]}, updates)
+                stock_renamed += 1
+            except Exception as _e:
+                logger.warning(f"stock rename failed for car {car.get('_id')}: {_e}")
+        if stock_renamed:
+            counts["cars.stock"] = stock_renamed
+
     if counts:
         bits = " | ".join(f"{k}={v}" for k, v in counts.items())
         logger.info(
@@ -3549,7 +3601,7 @@ async def repair_location_references(request: Request):
     # ---- CARS ----
     async for c in db.cars.find({}, {
         "pickup_location": 1, "dropoff_location": 1,
-        "pickup_locations": 1, "dropoff_locations": 1,
+        "pickup_locations": 1, "dropoff_locations": 1, "stock": 1,
     }):
         cid = c.get("_id")
         if isinstance(c.get("pickup_location"), dict):
@@ -3562,6 +3614,44 @@ async def repair_location_references(request: Request):
         for i, pl in enumerate(c.get("dropoff_locations") or []):
             if isinstance(pl, dict):
                 await _try_fix_array(db.cars, cid, "dropoff_locations", i, (pl.get("name") or "").strip())
+
+        # Repair stock keys (dict keyed by location name). Iterate keys and
+        # for each one that's an orphan, try to tolerant-match to a real
+        # location and rename the key in-place (merging counts if needed).
+        stock_map = c.get("stock") or {}
+        if isinstance(stock_map, dict):
+            for k in list(stock_map.keys()):
+                kname = (k or "").strip()
+                if not kname:
+                    continue
+                if kname.lower() in name_set:
+                    continue
+                orphans_found += 1
+                loc = await _resolve_location_tolerant(kname)
+                if not loc:
+                    still_orphaned.append({"collection": "cars", "id": str(cid), "field": f"stock.{k}", "name": kname})
+                    continue
+                new_key = loc.get("name") or kname
+                if new_key == k:
+                    continue
+                old_val = int(stock_map.get(k) or 0)
+                existing = int(stock_map.get(new_key) or 0)
+                merged = old_val + existing
+                try:
+                    await db.cars.update_one(
+                        {"_id": cid},
+                        {"$unset": {f"stock.{k}": ""}, "$set": {f"stock.{new_key}": merged}},
+                    )
+                    repaired += 1
+                    details.append({
+                        "collection": "cars",
+                        "id": str(cid),
+                        "field": f"stock.{k}",
+                        "from": kname,
+                        "to": new_key,
+                    })
+                except Exception as _e:
+                    logger.warning(f"stock key repair failed for car {cid}: {_e}")
 
     # ---- BOOKINGS ----
     async for b in db.bookings.find({}, {"pickup_location": 1, "dropoff_location": 1}):
