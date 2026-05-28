@@ -1501,8 +1501,12 @@ async def create_booking(booking: BookingCreate, request: Request):
     days = max(1, (dropoff - pickup).days)
     
     # Look up tax rate AND minimum booking days from pickup location.
-    # Use case-insensitive exact match (anchored regex) + trim whitespace
-    # so admin-entered name variations don't silently fall back to defaults.
+    # Use a tolerant matching chain so admin-entered name variations or
+    # legacy bookings don't silently fall back to "Tax (0%)":
+    #   1. exact case-insensitive name match
+    #   2. starts-with case-insensitive name match  (e.g. "Santo Domingo" → "Santo Domingo Downtown")
+    #   3. city case-insensitive match
+    #   4. contains/regex match (last resort)
     tax_rate = 0.0
     min_days = 1
     pickup_country = ""
@@ -1511,10 +1515,22 @@ async def create_booking(booking: BookingCreate, request: Request):
     if pickup_loc_name:
         import re
         escaped = re.escape(pickup_loc_name)
+        proj = {"_id": 0, "tax_rate": 1, "name": 1, "min_booking_days": 1, "country": 1, "active": 1}
         loc = await db.locations.find_one(
-            {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
-            {"_id": 0, "tax_rate": 1, "name": 1, "min_booking_days": 1, "country": 1, "active": 1},
+            {"name": {"$regex": f"^{escaped}$", "$options": "i"}}, proj,
         )
+        if not loc:
+            loc = await db.locations.find_one(
+                {"name": {"$regex": f"^{escaped}", "$options": "i"}}, proj,
+            )
+        if not loc:
+            loc = await db.locations.find_one(
+                {"city": {"$regex": f"^{escaped}$", "$options": "i"}}, proj,
+            )
+        if not loc:
+            loc = await db.locations.find_one(
+                {"name": {"$regex": escaped, "$options": "i"}}, proj,
+            )
         if loc:
             tax_rate = float(loc.get("tax_rate") or 0)
             min_days = int(loc.get("min_booking_days") or 1)
@@ -1702,16 +1718,24 @@ async def get_booking(booking_id: str, request: Request):
 
 @api_router.post("/admin/backfill-booking-taxes")
 async def backfill_booking_taxes(request: Request):
-    """Recompute and persist subtotal / tax_rate / tax_amount for bookings
-    created before the tax feature was added. Existing total_price is preserved
-    and treated as the grand total — subtotal is derived from the pickup
-    location's current tax rate so that subtotal + tax = total_price.
+    """Recompute and persist subtotal / tax_rate / tax_amount for bookings.
+
+    Targets two classes of legacy / drifted bookings:
+
+      A) **Created before tax feature was added** — bookings missing one or
+         more of `subtotal`, `tax_rate`, `tax_amount`. `total_price` is
+         preserved and treated as the grand total; subtotal is derived from
+         the pickup location's current tax rate so that subtotal + tax == total.
+
+      B) **Created with `tax_rate=0` due to a name mismatch** (e.g. pickup
+         "Santo Domingo" not matching DB "Santo Domingo Downtown"). When
+         `?force=true` is passed, also reprocess those bookings using a
+         tolerant location lookup: exact → prefix → city → contains.
 
     Optimized:
-      * Filter at DB level so already-complete bookings aren't loaded into memory.
+      * Filter at DB level so already-complete bookings aren't loaded.
       * Projection limits each doc to a handful of fields.
-      * Hard safety cap via ``?limit=`` query param (default 1000, max 10000) to
-        prevent unbounded DB scans / lockups in production.
+      * Hard safety cap via ``?limit=`` query param (default 1000, max 10000).
       * Batched ``bulk_write`` updates instead of N round-trips.
     """
     user = await require_permission(request, "admins.manage")
@@ -1722,28 +1746,77 @@ async def backfill_booking_taxes(request: Request):
     except (TypeError, ValueError):
         limit = 1000
     limit = max(1, min(limit, 10000))
+    force = (request.query_params.get("force", "").lower() in ("1", "true", "yes"))
 
     updated = 0
     no_total = 0
+    no_match = 0
 
-    # Preload locations into a name -> tax_rate map (small, cap at 500).
-    loc_rates: dict = {}
-    async for loc in db.locations.find({}, {"_id": 0, "name": 1, "tax_rate": 1}).limit(500):
-        loc_rates[loc.get("name", "")] = float(loc.get("tax_rate") or 0.0)
+    # Preload all locations into in-memory maps so we can do tolerant lookups
+    # without N+1 DB queries during the backfill loop.
+    locs: list = []
+    async for loc in db.locations.find(
+        {},
+        {"_id": 0, "name": 1, "city": 1, "country": 1, "tax_rate": 1},
+    ).limit(500):
+        locs.append({
+            "name": (loc.get("name") or "").strip(),
+            "city": (loc.get("city") or "").strip(),
+            "country": (loc.get("country") or "").strip(),
+            "tax_rate": float(loc.get("tax_rate") or 0.0),
+        })
 
-    # DB-level filter: only bookings missing at least one of the tax fields.
-    incomplete_filter = {
-        "$or": [
-            {"subtotal": {"$exists": False}},
-            {"subtotal": None},
-            {"tax_rate": {"$exists": False}},
-            {"tax_rate": None},
-            {"tax_amount": {"$exists": False}},
-            {"tax_amount": None},
-        ]
-    }
-    # Only fetch fields we actually need.
-    projection = {"_id": 1, "total_price": 1, "pickup_location.name": 1}
+    def resolve_location(pickup_name: str):
+        """Tolerant lookup: exact name → prefix → city → contains. Returns
+        the matched location dict or None."""
+        if not pickup_name:
+            return None
+        q = pickup_name.strip().lower()
+        # 1) Exact
+        for l in locs:
+            if l["name"].lower() == q:
+                return l
+        # 2) Prefix — DB name starts with query
+        for l in locs:
+            if l["name"].lower().startswith(q):
+                return l
+        # 3) City exact
+        for l in locs:
+            if l["city"].lower() == q:
+                return l
+        # 4) Contains either direction
+        for l in locs:
+            ln = l["name"].lower()
+            if q in ln or ln in q:
+                return l
+        return None
+
+    # DB-level filter: bookings missing tax fields, plus optionally zero-tax bookings.
+    if force:
+        incomplete_filter = {
+            "$or": [
+                {"subtotal": {"$exists": False}},
+                {"subtotal": None},
+                {"tax_rate": {"$exists": False}},
+                {"tax_rate": None},
+                {"tax_amount": {"$exists": False}},
+                {"tax_amount": None},
+                {"tax_rate": 0},
+                {"tax_rate": 0.0},
+            ]
+        }
+    else:
+        incomplete_filter = {
+            "$or": [
+                {"subtotal": {"$exists": False}},
+                {"subtotal": None},
+                {"tax_rate": {"$exists": False}},
+                {"tax_rate": None},
+                {"tax_amount": {"$exists": False}},
+                {"tax_amount": None},
+            ]
+        }
+    projection = {"_id": 1, "total_price": 1, "pickup_location": 1, "tax_rate": 1, "subtotal": 1}
 
     cursor = db.bookings.find(incomplete_filter, projection).limit(limit)
 
@@ -1756,9 +1829,20 @@ async def backfill_booking_taxes(request: Request):
             continue
         total = float(total)
 
-        pickup_name = (b.get("pickup_location") or {}).get("name", "")
-        tax_rate = loc_rates.get(pickup_name, 0.0)
+        pickup = b.get("pickup_location") or {}
+        pickup_name = pickup.get("name", "") or ""
+        loc = resolve_location(pickup_name)
+        if loc is None:
+            no_match += 1
+            tax_rate = 0.0
+            country = (pickup.get("country") or "").strip()
+        else:
+            tax_rate = loc["tax_rate"]
+            country = loc["country"]
 
+        # When `force=true`, the booking's current total may already INCLUDE
+        # tax that we haven't reflected in tax_rate/tax_amount. So we derive
+        # subtotal by stripping the (now-correct) tax rate from the total.
         divisor = 1.0 + (tax_rate / 100.0)
         subtotal = round(total / divisor, 2) if divisor > 0 else round(total, 2)
         tax_amount = round(total - subtotal, 2)
@@ -1769,9 +1853,19 @@ async def backfill_booking_taxes(request: Request):
             tax_amount = 0.0
             tax_rate = 0.0
 
+        update_doc = {
+            "subtotal": subtotal,
+            "tax_rate": tax_rate,
+            "tax_amount": tax_amount,
+        }
+        # Also enrich the booking's pickup_location with country if missing,
+        # so the receipt/email can render the right ITBIS/Tax label.
+        if country and not pickup.get("country"):
+            update_doc["pickup_location.country"] = country
+
         ops.append(UpdateOne(
             {"_id": b["_id"]},
-            {"$set": {"subtotal": subtotal, "tax_rate": tax_rate, "tax_amount": tax_amount}},
+            {"$set": update_doc},
         ))
         if len(ops) >= BATCH:
             res = await db.bookings.bulk_write(ops, ordered=False)
