@@ -1467,6 +1467,49 @@ async def get_categories():
 
 # ==================== BOOKING ROUTES ====================
 
+async def _resolve_stock_key(car_id: str, raw_name: str) -> Optional[str]:
+    """Find the actual key in a car's `stock` dict that matches `raw_name`.
+
+    Critical because MongoDB ``$inc`` on a non-existent path silently creates
+    a new field rather than decrementing the intended slot. Stock keys often
+    drift from booking-stored location names (admin renames a location, casing
+    changes, extra whitespace, partial names…), so we use the same tolerant
+    fallback chain as the tax lookup:
+      1. exact case-sensitive match
+      2. exact case-insensitive match
+      3. prefix case-insensitive
+      4. contains (either direction)
+
+    Returns the matched key string, or None if the car has no stock dict /
+    no plausible match.
+    """
+    if not raw_name:
+        return None
+    car = await db.cars.find_one({"_id": ObjectId(car_id)}, {"stock": 1})
+    stock = (car or {}).get("stock") if isinstance((car or {}).get("stock"), dict) else None
+    if not stock:
+        return None
+    target = raw_name.strip()
+    target_l = target.lower()
+    # 1) exact
+    if target in stock:
+        return target
+    # 2) case-insensitive exact
+    for k in stock.keys():
+        if k.lower() == target_l:
+            return k
+    # 3) prefix
+    for k in stock.keys():
+        if k.lower().startswith(target_l):
+            return k
+    # 4) contains either direction
+    for k in stock.keys():
+        kl = k.lower()
+        if target_l in kl or kl in target_l:
+            return k
+    return None
+
+
 def serialize_booking(b):
     b["id"] = str(b["_id"])
     del b["_id"]
@@ -2143,13 +2186,24 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
             ):
                 pickup_name = (((booking or {}).get("pickup_location") or {}).get("name") or "").strip()
                 if pickup_name:
+                    # Resolve the booking's stored location name to the actual
+                    # key in the car's stock dict. Without this, name drift
+                    # (admin rename, casing diff, extra whitespace) causes
+                    # ``$inc`` to silently CREATE a new stock key at -1 while
+                    # leaving the real slot untouched — which manifests as
+                    # "stock doesn't decrement on pickup".
+                    stock_key = await _resolve_stock_key(car_id, pickup_name) or pickup_name
                     await db.cars.update_one(
                         {"_id": ObjectId(car_id)},
-                        {"$inc": {f"stock.{pickup_name}": -1}},
+                        {"$inc": {f"stock.{stock_key}": -1}},
                     )
                     await db.bookings.update_one(
                         {"_id": ObjectId(booking_id)},
-                        {"$set": {"stock_adjustments.pickup_decremented": True, "stock_adjustments.pickup_at": datetime.now(timezone.utc)}},
+                        {"$set": {
+                            "stock_adjustments.pickup_decremented": True,
+                            "stock_adjustments.pickup_at": datetime.now(timezone.utc),
+                            "stock_adjustments.pickup_key": stock_key,
+                        }},
                     )
             # Drop-off: idempotent. Triggers whenever the booking is in
             # 'completed' status, pickup was decremented, and dropoff hasn't
@@ -2161,13 +2215,18 @@ async def admin_update_booking_status(booking_id: str, body: BookingStatusUpdate
             ):
                 dropoff_name = (((booking or {}).get("dropoff_location") or {}).get("name") or "").strip()
                 if dropoff_name:
+                    stock_key = await _resolve_stock_key(car_id, dropoff_name) or dropoff_name
                     await db.cars.update_one(
                         {"_id": ObjectId(car_id)},
-                        {"$inc": {f"stock.{dropoff_name}": 1}},
+                        {"$inc": {f"stock.{stock_key}": 1}},
                     )
                     await db.bookings.update_one(
                         {"_id": ObjectId(booking_id)},
-                        {"$set": {"stock_adjustments.dropoff_incremented": True, "stock_adjustments.dropoff_at": datetime.now(timezone.utc)}},
+                        {"$set": {
+                            "stock_adjustments.dropoff_incremented": True,
+                            "stock_adjustments.dropoff_at": datetime.now(timezone.utc),
+                            "stock_adjustments.dropoff_key": stock_key,
+                        }},
                     )
             # Re-read to include the freshly-set stock_adjustments in the response payload
             booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
