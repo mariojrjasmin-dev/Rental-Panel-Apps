@@ -355,10 +355,17 @@ export default function BookingScreen() {
       setMileageLimitPerDay(cached.mileage_limit_per_day);
       setExtraMileageCharge(cached.extra_mileage_charge);
       setPickupCountry(cached.country);
+    } else if (Object.keys(locMetaByName).length === 0) {
+      // 🛡 The locations prefetch hasn't completed yet (cold load race).
+      // Do NOT zero-out the tax rate — keep whatever was loaded last so
+      // the user never sees a transient "Tax (0%) $0.00" on the very
+      // first render. We'll re-run automatically when locMetaByName
+      // populates because it's a dependency below.
     } else {
-      // Cache miss (network race) — at least pick up country from countryByName
-      // and clear stale tax rate so the user doesn't see e.g. 8.875% from the
-      // previous pickup while the freshness fetch is in flight.
+      // Map IS loaded but doesn't contain this pickup name (admin renamed
+      // the location or the car has a stale pickup_locations entry). Fall
+      // back to the country name map and let the async tax-by-name call
+      // below resolve the rate via tolerant matching on the backend.
       const eagerCountry = (countryByName[key] || '').trim();
       setPickupCountry(eagerCountry);
       setTaxRate(0);
