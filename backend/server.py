@@ -1472,6 +1472,120 @@ def serialize_booking(b):
     del b["_id"]
     return b
 
+
+async def _resolve_location_tolerant(name: str) -> Optional[dict]:
+    """Tolerant location lookup: exact name → prefix → city → contains.
+
+    Returns the matched location dict (with tax_rate / country / name / city)
+    or None if nothing matches. Used wherever we need to bind a stored
+    pickup_location.name back to its current location record — robust to
+    admin renames, partial names, or stale bookings.
+    """
+    q = (name or "").strip()
+    if not q:
+        return None
+    import re as _re
+    escaped = _re.escape(q)
+    proj = {"_id": 0, "name": 1, "city": 1, "country": 1, "tax_rate": 1, "active": 1}
+    # 1) exact
+    loc = await db.locations.find_one(
+        {"name": {"$regex": f"^{escaped}$", "$options": "i"}}, proj
+    )
+    if loc:
+        return loc
+    # 2) prefix
+    loc = await db.locations.find_one(
+        {"name": {"$regex": f"^{escaped}", "$options": "i"}}, proj
+    )
+    if loc:
+        return loc
+    # 3) city exact
+    loc = await db.locations.find_one(
+        {"city": {"$regex": f"^{escaped}$", "$options": "i"}}, proj
+    )
+    if loc:
+        return loc
+    # 4) contains either direction
+    loc = await db.locations.find_one(
+        {"name": {"$regex": escaped, "$options": "i"}}, proj
+    )
+    return loc
+
+
+async def _auto_heal_booking_tax(b: dict) -> dict:
+    """If a booking was created with tax_rate=0 (because the location lookup
+    failed at creation time — e.g. an admin renamed the location, the name
+    was a partial match, etc.) try to re-resolve the pickup location now and
+    PERSIST the corrected values:
+
+      * tax_rate            (from the now-resolved location)
+      * tax_amount
+      * total_price         (subtotal + tax_amount)
+      * pickup_location.country  (so receipt labels show ITBIS vs Tax)
+
+    This is idempotent — once healed, the booking is skipped on future
+    reads. Failures are silent (never break the read).
+    """
+    try:
+        cur_rate = float(b.get("tax_rate") or 0)
+        pickup = b.get("pickup_location") or {}
+        pickup_name = (pickup.get("name") or "").strip()
+        if cur_rate > 0 and pickup.get("country"):
+            return b  # already healthy
+
+        loc = await _resolve_location_tolerant(pickup_name)
+        if not loc:
+            return b
+
+        loc_rate = float(loc.get("tax_rate") or 0)
+        loc_country = (loc.get("country") or "").strip()
+        if loc_rate <= 0 and not loc_country:
+            return b  # nothing to heal
+
+        update_set: dict = {}
+
+        # Heal country if missing (cheap, doesn't change totals).
+        if loc_country and not pickup.get("country"):
+            pickup["country"] = loc_country
+            update_set["pickup_location"] = pickup
+            b["pickup_location"] = pickup
+
+        # If tax_rate was zero but location actually has a real tax rate,
+        # recompute subtotal/tax/total. We treat the existing `subtotal`
+        # as the true taxable base (admin already saw it), so:
+        #   tax_amount = subtotal * (rate / 100)
+        #   total_price = subtotal + tax_amount
+        # If subtotal is missing, derive it from total_price by stripping
+        # tax at the new rate.
+        if cur_rate <= 0 and loc_rate > 0:
+            subtotal = b.get("subtotal")
+            total = b.get("total_price")
+            if subtotal is None and total is not None:
+                divisor = 1.0 + (loc_rate / 100.0)
+                subtotal = round(float(total) / divisor, 2)
+            if subtotal is not None:
+                subtotal = round(float(subtotal), 2)
+                tax_amount = round(subtotal * (loc_rate / 100.0), 2)
+                new_total = round(subtotal + tax_amount, 2)
+                update_set["tax_rate"] = loc_rate
+                update_set["tax_amount"] = tax_amount
+                update_set["subtotal"] = subtotal
+                update_set["total_price"] = new_total
+                b["tax_rate"] = loc_rate
+                b["tax_amount"] = tax_amount
+                b["subtotal"] = subtotal
+                b["total_price"] = new_total
+
+        if update_set:
+            await db.bookings.update_one({"_id": b["_id"]}, {"$set": update_set})
+            logger.info(
+                f"Auto-healed booking {str(b.get('_id'))[-8:]} pickup={pickup_name!r} → "
+                f"tax_rate={update_set.get('tax_rate', cur_rate)} country={pickup.get('country')!r}"
+            )
+    except Exception as _e:
+        logger.warning(f"auto-heal booking error: {_e}")
+    return b
+
 @api_router.post("/bookings")
 async def create_booking(booking: BookingCreate, request: Request):
     user = await get_authenticated_user(request)
@@ -1705,7 +1819,11 @@ async def get_bookings(request: Request):
     user = await get_authenticated_user(request)
     user_id = str(user.get("_id") or user.get("id") or user.get("user_id"))
     bookings = await db.bookings.find({"user_id": user_id}).sort("created_at", -1).to_list(100)
-    return [serialize_booking(b) for b in bookings]
+    healed = []
+    for b in bookings:
+        b = await _auto_heal_booking_tax(b)
+        healed.append(serialize_booking(b))
+    return healed
 
 @api_router.get("/bookings/{booking_id}")
 async def get_booking(booking_id: str, request: Request):
@@ -1713,6 +1831,7 @@ async def get_booking(booking_id: str, request: Request):
     booking = await db.bookings.find_one({"_id": ObjectId(booking_id)})
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
+    booking = await _auto_heal_booking_tax(booking)
     return serialize_booking(booking)
 
 
@@ -2222,6 +2341,11 @@ async def get_booking_receipt(booking_id: str, request: Request):
     user_id = str(user.get("_id") or user.get("id") or user.get("user_id"))
     if user.get("role") != "admin" and booking.get("user_id") != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this receipt")
+
+    # Auto-heal stale tax/country values before rendering so the PDF is
+    # always correct, even if the booking was created when the pickup
+    # location name didn't match the current locations collection.
+    booking = await _auto_heal_booking_tax(booking)
 
     pdf_bytes = _generate_receipt_pdf(booking)
     from fastapi.responses import Response as FResponse
