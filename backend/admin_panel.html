@@ -2576,8 +2576,14 @@ async function showLocForm(id) {
           <div class="form-group"><label>Longitude *</label><input class="input" id="l-lng" value="${loc.lng||''}"></div>
         </div>
         <div style="display:flex;gap:12px">
-          <div class="form-group" style="flex:1"><label>Tax Rate (%)</label><input class="input" id="l-tax" type="number" step="0.01" value="${loc.tax_rate||0}" placeholder="e.g. 18 for 18%"></div>
+          <div class="form-group" style="flex:1">
+            <label>Tax Rate (%) <span style="color:#999;font-weight:normal;font-size:11px">— legacy, no longer used</span></label>
+            <input class="input" id="l-tax" type="number" step="0.01" value="${loc.tax_rate||0}" placeholder="ignored" disabled style="background:#f5f5f7;cursor:not-allowed;color:#999">
+          </div>
           <div class="form-group" style="flex:1"><label>Min Booking Days</label><input class="input" id="l-mindays" type="number" min="1" max="365" value="${loc.min_booking_days||1}" placeholder="1"></div>
+        </div>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:12px;color:#1e3a8a;line-height:1.5">
+          ℹ️ <strong>Tax is determined by country</strong> (single source of truth): Dominican Republic → 18% ITBIS, USA → 0% Tax. The "Tax Rate" field above is kept for legacy compatibility but is <strong>no longer used</strong> anywhere in the app, PDF receipts, or email confirmations.
         </div>
         <div class="form-group">
           <label>⛽ Pre-paid Refuel Fee ($)</label>

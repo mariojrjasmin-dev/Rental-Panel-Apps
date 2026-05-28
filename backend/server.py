@@ -1555,6 +1555,46 @@ async def _resolve_location_tolerant(name: str) -> Optional[dict]:
     return loc
 
 
+# =================================================================
+# COUNTRY-DRIVEN TAX RESOLUTION (single source of truth)
+# =================================================================
+# Tax is determined by the COUNTRY of the pickup location, NOT by the
+# per-location `tax_rate` field (which is now legacy / ignored). This
+# means: renaming or deleting a location can never silently zero-out
+# tax — as long as the country is resolvable, the rate is correct.
+#
+#   Dominican Republic → 18% ITBIS
+#   United States      →  0% (state-level, billed separately at pickup)
+#   <unknown>          →  0% "Tax"
+#
+# To add a country, append a new entry below. The key MUST be lowercase
+# and stripped. Common aliases are accepted (e.g. "do", "rd", "usa").
+COUNTRY_TAX_RATES: dict = {
+    "dominican republic": {"rate": 18.0, "label": "ITBIS"},
+    "do":                 {"rate": 18.0, "label": "ITBIS"},
+    "dom":                {"rate": 18.0, "label": "ITBIS"},
+    "rd":                 {"rate": 18.0, "label": "ITBIS"},
+    "dr":                 {"rate": 18.0, "label": "ITBIS"},
+    "usa":                {"rate":  0.0, "label": "Tax"},
+    "united states":      {"rate":  0.0, "label": "Tax"},
+    "united states of america": {"rate":  0.0, "label": "Tax"},
+    "us":                 {"rate":  0.0, "label": "Tax"},
+}
+DEFAULT_COUNTRY_TAX: dict = {"rate": 0.0, "label": "Tax"}
+
+
+def country_tax(country: Optional[str]) -> dict:
+    """Return {'rate': float, 'label': str} for the given country.
+    Case-insensitive; whitespace-tolerant; falls back to DEFAULT for
+    unknown values."""
+    if not country:
+        return dict(DEFAULT_COUNTRY_TAX)
+    key = str(country).strip().lower()
+    if not key:
+        return dict(DEFAULT_COUNTRY_TAX)
+    return dict(COUNTRY_TAX_RATES.get(key, DEFAULT_COUNTRY_TAX))
+
+
 async def _auto_heal_booking_tax(b: dict) -> dict:
     """If a booking was created with tax_rate=0 (because the location lookup
     failed at creation time — e.g. an admin renamed the location, the name
@@ -1580,8 +1620,9 @@ async def _auto_heal_booking_tax(b: dict) -> dict:
         if not loc:
             return b
 
-        loc_rate = float(loc.get("tax_rate") or 0)
         loc_country = (loc.get("country") or "").strip()
+        # Country is the single source of truth for tax (see COUNTRY_TAX_RATES).
+        loc_rate = float(country_tax(loc_country)["rate"])
         if loc_rate <= 0 and not loc_country:
             return b  # nothing to heal
 
@@ -1689,9 +1730,13 @@ async def create_booking(booking: BookingCreate, request: Request):
                 {"name": {"$regex": escaped, "$options": "i"}}, proj,
             )
         if loc:
-            tax_rate = float(loc.get("tax_rate") or 0)
-            min_days = int(loc.get("min_booking_days") or 1)
+            # Tax is now derived from COUNTRY (single source of truth via
+            # COUNTRY_TAX_RATES) — not from the per-location tax_rate field.
+            # This makes the tax label/rate immune to location renames or
+            # admins forgetting to set tax_rate on new locations.
             pickup_country = (loc.get("country") or "").strip()
+            tax_rate = float(country_tax(pickup_country)["rate"])
+            min_days = int(loc.get("min_booking_days") or 1)
             pickup_active = bool(loc.get("active", True))
         else:
             logger.warning(f"No location matched name={pickup_loc_name!r} for tax/min-days lookup")
@@ -3170,6 +3215,14 @@ async def get_admin_analytics(request: Request):
 def serialize_location(loc):
     loc["id"] = str(loc["_id"])
     del loc["_id"]
+    # Override the legacy per-location `tax_rate` field with the canonical
+    # country-derived rate (see COUNTRY_TAX_RATES). This guarantees the
+    # mobile app's locMetaByName cache, the customer website, and any
+    # admin tools all agree on the same number regardless of what the
+    # legacy DB field says.
+    ct = country_tax((loc.get("country") or "").strip())
+    loc["tax_rate"] = float(ct["rate"])
+    loc["tax_label"] = ct["label"]
     return loc
 
 @api_router.get("/locations")
@@ -3243,11 +3296,17 @@ async def get_tax_by_location_name(name: str):
         )
 
     if loc:
+        # Tax is now driven by country, not the per-location tax_rate field
+        # (see COUNTRY_TAX_RATES). This guarantees consistency across the
+        # mobile app, customer website, PDF receipts, and admin panel.
+        country = (loc.get("country") or "").strip()
+        ct = country_tax(country)
         return {
-            "tax_rate": float(loc.get("tax_rate") or 0.0),
+            "tax_rate": float(ct["rate"]),
+            "tax_label": ct["label"],
             "name": loc.get("name", ""),
             "city": loc.get("city", ""),
-            "country": (loc.get("country") or "").strip(),
+            "country": country,
             "min_booking_days": int(loc.get("min_booking_days") or 1),
             "insurance_included": bool(loc.get("insurance_included") or False),
             "refuel_amount": float(loc.get("refuel_amount") or 0.0),
@@ -3255,7 +3314,20 @@ async def get_tax_by_location_name(name: str):
             "mileage_limit_per_day": int(loc.get("mileage_limit_per_day") or 0),
             "extra_mileage_charge": float(loc.get("extra_mileage_charge") or 0.0),
         }
-    return {"tax_rate": 0.0, "name": q, "city": "", "country": "", "min_booking_days": 1, "insurance_included": False, "refuel_amount": 0.0, "unlimited_mileage": True, "mileage_limit_per_day": 0, "extra_mileage_charge": 0.0}
+    # Unknown location → 0% Tax fallback (same as DEFAULT_COUNTRY_TAX)
+    return {
+        "tax_rate": float(DEFAULT_COUNTRY_TAX["rate"]),
+        "tax_label": DEFAULT_COUNTRY_TAX["label"],
+        "name": q,
+        "city": "",
+        "country": "",
+        "min_booking_days": 1,
+        "insurance_included": False,
+        "refuel_amount": 0.0,
+        "unlimited_mileage": True,
+        "mileage_limit_per_day": 0,
+        "extra_mileage_charge": 0.0,
+    }
 
 @api_router.get("/locations/{location_id}")
 async def get_location(location_id: str):
