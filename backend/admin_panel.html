@@ -1786,7 +1786,22 @@ function toggleLoc(type, name, lat, lng) {
     arr.splice(idx, 1);
     if (event && event.target && event.target.classList) event.target.classList.remove(activeClass);
   } else {
-    arr.push({name, lat, lng});
+    // Look up the full location metadata so the entry we save carries
+    // the COUNTRY (and city) — not just {name, lat, lng}. Without country
+    // the mobile/web booking page can't render the correct ITBIS vs Tax
+    // label, even though the tax_rate itself comes back fine from the
+    // /api/locations/tax-by-name endpoint. Missing country here is the
+    // exact regression that resurfaced after the location cleanup.
+    const meta = (typeof locations !== 'undefined' ? (locations || []) : [])
+      .find(l => String(l.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase());
+    const entry = {
+      name,
+      lat,
+      lng,
+      country: (meta && meta.country) ? meta.country : '',
+      city:    (meta && meta.city)    ? meta.city    : '',
+    };
+    arr.push(entry);
     if (event && event.target && event.target.classList) event.target.classList.add(activeClass);
   }
   input.value = JSON.stringify(arr);
