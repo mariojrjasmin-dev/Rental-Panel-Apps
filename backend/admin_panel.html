@@ -1530,12 +1530,24 @@ async function deletePromo(id, code) {
 
 
 function carCard(c) {
+  // Build a Set of currently-ACTIVE location names (case-insensitive) so
+  // we can filter out any ghost references this car still has from
+  // BEFORE a location was deleted or deactivated. (The full cleanup
+  // happens when the admin opens the Vehicle edit form → sees the
+  // 🧹 banner → clicks Save. Until then we just hide the ghosts visually
+  // so the card doesn't display stale data.)
+  const _activeLocNames = new Set((typeof locations !== 'undefined' ? (locations || []) : []).map(l => String(l.name || '').trim().toLowerCase()));
+  const _isActive = (nm) => _activeLocNames.has(String(nm || '').trim().toLowerCase());
+
   // Inventory badge: green when total stock > 0, red when 0 (hidden from customers).
   const stockMap = c.stock || {};
-  const total = Object.values(stockMap).reduce((s, v) => s + (parseInt(v,10) || 0), 0);
+  // Only count stock at currently-active locations. Ghost keys are
+  // ignored (they'll get cleaned up on the next Vehicle Save).
+  const _activeStockEntries = Object.entries(stockMap).filter(([k, _v]) => _isActive(k));
+  const total = _activeStockEntries.reduce((s, [, v]) => s + (parseInt(v, 10) || 0), 0);
   const hasStock = total > 0;
-  const stockBreakdown = Object.entries(stockMap)
-    .filter(([k, v]) => (parseInt(v, 10) || 0) > 0)
+  const stockBreakdown = _activeStockEntries
+    .filter(([, v]) => (parseInt(v, 10) || 0) > 0)
     .map(([k, v]) => k + ': ' + v)
     .join(' · ');
   const unitsBadge = !hasStock
@@ -1548,7 +1560,10 @@ function carCard(c) {
       <p>${c.category} · $${c.price_per_day}/day · ${c.seats} seats</p>
       ${stockBreakdown ? '<p style="color:#0a5d2b;font-size:11px;font-weight:600">📦 '+stockBreakdown+'</p>' : ''}
       ${(() => {
-        const pls = (c.pickup_locations && c.pickup_locations.length) ? c.pickup_locations : (c.pickup_location ? [c.pickup_location] : []);
+        const raw = (c.pickup_locations && c.pickup_locations.length) ? c.pickup_locations : (c.pickup_location ? [c.pickup_location] : []);
+        // Filter out ghost names (deleted / inactive locations). The card
+        // only shows references the customer would actually see.
+        const pls = raw.filter(p => p && _isActive(p.name));
         if (!pls.length) return '';
         const names = pls.map(p => p.name).filter(Boolean);
         const label = names.length === 1 ? names[0] : (names[0] + ' +' + (names.length-1) + ' more');
