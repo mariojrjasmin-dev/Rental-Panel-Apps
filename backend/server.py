@@ -5053,6 +5053,7 @@ async def serve_admin_panel():
         )
     return HTMLResponse(content="<h1>Admin panel not found</h1>", status_code=404)
 
+
 @app.get("/api/assets/logo.png")
 async def serve_brand_logo():
     """Public endpoint that serves the DAMS Rent A Car brand logo.
