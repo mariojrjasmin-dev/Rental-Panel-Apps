@@ -6,6 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../_layout';
 import BrandLogo from '../../components/BrandLogo';
 import { t } from '../../src/i18n';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import {
   isBiometricAvailable,
   isBiometricEnabled,
@@ -13,6 +15,13 @@ import {
   enableBiometricLogin,
   type BiometricCheck,
 } from '../../src/biometric';
+
+// expo-apple-authentication is iOS-native-only. Importing it on web or
+// Android would crash, so we lazy-resolve at call time.
+const BACKEND_URL =
+  (process.env.EXPO_PUBLIC_BACKEND_URL as string | undefined) ||
+  (Constants?.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL as string | undefined) ||
+  '';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -22,8 +31,86 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [bioState, setBioState] = useState<BiometricCheck>({ available: false, enrolled: false, type: 'none' });
   const [bioReady, setBioReady] = useState(false); // user has previously enabled biometric
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  const [appleSubmitting, setAppleSubmitting] = useState(false);
   const { login, locale } = useAuth();
   const router = useRouter();
+
+  // Check if Sign In with Apple is supported. iOS 13+ device and
+  // the expo-apple-authentication native module must be linked
+  // (requires a custom dev/EAS build — not Expo Go).
+  useEffect(() => {
+    (async () => {
+      if (Platform.OS !== 'ios') { setAppleAvailable(false); return; }
+      try {
+        const AA = await import('expo-apple-authentication');
+        const ok = await AA.isAvailableAsync();
+        setAppleAvailable(!!ok);
+      } catch {
+        setAppleAvailable(false);
+      }
+    })();
+  }, []);
+
+  const handleAppleSignIn = async () => {
+    if (appleSubmitting) return;
+    setError('');
+    setAppleSubmitting(true);
+    try {
+      const AA = await import('expo-apple-authentication');
+      const credential = await AA.signInAsync({
+        requestedScopes: [
+          AA.AppleAuthenticationScope.FULL_NAME,
+          AA.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      const identityToken = credential.identityToken;
+      if (!identityToken) {
+        setError(t('appleSignInError'));
+        setAppleSubmitting(false);
+        return;
+      }
+      // Apple gives the full name only on the FIRST sign-in. Concatenate
+      // first + last when available so the backend can save it.
+      const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+        .filter(Boolean).join(' ').trim() || undefined;
+
+      const res = await fetch(`${BACKEND_URL}/api/auth/apple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identity_token: identityToken,
+          full_name: fullName,
+          email: credential.email || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.token) {
+        setError(data?.detail || t('appleSignInError'));
+        setAppleSubmitting(false);
+        return;
+      }
+      // Persist token + user — match the email-login flow exactly.
+      await AsyncStorage.setItem('auth_token', data.token);
+      await AsyncStorage.setItem('user', JSON.stringify({
+        id: data.id, email: data.email, name: data.name,
+        role: data.role || 'user', provider: data.provider || 'apple',
+      }));
+      // Route to the customer home tab.
+      router.replace('/(tabs)/home');
+    } catch (e: any) {
+      const code = e?.code || '';
+      if (code === 'ERR_REQUEST_CANCELED' || /cancel/i.test(String(e?.message))) {
+        // Silent — user backed out of the Apple sheet.
+        setAppleSubmitting(false);
+        return;
+      }
+      console.log('Apple Sign In error:', e);
+      setError(t('appleSignInError'));
+    } finally {
+      setAppleSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -179,6 +266,28 @@ export default function LoginScreen() {
             <Text style={styles.googleBtnText}>{t('continueWithGoogle')}</Text>
           </TouchableOpacity>
 
+          {/* Apple Sign In — App Store guideline 4.8 requires it whenever
+              another third-party auth (Google/Facebook) is offered. iOS-only;
+              never shows on Android or web. */}
+          {appleAvailable && (
+            <TouchableOpacity
+              testID="apple-login-button"
+              style={styles.appleBtn}
+              activeOpacity={0.85}
+              onPress={handleAppleSignIn}
+              disabled={appleSubmitting}
+            >
+              {appleSubmitting ? (
+                <ActivityIndicator color="#FFF" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="logo-apple" size={20} color="#FFF" />
+                  <Text style={styles.appleBtnText}>{t('continueWithApple')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity testID="go-to-register" onPress={() => router.push('/(auth)/register')} style={styles.linkBtn}>
             <Text style={styles.linkText}>{t('noAccountYet')} <Text style={styles.linkBold}>{t('signUp')}</Text></Text>
           </TouchableOpacity>
@@ -212,6 +321,10 @@ const styles = StyleSheet.create({
   dividerText: { marginHorizontal: 16, color: '#999', fontSize: 14 },
   googleBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5', borderRadius: 50, paddingVertical: 16, borderWidth: 1, borderColor: '#E5E5E5', gap: 10 },
   googleBtnText: { fontSize: 16, fontWeight: '600', color: '#0A0A0A' },
+  // Apple's Human Interface Guidelines: solid black button with white SF Pro
+  // text + the official Apple logo glyph. Same shape & padding as Google.
+  appleBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#000000', borderRadius: 50, paddingVertical: 16, gap: 10, marginTop: 10 },
+  appleBtnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
   linkBtn: { alignItems: 'center', marginTop: 8 },
   linkText: { fontSize: 15, color: '#666' },
   linkBold: { color: '#FF3B30', fontWeight: '700' },

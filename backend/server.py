@@ -900,6 +900,177 @@ async def get_me(request: Request):
     user = await get_authenticated_user(request)
     return user
 
+
+# ==================== APPLE SIGN IN (App Store guideline 4.8) ====================
+# Apple's identity token is a JWT signed with one of Apple's rotating public
+# keys (RS256). We fetch the JWKS once and cache it via PyJWKClient. No
+# Apple-side server secret is needed for native-app verification — the JWT
+# is self-contained.
+APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
+APPLE_ISSUER = "https://appleid.apple.com"
+# Allowed audiences = your iOS bundle identifier(s). Multiple supported in
+# case dev / staging / prod bundles differ. Configurable via env so EAS
+# builds can override without code changes.
+APPLE_ALLOWED_AUDIENCES = [
+    a.strip() for a in os.environ.get(
+        "APPLE_ALLOWED_AUDIENCES",
+        "com.damsrentacar.app,com.damscarrental.app,com.damscarrental,host.exp.Exponent",
+    ).split(",") if a.strip()
+]
+_apple_jwk_client: Optional[jwt.PyJWKClient] = None
+
+
+def _get_apple_jwk_client() -> jwt.PyJWKClient:
+    """Lazy-init a JWKS client so we don't make a network call at import time."""
+    global _apple_jwk_client
+    if _apple_jwk_client is None:
+        _apple_jwk_client = jwt.PyJWKClient(APPLE_JWKS_URL, cache_keys=True)
+    return _apple_jwk_client
+
+
+class AppleAuthRequest(BaseModel):
+    identity_token: str
+    # First-call optional fields. Apple only returns the full name on the
+    # FIRST authorization (and never again). We persist it then.
+    full_name: Optional[str] = None
+    email: Optional[str] = None  # fallback if backend can't parse from JWT
+
+
+def _verify_apple_token(identity_token: str) -> dict:
+    """Verify and decode Apple's identity_token JWT.
+
+    Returns the verified payload {sub, email, ...} on success.
+    Raises HTTPException(401) on any verification failure.
+    """
+    if not identity_token or len(identity_token) < 20:
+        raise HTTPException(status_code=400, detail="Missing or invalid identity_token")
+    try:
+        client = _get_apple_jwk_client()
+        signing_key = client.get_signing_key_from_jwt(identity_token)
+        # Decode with full validation. We accept any of our configured
+        # bundle IDs as the audience.
+        payload = jwt.decode(
+            identity_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=APPLE_ALLOWED_AUDIENCES if APPLE_ALLOWED_AUDIENCES else None,
+            issuer=APPLE_ISSUER,
+            options={
+                "verify_signature": True,
+                "verify_aud": bool(APPLE_ALLOWED_AUDIENCES),
+                "verify_iss": True,
+                "verify_exp": True,
+            },
+        )
+        return payload
+    except jwt.InvalidAudienceError:
+        logger.warning("Apple JWT rejected: audience mismatch (allowed=%s)", APPLE_ALLOWED_AUDIENCES)
+        raise HTTPException(status_code=401, detail="Apple token: audience mismatch (bundle id)")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Apple token expired, please retry sign-in")
+    except jwt.InvalidIssuerError:
+        raise HTTPException(status_code=401, detail="Apple token: invalid issuer")
+    except jwt.InvalidSignatureError:
+        raise HTTPException(status_code=401, detail="Apple token signature invalid")
+    except jwt.PyJWTError as e:
+        logger.warning("Apple JWT decode failed: %s", e)
+        raise HTTPException(status_code=401, detail="Apple token verification failed")
+    except Exception as e:
+        logger.exception("Apple JWT verify unexpected error: %s", e)
+        raise HTTPException(status_code=500, detail="Apple sign-in verification error")
+
+
+@api_router.post("/auth/apple")
+async def apple_sign_in(req: AppleAuthRequest, response: Response):
+    """Mobile-app Apple Sign In.
+
+    Flow:
+      1. Mobile app calls `AppleAuthentication.signInAsync(...)` and gets
+         back an `identityToken`. It posts here with that token + optional
+         `full_name` (only present on first sign-in).
+      2. We verify the JWT against Apple's JWKS.
+      3. We look up or create a user keyed by `apple_sub`.
+      4. We return the same `{id, email, name, role, token}` shape as
+         `/auth/login` so the mobile auth context handles it identically.
+    """
+    payload = _verify_apple_token(req.identity_token)
+
+    apple_sub = (payload.get("sub") or "").strip()
+    apple_email = (payload.get("email") or req.email or "").strip().lower()
+    email_verified = bool(payload.get("email_verified") in (True, "true"))
+    is_private_email = bool(payload.get("is_private_email") in (True, "true"))
+
+    if not apple_sub:
+        raise HTTPException(status_code=400, detail="Apple token missing user id (sub)")
+
+    # 1. Look up existing user by apple_sub (the stable identifier).
+    user = await db.users.find_one({"apple_sub": apple_sub})
+
+    # 2. If not found, also try the email (account-linking for users who
+    #    previously signed up with email/password and now want to use Apple).
+    if not user and apple_email:
+        user = await db.users.find_one({"email": apple_email})
+        if user:
+            # Link the Apple identity to the existing email account.
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {"$set": {
+                    "apple_sub": apple_sub,
+                    "apple_linked_at": datetime.now(timezone.utc),
+                    "apple_email_private": is_private_email,
+                }},
+            )
+            user["apple_sub"] = apple_sub
+
+    # 3. Brand-new user — create the record.
+    if not user:
+        # Apple only returns `email` on the FIRST authorization. If we don't
+        # have one, we still allow account creation using the `sub` as a
+        # synthetic local handle so we don't lose the sign-in.
+        if not apple_email:
+            apple_email = f"apple_{apple_sub[:24].replace('.', '')}@privaterelay.appleid.com"
+        # Name: Apple sends `name.firstName` / `name.lastName` on first auth
+        # in the native iOS flow. The mobile client passes it via full_name.
+        display_name = (req.full_name or "").strip() or apple_email.split("@", 1)[0]
+
+        new_doc = {
+            "email": apple_email,
+            "name": display_name,
+            "role": "user",
+            "provider": "apple",
+            "apple_sub": apple_sub,
+            "apple_email_private": is_private_email,
+            "apple_email_verified": email_verified,
+            "adult_confirmed": True,         # Apple SIWA: minors are 13+ on Apple ID
+            "adult_confirmed_at": datetime.now(timezone.utc),
+            "terms_accepted": True,
+            "terms_accepted_at": datetime.now(timezone.utc),
+            "password_hash": None,
+            "created_at": datetime.now(timezone.utc),
+        }
+        ins = await db.users.insert_one(new_doc)
+        user = await db.users.find_one({"_id": ins.inserted_id})
+        logger.info(f"Apple Sign In: NEW user email={apple_email!r} sub={apple_sub[:12]}…")
+    else:
+        logger.info(f"Apple Sign In: returning user email={user.get('email')!r} sub={apple_sub[:12]}…")
+
+    user_id = str(user["_id"])
+    email_for_jwt = (user.get("email") or apple_email)
+    access_token = create_access_token(user_id, email_for_jwt)
+    refresh_token = create_refresh_token(user_id)
+    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=False, samesite="lax", max_age=3600, path="/")
+    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=False, samesite="lax", max_age=604800, path="/")
+
+    return {
+        "id": user_id,
+        "email": email_for_jwt,
+        "name": user.get("name", ""),
+        "role": user.get("role", "user"),
+        "provider": user.get("provider", "apple"),
+        "token": access_token,
+    }
+
+
 @api_router.post("/auth/logout")
 async def logout(response: Response):
     response.delete_cookie("access_token", path="/")

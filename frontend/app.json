@@ -11,7 +11,8 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.damsrentacar.app",
-      "buildNumber": "12",
+      "buildNumber": "13",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos of cars for listings",
         "NSPhotoLibraryUsageDescription": "Select car photos from gallery",
