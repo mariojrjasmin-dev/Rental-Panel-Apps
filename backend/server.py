@@ -1574,14 +1574,35 @@ def car_total_units(car: dict) -> int:
 
 
 def car_stock_at(car: dict, location_name: Optional[str]) -> int:
-    """Stock for a given pickup location (case-sensitive match on name)."""
+    """Stock for a given pickup location at the car.
+
+    Case-INSENSITIVE name match: handles slight casing differences between
+    a customer's filter value, the location dropdown chip name, and the
+    stock dict key. Returns 0 if no match.
+    """
     if not location_name:
         return 0
     s = car.get("stock") if isinstance(car.get("stock"), dict) else {}
-    try:
-        return int(s.get(location_name) or 0)
-    except Exception:
+    if not s:
         return 0
+    target = str(location_name).strip().lower()
+    if not target:
+        return 0
+    # Fast path: exact-case hit.
+    direct = s.get(location_name)
+    if direct is not None:
+        try:
+            return int(direct or 0)
+        except Exception:
+            return 0
+    # Case-insensitive fallback.
+    for k, v in s.items():
+        if (k or "").strip().lower() == target:
+            try:
+                return int(v or 0)
+            except Exception:
+                return 0
+    return 0
 
 
 async def get_car_active_units_count(car_id: str) -> int:
@@ -1670,6 +1691,12 @@ async def get_cars(category: Optional[str] = None, search: Optional[str] = None,
     cars = await db.cars.find(query).to_list(100)
     # Per-location stock + active-location filter (customer-facing).
     inactive_loc_names = await get_inactive_location_names()
+    # If the customer is browsing under a SPECIFIC location filter, we must
+    # require that THAT location has stock > 0 — otherwise the listing
+    # advertises a car that the booking endpoint will refuse moments later
+    # ("out of stock at <name>"). When NO location filter is applied we keep
+    # the older "show if any pickup has stock" behavior.
+    filter_loc_name = (location or city or "").strip().lower()
     result = []
     for c in cars:
         c = serialize_car(c)
@@ -1682,15 +1709,36 @@ async def get_cars(category: Optional[str] = None, search: Optional[str] = None,
                 c["pickup_location"] = c["pickup_locations"][0]
             if c["dropoff_locations"]:
                 c["dropoff_location"] = c["dropoff_locations"][0]
-        # Compute available pickup locations: those with stock > 0
-        available_pickups = [p for p in (c.get("pickup_locations") or []) if car_stock_at(c, p.get("name")) > 0]
+        # Hide pickup pills that have 0 stock so the customer can't pick one
+        # that will immediately fail at booking time. This is a pure UX
+        # cleanup — the backend POST /bookings already double-validates.
+        c["pickup_locations"] = [p for p in (c.get("pickup_locations") or []) if car_stock_at(c, p.get("name")) > 0]
+        if c.get("pickup_locations"):
+            c["pickup_location"] = c["pickup_locations"][0]
+        # Compute available pickup locations (now identical to pickup_locations
+        # after the stock-strip above, but kept for clarity).
+        available_pickups = c["pickup_locations"]
         units_total = car_total_units(c)
-        c["units_available"] = units_total  # kept for legacy clients (total)
+        c["units_available"] = units_total  # legacy clients (total across all locs)
         c["units_left"] = units_total       # alias
         c["is_available"] = len(available_pickups) > 0
-        # Hide if NO pickup location has stock left.
+        # Hide the car entirely if it has nothing in stock anywhere.
         if not available_pickups:
             continue
+        # If the customer is filtering by a specific location, require that
+        # location to be among the still-available pickups. The DB query
+        # only matched the LOCATION NAME (name match across pickup/dropoff
+        # arrays). It did NOT check stock. So this is where we enforce the
+        # per-location stock gate.
+        if filter_loc_name:
+            in_stock_here = any(
+                (p.get("name") or "").strip().lower() == filter_loc_name
+                or filter_loc_name in (p.get("name") or "").strip().lower()
+                or (p.get("name") or "").strip().lower() in filter_loc_name
+                for p in available_pickups
+            )
+            if not in_stock_here:
+                continue
         result.append(c)
     return result
 
