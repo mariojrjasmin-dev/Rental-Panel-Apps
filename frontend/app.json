@@ -70,7 +70,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Show directions from your location to pickup"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true

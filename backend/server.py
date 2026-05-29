@@ -1621,8 +1621,8 @@ async def _auto_heal_booking_tax(b: dict) -> dict:
             return b
 
         loc_country = (loc.get("country") or "").strip()
-        # Country is the single source of truth for tax (see COUNTRY_TAX_RATES).
-        loc_rate = float(country_tax(loc_country)["rate"])
+        # Tax RATE from the location's own tax_rate field; LABEL from country.
+        loc_rate = float(loc.get("tax_rate") or 0.0)
         if loc_rate <= 0 and not loc_country:
             return b  # nothing to heal
 
@@ -1730,12 +1730,11 @@ async def create_booking(booking: BookingCreate, request: Request):
                 {"name": {"$regex": escaped, "$options": "i"}}, proj,
             )
         if loc:
-            # Tax is now derived from COUNTRY (single source of truth via
-            # COUNTRY_TAX_RATES) — not from the per-location tax_rate field.
-            # This makes the tax label/rate immune to location renames or
-            # admins forgetting to set tax_rate on new locations.
+            # Tax RATE comes from the location's own tax_rate field
+            # (admin-editable in the Locations form). Tax LABEL (ITBIS vs
+            # Tax) is derived from country via country_tax() at render time.
             pickup_country = (loc.get("country") or "").strip()
-            tax_rate = float(country_tax(pickup_country)["rate"])
+            tax_rate = float(loc.get("tax_rate") or 0.0)
             min_days = int(loc.get("min_booking_days") or 1)
             pickup_active = bool(loc.get("active", True))
         else:
@@ -3215,13 +3214,11 @@ async def get_admin_analytics(request: Request):
 def serialize_location(loc):
     loc["id"] = str(loc["_id"])
     del loc["_id"]
-    # Override the legacy per-location `tax_rate` field with the canonical
-    # country-derived rate (see COUNTRY_TAX_RATES). This guarantees the
-    # mobile app's locMetaByName cache, the customer website, and any
-    # admin tools all agree on the same number regardless of what the
-    # legacy DB field says.
+    # Tax RATE comes from each location's own tax_rate field (admin-editable,
+    # so e.g. different US states can have different rates).
+    # Tax LABEL still comes from the country (DR → ITBIS, else → Tax).
     ct = country_tax((loc.get("country") or "").strip())
-    loc["tax_rate"] = float(ct["rate"])
+    loc["tax_rate"] = float(loc.get("tax_rate") or 0.0)
     loc["tax_label"] = ct["label"]
     return loc
 
@@ -3296,13 +3293,12 @@ async def get_tax_by_location_name(name: str):
         )
 
     if loc:
-        # Tax is now driven by country, not the per-location tax_rate field
-        # (see COUNTRY_TAX_RATES). This guarantees consistency across the
-        # mobile app, customer website, PDF receipts, and admin panel.
+        # Tax RATE from the location's own tax_rate field (admin-editable).
+        # Tax LABEL still derived from country (DR → ITBIS, else → Tax).
         country = (loc.get("country") or "").strip()
         ct = country_tax(country)
         return {
-            "tax_rate": float(ct["rate"]),
+            "tax_rate": float(loc.get("tax_rate") or 0.0),
             "tax_label": ct["label"],
             "name": loc.get("name", ""),
             "city": loc.get("city", ""),
