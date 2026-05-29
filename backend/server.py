@@ -944,6 +944,20 @@ def _verify_apple_token(identity_token: str) -> dict:
     """
     if not identity_token or len(identity_token) < 20:
         raise HTTPException(status_code=400, detail="Missing or invalid identity_token")
+
+    # Peek at the unverified payload first so we can produce a useful error
+    # message that shows the actual `aud` claim. This is critical for
+    # diagnosing bundle-id mismatches in production where we can't easily
+    # see the token. The payload is NOT trusted until full verify below.
+    try:
+        unverified = jwt.decode(identity_token, options={"verify_signature": False})
+        token_aud = unverified.get("aud")
+        token_iss = unverified.get("iss")
+        logger.info("Apple JWT inspection: aud=%s iss=%s allowed_auds=%s",
+                    token_aud, token_iss, APPLE_ALLOWED_AUDIENCES)
+    except Exception:
+        token_aud = None
+
     try:
         client = _get_apple_jwk_client()
         signing_key = client.get_signing_key_from_jwt(identity_token)
@@ -964,8 +978,14 @@ def _verify_apple_token(identity_token: str) -> dict:
         )
         return payload
     except jwt.InvalidAudienceError:
-        logger.warning("Apple JWT rejected: audience mismatch (allowed=%s)", APPLE_ALLOWED_AUDIENCES)
-        raise HTTPException(status_code=401, detail="Apple token: audience mismatch (bundle id)")
+        logger.warning("Apple JWT rejected: audience mismatch (token_aud=%s allowed=%s)",
+                       token_aud, APPLE_ALLOWED_AUDIENCES)
+        # Surface the actual `aud` in the error so the operator can add it to
+        # APPLE_ALLOWED_AUDIENCES env var without redeploying just to read logs.
+        raise HTTPException(
+            status_code=401,
+            detail=f"Apple token: audience mismatch (got '{token_aud}', expected one of {APPLE_ALLOWED_AUDIENCES})"
+        )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Apple token expired, please retry sign-in")
     except jwt.InvalidIssuerError:
