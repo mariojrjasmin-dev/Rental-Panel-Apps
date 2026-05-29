@@ -12,6 +12,7 @@ from bson import ObjectId
 import os
 import json
 import logging
+import re
 import uuid
 import secrets
 import bcrypt
@@ -911,6 +912,177 @@ async def logout(response: Response):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+# ==================== DELETE ACCOUNT (App Store guideline 5.1.1(v)) ====================
+class DeleteAccountRequest(BaseModel):
+    # Required for email accounts; ignored for OAuth-only accounts where the
+    # JWT itself proves identity (Google / Apple).
+    password: Optional[str] = None
+    # Two-step safety: client must echo back this string verbatim before we'll
+    # actually delete. Prevents accidental taps and bot-driven mass deletion.
+    confirm_phrase: Optional[str] = None
+
+
+@api_router.delete("/auth/account")
+async def delete_account(req: DeleteAccountRequest, request: Request, response: Response):
+    """Permanently deletes the authenticated user's account.
+
+    What gets DELETED:
+      - users document
+      - password reset codes
+      - push notification tokens
+      - uploaded files referenced by this user (license / ID photos, etc.)
+      - refresh tokens / sessions
+
+    What gets ANONYMIZED (kept for admin / financial / tax records):
+      - bookings: user_id → "[deleted]", customer_name / customer_email /
+        customer_phone replaced with "[deleted]", and a `deleted_user_at`
+        timestamp set.
+
+    Required by App Store guideline 5.1.1(v) — every app that creates
+    accounts must offer in-app deletion.
+    """
+    user = await get_authenticated_user(request)
+    user_id = user.get("id")
+    user_email = (user.get("email") or "").lower().strip()
+    if not user_id and not user_email:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Admins cannot delete their own account through this endpoint — they
+    # must do it via the Admin Panel's user management (safer, requires a
+    # second admin to confirm). This prevents an admin from accidentally
+    # nuking the only admin in the system.
+    if user.get("role") == "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin accounts cannot be deleted from the mobile app. Contact another admin to remove your account from the Admin Panel.",
+        )
+
+    # Two-step confirm phrase (case-insensitive). Helps satisfy "verifiable
+    # action by the user" requirement on App Store reviews.
+    expected_phrase = "delete"
+    if (req.confirm_phrase or "").strip().lower() != expected_phrase:
+        raise HTTPException(
+            status_code=400,
+            detail=f"To confirm permanent deletion, set confirm_phrase to '{expected_phrase}'.",
+        )
+
+    # Re-fetch the full user doc so we can verify password and find file refs.
+    full = None
+    try:
+        if user_id:
+            full = await db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        full = None
+    if not full and user_email:
+        full = await db.users.find_one({"email": user_email})
+    if not full:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Password re-check for email accounts. OAuth-only accounts (Google /
+    # Apple) skip this — possession of a valid JWT is sufficient proof and
+    # they may have no password set.
+    has_password = bool(full.get("password_hash"))
+    if has_password:
+        if not req.password:
+            raise HTTPException(status_code=400, detail="Password is required to delete this account.")
+        if not verify_password(req.password, full["password_hash"]):
+            raise HTTPException(status_code=400, detail="Password is incorrect.")
+
+    now = datetime.now(timezone.utc)
+    deletion_id = str(full["_id"])
+
+    # ---- 1. Anonymize bookings (keep history for financial records) ----
+    try:
+        anon_set = {
+            "user_id": "[deleted]",
+            "customer_name": "[deleted]",
+            "customer_email": "[deleted]",
+            "customer_phone": "[deleted]",
+            "deleted_user_at": now,
+            "deleted_user_id_ref": deletion_id,
+        }
+        # Match by both stored user id AND email since legacy bookings used
+        # different keys at different points in the schema.
+        b_res = await db.bookings.update_many(
+            {"$or": [
+                {"user_id": deletion_id},
+                {"user_id": str(full.get("_id"))},
+                {"customer_email": {"$regex": f"^{re.escape(user_email)}$", "$options": "i"}} if user_email else {"_id": None},
+            ]},
+            {"$set": anon_set},
+        )
+        bookings_anonymized = int(b_res.modified_count or 0)
+    except Exception as _e:
+        logger.warning(f"booking anonymization failed for {deletion_id}: {_e}")
+        bookings_anonymized = 0
+
+    # ---- 2. Delete uploaded files referenced on the user doc ----
+    files_deleted = 0
+    try:
+        uploads_dir = _Path(__file__).parent / "uploads"
+        for field in ("license_photo", "id_photo", "avatar", "profile_picture"):
+            ref = full.get(field)
+            if not ref:
+                continue
+            # ref might be a full URL or just a filename. Extract the filename.
+            fname = str(ref).rsplit("/", 1)[-1].strip()
+            if not fname or "/" in fname or ".." in fname:
+                continue
+            f = uploads_dir / fname
+            if f.exists() and f.is_file():
+                try:
+                    f.unlink()
+                    files_deleted += 1
+                except Exception:
+                    pass
+    except Exception as _e:
+        logger.warning(f"file cleanup failed for {deletion_id}: {_e}")
+
+    # ---- 3. Delete companion docs (push tokens, reset codes, sessions) ----
+    pt_deleted = 0
+    rc_deleted = 0
+    rt_deleted = 0
+    try:
+        pt_deleted = (await db.push_tokens.delete_many({"$or": [
+            {"user_id": deletion_id},
+            {"email": user_email} if user_email else {"_id": None},
+        ]})).deleted_count
+    except Exception:
+        pass
+    try:
+        if user_email:
+            rc_deleted = (await db.password_reset_codes.delete_many({"email": user_email})).deleted_count
+    except Exception:
+        pass
+    try:
+        rt_deleted = (await db.refresh_tokens.delete_many({"$or": [
+            {"user_id": deletion_id},
+            {"email": user_email} if user_email else {"_id": None},
+        ]})).deleted_count
+    except Exception:
+        pass
+
+    # ---- 4. Finally, delete the user record itself ----
+    await db.users.delete_one({"_id": full["_id"]})
+
+    # ---- 5. Clear cookies / session on the response ----
+    response.delete_cookie("refresh_token", path="/")
+    response.delete_cookie("session_token", path="/")
+
+    logger.info(
+        f"ACCOUNT DELETED uid={deletion_id} email={user_email!r} "
+        f"bookings_anonymized={bookings_anonymized} files={files_deleted} "
+        f"push_tokens={pt_deleted} reset_codes={rc_deleted} refresh_tokens={rt_deleted}"
+    )
+    return {
+        "deleted": True,
+        "bookings_anonymized": bookings_anonymized,
+        "files_deleted": files_deleted,
+        "push_tokens_deleted": pt_deleted,
+    }
+
 
 @api_router.post("/auth/change-password")
 async def change_password(req: ChangePasswordRequest, request: Request):

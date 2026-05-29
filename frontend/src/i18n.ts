@@ -166,6 +166,26 @@ const translations = {
     member: 'Member',
     manageLocations: 'Manage Locations',
 
+    // ---- Delete Account (App Store guideline 5.1.1(v)) ----
+    deleteAccount: 'Delete Account',
+    deleteAccountWarn: 'This will permanently delete your account.',
+    deleteAccountWhatHappens: 'What happens when you delete:',
+    deleteAccountBullet1: 'Your profile, photos, and login are permanently removed.',
+    deleteAccountBullet2: 'Your past bookings are kept on file (with all personal info removed) for legal and accounting purposes.',
+    deleteAccountBullet3: 'You will be signed out immediately. This cannot be undone.',
+    deleteAccountConfirmTitle: 'Confirm deletion',
+    deleteAccountTypeDelete: 'Type DELETE below to confirm',
+    deleteAccountEnterPassword: 'Enter your password',
+    deleteAccountTypeHere: 'Type DELETE',
+    deleteAccountConfirmBtn: 'Permanently Delete',
+    deleteAccountCancel: 'Keep My Account',
+    deleteAccountSuccess: 'Account deleted',
+    deleteAccountSuccessMsg: 'Your account has been permanently deleted. Thank you for trying Dams Car Rental.',
+    deleteAccountWrongPhrase: 'Please type DELETE (in all caps) to confirm.',
+    deleteAccountWrongPassword: 'Password is incorrect.',
+    deleteAccountAdminBlocked: 'Admin accounts cannot be deleted here. Contact another admin to remove your account from the Admin Panel.',
+    deleteAccountErrorGeneric: 'Could not delete your account. Please try again or contact support.',
+
     // ---- Misc ----
     loading: 'Loading...',
     error: 'Error',
@@ -336,6 +356,26 @@ const translations = {
     cancel: 'Cancelar',
     member: 'Miembro',
     manageLocations: 'Administrar Ubicaciones',
+
+    // ---- Eliminar cuenta (App Store guideline 5.1.1(v)) ----
+    deleteAccount: 'Eliminar cuenta',
+    deleteAccountWarn: 'Esto eliminará tu cuenta permanentemente.',
+    deleteAccountWhatHappens: 'Qué sucede al eliminar:',
+    deleteAccountBullet1: 'Tu perfil, fotos y acceso se eliminan permanentemente.',
+    deleteAccountBullet2: 'Tus reservas anteriores se conservan (sin información personal) por motivos legales y contables.',
+    deleteAccountBullet3: 'Se cerrará tu sesión de inmediato. Esta acción no se puede deshacer.',
+    deleteAccountConfirmTitle: 'Confirmar eliminación',
+    deleteAccountTypeDelete: 'Escribe DELETE abajo para confirmar',
+    deleteAccountEnterPassword: 'Ingresa tu contraseña',
+    deleteAccountTypeHere: 'Escribe DELETE',
+    deleteAccountConfirmBtn: 'Eliminar permanentemente',
+    deleteAccountCancel: 'Mantener mi cuenta',
+    deleteAccountSuccess: 'Cuenta eliminada',
+    deleteAccountSuccessMsg: 'Tu cuenta ha sido eliminada permanentemente. Gracias por probar Dams Car Rental.',
+    deleteAccountWrongPhrase: 'Escribe DELETE (en mayúsculas) para confirmar.',
+    deleteAccountWrongPassword: 'Contraseña incorrecta.',
+    deleteAccountAdminBlocked: 'Las cuentas de administrador no se pueden eliminar aquí. Contacta a otro administrador para eliminar tu cuenta desde el Panel de Administración.',
+    deleteAccountErrorGeneric: 'No se pudo eliminar tu cuenta. Intenta de nuevo o contacta soporte.',
 
     // ---- Misc ----
     loading: 'Cargando...',

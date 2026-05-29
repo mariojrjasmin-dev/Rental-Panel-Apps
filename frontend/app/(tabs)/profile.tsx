@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useContext } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Switch, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +23,16 @@ export default function ProfileScreen() {
   const bottomPad = tabBarHeight + 32;
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  // ---- Delete Account state (App Store guideline 5.1.1(v)) ----
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [delPhrase, setDelPhrase] = useState('');
+  const [delPassword, setDelPassword] = useState('');
+  const [delSubmitting, setDelSubmitting] = useState(false);
+  const [delError, setDelError] = useState('');
+  // OAuth users (Google / Apple) have no password — skip the password field.
+  const isOAuthUser = !!(user as any)?.provider && (user as any).provider !== 'email';
+
   const [bioState, setBioState] = useState<BiometricCheck>({ available: false, enrolled: false, type: 'none' });
   const [bioEnabled, setBioEnabled] = useState(false);
   // Password-confirm modal state (used to enable biometric from Profile)
@@ -129,6 +140,77 @@ export default function ProfileScreen() {
       setLoggingOut(false);
     }
   }, [logout, router]);
+
+  // ---- Delete Account handler (App Store 5.1.1(v)) ----
+  const openDeleteModal = useCallback(() => {
+    if (user?.role === 'admin') {
+      Alert.alert(t('deleteAccount'), t('deleteAccountAdminBlocked'));
+      return;
+    }
+    setDelPhrase('');
+    setDelPassword('');
+    setDelError('');
+    setDeleteModalVisible(true);
+  }, [user?.role]);
+
+  const closeDeleteModal = useCallback(() => {
+    if (delSubmitting) return;
+    setDeleteModalVisible(false);
+    setDelPhrase('');
+    setDelPassword('');
+    setDelError('');
+  }, [delSubmitting]);
+
+  const doDeleteAccount = useCallback(async () => {
+    // Frontend validation mirrors the backend so we give instant feedback.
+    if ((delPhrase || '').trim().toUpperCase() !== 'DELETE') {
+      setDelError(t('deleteAccountWrongPhrase'));
+      return;
+    }
+    if (!isOAuthUser && !(delPassword || '').trim()) {
+      setDelError(t('deleteAccountWrongPassword'));
+      return;
+    }
+    setDelSubmitting(true);
+    setDelError('');
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${BACKEND_URL}/api/auth/account`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({
+          confirm_phrase: 'delete',
+          password: isOAuthUser ? undefined : delPassword,
+        }),
+      });
+      if (res.status === 200) {
+        // Clear local state, then sign out + navigate to login.
+        setDeleteModalVisible(false);
+        Alert.alert(t('deleteAccountSuccess'), t('deleteAccountSuccessMsg'));
+        try { await logout(); } catch {}
+        router.replace('/(auth)/login');
+        return;
+      }
+      // Map backend errors to localized strings.
+      let detail = t('deleteAccountErrorGeneric');
+      try {
+        const j = await res.json();
+        const d = String(j?.detail || '').toLowerCase();
+        if (res.status === 400 && d.includes('password')) detail = t('deleteAccountWrongPassword');
+        else if (res.status === 400 && d.includes('confirm')) detail = t('deleteAccountWrongPhrase');
+        else if (res.status === 403) detail = t('deleteAccountAdminBlocked');
+        else if (j?.detail) detail = String(j.detail);
+      } catch {}
+      setDelError(detail);
+    } catch (e: any) {
+      setDelError(e?.message ? String(e.message) : t('deleteAccountErrorGeneric'));
+    } finally {
+      setDelSubmitting(false);
+    }
+  }, [delPhrase, delPassword, isOAuthUser, logout, router]);
 
   const showConfirm = useCallback(() => {
     setConfirmLogout(true);
@@ -287,6 +369,23 @@ export default function ProfileScreen() {
             </View>
           )}
         </View>
+
+        {/* Delete Account — App Store guideline 5.1.1(v).
+            Hidden for admin accounts (they must be removed by another admin
+            from the Admin Panel). */}
+        {user?.role !== 'admin' && (
+          <Pressable
+            testID="delete-account-button"
+            onPress={openDeleteModal}
+            // @ts-ignore - onClick for web
+            onClick={openDeleteModal}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.dangerLink, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Ionicons name="trash-outline" size={18} color={isDark ? '#FF6B6B' : '#B91C1C'} />
+            <Text style={[styles.dangerLinkText, { color: isDark ? '#FF6B6B' : '#B91C1C' }]}>{t('deleteAccount')}</Text>
+          </Pressable>
+        )}
       </ScrollView>
 
       {/* Confirm Password Modal — required to enable biometric login from Profile */}
@@ -351,6 +450,107 @@ export default function ProfileScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ====== Delete Account Modal — App Store guideline 5.1.1(v) ====== */}
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView
+            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 16 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={[styles.modalCard, { maxHeight: '95%' }]}>
+              <View style={[styles.modalIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                <Ionicons name="warning-outline" size={30} color="#DC2626" />
+              </View>
+              <Text style={styles.modalTitle}>{t('deleteAccountConfirmTitle')}</Text>
+              <Text style={[styles.modalSub, { color: '#DC2626', fontWeight: '700' }]}>{t('deleteAccountWarn')}</Text>
+
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#0A0A0A', marginTop: 12, marginBottom: 6, alignSelf: 'stretch' }}>
+                {t('deleteAccountWhatHappens')}
+              </Text>
+              <View style={{ alignSelf: 'stretch', gap: 6, marginBottom: 14 }}>
+                <Text style={{ fontSize: 12.5, color: '#444', lineHeight: 18 }}>• {t('deleteAccountBullet1')}</Text>
+                <Text style={{ fontSize: 12.5, color: '#444', lineHeight: 18 }}>• {t('deleteAccountBullet2')}</Text>
+                <Text style={{ fontSize: 12.5, color: '#444', lineHeight: 18 }}>• {t('deleteAccountBullet3')}</Text>
+              </View>
+
+              {!isOAuthUser && (
+                <>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: '#666', alignSelf: 'stretch', marginBottom: 4 }}>
+                    {t('deleteAccountEnterPassword')}
+                  </Text>
+                  <View style={styles.modalInputWrap}>
+                    <Ionicons name="lock-closed-outline" size={18} color="#999" />
+                    <TextInput
+                      testID="delete-password-input"
+                      style={styles.modalInput}
+                      placeholder={t('password')}
+                      placeholderTextColor="#999"
+                      value={delPassword}
+                      onChangeText={(v) => { setDelPassword(v); if (delError) setDelError(''); }}
+                      secureTextEntry
+                      editable={!delSubmitting}
+                    />
+                  </View>
+                </>
+              )}
+
+              <Text style={{ fontSize: 12, fontWeight: '600', color: '#666', alignSelf: 'stretch', marginTop: 4, marginBottom: 4 }}>
+                {t('deleteAccountTypeDelete')}
+              </Text>
+              <View style={styles.modalInputWrap}>
+                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
+                <TextInput
+                  testID="delete-phrase-input"
+                  style={styles.modalInput}
+                  placeholder={t('deleteAccountTypeHere')}
+                  placeholderTextColor="#999"
+                  value={delPhrase}
+                  onChangeText={(v) => { setDelPhrase(v); if (delError) setDelError(''); }}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  editable={!delSubmitting}
+                />
+              </View>
+
+              {delError ? <Text style={styles.modalErr}>{delError}</Text> : null}
+
+              <View style={styles.modalActions}>
+                <Pressable
+                  testID="delete-cancel-btn"
+                  style={[styles.modalBtn, styles.modalBtnGhost]}
+                  onPress={closeDeleteModal}
+                  disabled={delSubmitting}
+                  accessibilityRole="button"
+                  // @ts-ignore
+                  onClick={delSubmitting ? undefined : closeDeleteModal}
+                >
+                  <Text style={styles.modalBtnGhostText}>{t('deleteAccountCancel')}</Text>
+                </Pressable>
+                <Pressable
+                  testID="delete-confirm-btn"
+                  style={[styles.modalBtn, { backgroundColor: '#DC2626' }]}
+                  onPress={doDeleteAccount}
+                  disabled={delSubmitting}
+                  accessibilityRole="button"
+                  // @ts-ignore
+                  onClick={delSubmitting ? undefined : doDeleteAccount}
+                >
+                  {delSubmitting ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalBtnPrimaryText}>{t('deleteAccountConfirmBtn')}</Text>}
+                </Pressable>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -377,6 +577,14 @@ const styles = StyleSheet.create({
   langBtnActive: { backgroundColor: '#0A0A0A', borderColor: '#0A0A0A' },
   langBtnText: { fontSize: 14, fontWeight: '700', color: '#0A0A0A' },
   langBtnTextActive: { color: '#FFF' },
+  // Delete Account link — destructive style, more subtle than logout button.
+  dangerLink: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, paddingVertical: 16, paddingHorizontal: 20, marginTop: 8, marginBottom: 32,
+    borderRadius: 12, borderWidth: 1, borderColor: 'rgba(185,28,28,0.18)',
+    backgroundColor: 'transparent',
+  },
+  dangerLinkText: { fontSize: 14, fontWeight: '700', color: '#B91C1C' },
   bioCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FAFAFA', borderRadius: 16, padding: 14, marginBottom: 16 },
   bioIconWrap: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   bioTitle: { fontSize: 15, fontWeight: '800', color: '#0A0A0A' },
