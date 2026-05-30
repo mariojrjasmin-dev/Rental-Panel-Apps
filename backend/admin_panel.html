@@ -1757,14 +1757,16 @@ async function showCarForm(id) {
         <div class="loc-pills" id="pickup-pills">${locations.map(l=>{
           const arr = (car.pickup_locations && car.pickup_locations.length) ? car.pickup_locations : (car.pickup_location ? [car.pickup_location] : []);
           const selected = arr.some(x => x && x.name === l.name);
-          return `<span class="loc-pill ${selected?'active-green':''}" data-loc-type="pickup" data-loc-name="${l.name.replace(/"/g,'&quot;')}" onclick="toggleLoc('pickup','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`;
+          const safeName = String(l.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+          return `<span class="loc-pill ${selected?'active-green':''}" data-loc-type="pickup" data-loc-name="${safeName}" onclick="toggleLocByName('pickup', this)">${safeName}</span>`;
         }).join('')}</div>
         <input type="hidden" id="f-pickups" value='${JSON.stringify((car.pickup_locations && car.pickup_locations.length) ? car.pickup_locations : (car.pickup_location ? [car.pickup_location] : []))}'>
         <div class="section-title" style="margin-top:14px">Drop-off Locations <span style="color:#FF3B30">*</span> <span id="dropoff-count" style="color:#666;font-size:11px;font-weight:600;margin-left:6px"></span></div>
         <div class="loc-pills" id="dropoff-pills">${locations.map(l=>{
           const arr = (car.dropoff_locations && car.dropoff_locations.length) ? car.dropoff_locations : (car.dropoff_location ? [car.dropoff_location] : []);
           const selected = arr.some(x => x && x.name === l.name);
-          return `<span class="loc-pill ${selected?'active-red':''}" data-loc-type="dropoff" data-loc-name="${l.name.replace(/"/g,'&quot;')}" onclick="toggleLoc('dropoff','${l.name.replace(/'/g,"\\'")}',${l.lat},${l.lng})">${l.name}</span>`;
+          const safeName = String(l.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+          return `<span class="loc-pill ${selected?'active-red':''}" data-loc-type="dropoff" data-loc-name="${safeName}" onclick="toggleLocByName('dropoff', this)">${safeName}</span>`;
         }).join('')}</div>
         <input type="hidden" id="f-dropoffs" value='${JSON.stringify((car.dropoff_locations && car.dropoff_locations.length) ? car.dropoff_locations : (car.dropoff_location ? [car.dropoff_location] : []))}'>
         <input type="hidden" id="f-stock" value='${JSON.stringify(car.stock || {})}'>
@@ -1783,41 +1785,88 @@ async function showCarForm(id) {
   setTimeout(() => { renderGallery(); renderStockInputs(); }, 0);
 }
 
-// Multi-select location toggle: adds/removes the location from the hidden
-// `f-pickups`/`f-dropoffs` JSON arrays. Updates the pill's active style and
-// the running count label.
-function toggleLoc(type, name, lat, lng) {
-  const inputId = 'f-' + (type==='pickup' ? 'pickups' : 'dropoffs');
+// Multi-select location toggle for vehicle settings.
+//
+// Single source of truth: the hidden input (`f-pickups` / `f-dropoffs`)
+// holds a JSON array of {name, lat, lng, country, city}. After every
+// toggle we (1) update the array, (2) re-sync the CSS class on EVERY
+// chip from the array — never from `event.target`. This avoids the
+// previous bug where the active-class and the array could desync after
+// rapid clicks or when `event` was unavailable (strict-mode browsers,
+// programmatic clicks, accessibility tools, etc.).
+//
+// Called from inline onclick="toggleLocByName('pickup', this)".
+function toggleLocByName(type, el) {
+  const name = el ? el.getAttribute('data-loc-name') : '';
+  if (!name) return;
+  const inputId = 'f-' + (type === 'pickup' ? 'pickups' : 'dropoffs');
+  const containerId = type + '-pills';
+  const counterId = type + '-count';
+  const activeClass = type === 'pickup' ? 'active-green' : 'active-red';
   const input = document.getElementById(inputId);
+  if (!input) return;
+
+  // Parse current array (defensive against malformed JSON).
   let arr = [];
-  try { arr = JSON.parse(input.value || '[]'); } catch(e) { arr = []; }
+  try { arr = JSON.parse(input.value || '[]'); if (!Array.isArray(arr)) arr = []; } catch (e) { arr = []; }
+
   const idx = arr.findIndex(x => x && x.name === name);
-  const activeClass = type==='pickup' ? 'active-green' : 'active-red';
   if (idx >= 0) {
+    // Toggle OFF — remove from array.
     arr.splice(idx, 1);
-    if (event && event.target && event.target.classList) event.target.classList.remove(activeClass);
   } else {
-    // Look up the full location metadata so the entry we save carries
-    // the COUNTRY (and city) — not just {name, lat, lng}. Without country
-    // the mobile/web booking page can't render the correct ITBIS vs Tax
-    // label, even though the tax_rate itself comes back fine from the
-    // /api/locations/tax-by-name endpoint. Missing country here is the
-    // exact regression that resurfaced after the location cleanup.
+    // Toggle ON — look up full metadata so we save coordinates + country.
+    // Coordinates and country are required to make the booking map render
+    // the right pin and the right tax label (ITBIS vs Tax) downstream.
     const meta = (typeof locations !== 'undefined' ? (locations || []) : [])
-      .find(l => String(l.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase());
+      .find(l => String(l.name || '').trim().toLowerCase() === String(name).trim().toLowerCase());
+    // Guard against null/undefined lat/lng — coerce to a real number.
+    const _num = (v) => {
+      const n = typeof v === 'number' ? v : parseFloat(v);
+      return Number.isFinite(n) ? n : 0;
+    };
     const entry = {
       name,
-      lat,
-      lng,
-      country: (meta && meta.country) ? meta.country : '',
-      city:    (meta && meta.city)    ? meta.city    : '',
+      lat: _num(meta && meta.lat),
+      lng: _num(meta && meta.lng),
+      country: (meta && meta.country) ? String(meta.country) : '',
+      city:    (meta && meta.city)    ? String(meta.city)    : '',
     };
     arr.push(entry);
-    if (event && event.target && event.target.classList) event.target.classList.add(activeClass);
   }
+
+  // Single source of truth — write back the array.
   input.value = JSON.stringify(arr);
-  const counter = document.getElementById(type+'-count');
+
+  // Re-sync EVERY chip's active class from the array. This is the key
+  // robustness fix — no longer depends on `event.target` working.
+  const container = document.getElementById(containerId);
+  if (container) {
+    const selectedNames = new Set(arr.map(x => x && x.name));
+    container.querySelectorAll('.loc-pill').forEach(pill => {
+      const pname = pill.getAttribute('data-loc-name');
+      if (selectedNames.has(pname)) pill.classList.add(activeClass);
+      else pill.classList.remove(activeClass);
+    });
+  }
+
+  // Update count badge.
+  const counter = document.getElementById(counterId);
   if (counter) counter.textContent = arr.length ? '(' + arr.length + ' selected)' : '';
+
+  // Refresh per-location stock inputs (which read from f-pickups / f-dropoffs).
+  if (typeof renderStockInputs === 'function') renderStockInputs();
+}
+
+// Backward-compat shim — older inline onclick handlers may still exist in
+// the page cache or in user bookmarks; keep this thin wrapper to avoid
+// ReferenceError if anything triggers the legacy signature.
+function toggleLoc(type, name /*, lat, lng */) {
+  const container = document.getElementById(type + '-pills');
+  if (!container) return;
+  const pill = container.querySelector(`.loc-pill[data-loc-name="${String(name||'').replace(/"/g,'\\"')}"]`);
+  if (pill) toggleLocByName(type, pill);
+}
   // Pickup OR dropoff changes affect the stock inputs (union list).
   renderStockInputs();
 }
