@@ -1083,11 +1083,11 @@ export default function BookingScreen() {
             </View>
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>📅 {tr('pickupDate')}</Text>
-              <Text style={styles.confirmValue}>{pickupDate}</Text>
+              <Text style={styles.confirmValue}>{pickupDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</Text>
             </View>
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>📅 {tr('dropoffDate')}</Text>
-              <Text style={styles.confirmValue}>{dropoffDate}</Text>
+              <Text style={styles.confirmValue}>{dropoffDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</Text>
             </View>
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>📍 {tr('pickupLocation')}</Text>
