@@ -2531,6 +2531,130 @@ async def get_booking(booking_id: str, request: Request):
     return serialize_booking(booking)
 
 
+# Minimum lead time (in hours) BEFORE pickup at which a customer can still
+# self-cancel their own booking. Set to 24 to match the published policy.
+CUSTOMER_CANCEL_MIN_LEAD_HOURS = 24
+
+
+@api_router.post("/bookings/{booking_id}/cancel")
+async def cancel_booking(booking_id: str, request: Request):
+    """Customer-initiated booking cancellation.
+
+    Rules:
+      • The booking must belong to the authenticated user (admins use the
+        existing admin endpoint).
+      • The booking status must be 'pending', 'pending_payment', or
+        'confirmed' — already-cancelled or completed/active bookings can't
+        be cancelled by the customer.
+      • Cancellation must be requested at least ``CUSTOMER_CANCEL_MIN_LEAD_HOURS``
+        hours before the pickup date.
+
+    Effects:
+      • Sets booking.status = 'cancelled'
+      • Records cancelled_at, cancelled_by = 'customer'
+      • Restocks +1 at the booked pickup location (if the location still
+        exists in the car's stock dict).
+      • Sends the existing cancellation email to the customer.
+      • Returns the updated booking JSON.
+
+    Refund: none. Payment is collected at pickup (cash or card-on-site) so
+    no money has ever changed hands. The cancellation email reflects this.
+    """
+    user = await get_authenticated_user(request)
+    try:
+        oid = ObjectId(booking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid booking id")
+    booking = await db.bookings.find_one({"_id": oid})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    # Ownership check — match either the user's id or the email-id pair
+    # (older bookings may have one but not the other). Admins are excluded
+    # here on purpose; they have a different endpoint.
+    booking_user_id = str(booking.get("user_id") or "")
+    booking_email = (booking.get("customer_email") or "").lower().strip()
+    current_user_id = str(user.get("_id") or user.get("id") or "")
+    current_email = (user.get("email") or "").lower().strip()
+    if booking_user_id and booking_user_id != current_user_id and booking_email != current_email:
+        raise HTTPException(status_code=403, detail="You can only cancel your own bookings.")
+
+    # Status check
+    current_status = (booking.get("status") or "").lower()
+    if current_status not in {"pending", "pending_payment", "confirmed"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This booking can't be cancelled (current status: {current_status or 'unknown'}).",
+        )
+
+    # Lead-time check — pickup must be at least N hours in the future.
+    pickup_str = (booking.get("pickup_date") or "").strip()
+    pickup_dt = None
+    if pickup_str:
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                pickup_dt = datetime.strptime(pickup_str[:len(fmt)], fmt)
+                break
+            except ValueError:
+                continue
+    if pickup_dt is None:
+        # If we can't parse the pickup date we conservatively allow the
+        # cancellation rather than trapping the customer in a bad booking.
+        logger.warning("Cannot parse pickup_date '%s' for cancel — allowing.", pickup_str)
+    else:
+        now_naive = datetime.utcnow()
+        hours_until = (pickup_dt - now_naive).total_seconds() / 3600.0
+        if hours_until < CUSTOMER_CANCEL_MIN_LEAD_HOURS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Bookings can only be cancelled at least {CUSTOMER_CANCEL_MIN_LEAD_HOURS} hours "
+                    f"before pickup. Please contact support for assistance."
+                ),
+            )
+
+    # Restock the car at the booked pickup location, if possible.
+    car_id = booking.get("car_id")
+    pickup_loc_name = ((booking.get("pickup_location") or {}).get("name") or "").strip()
+    restock_status = "skipped"
+    if car_id and pickup_loc_name:
+        try:
+            car_oid = ObjectId(car_id) if not isinstance(car_id, ObjectId) else car_id
+            inc_field = f"stock.{pickup_loc_name}"
+            res = await db.cars.update_one({"_id": car_oid}, {"$inc": {inc_field: 1}})
+            restock_status = f"incremented (modified={res.modified_count})"
+        except Exception as e:
+            logger.exception("Restock failed during cancel for booking=%s: %s", booking_id, e)
+            restock_status = f"error: {str(e)[:120]}"
+
+    # Persist the cancellation.
+    await db.bookings.update_one(
+        {"_id": oid},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": datetime.utcnow(),
+            "cancelled_by": "customer",
+        }},
+    )
+
+    # Re-fetch and email.
+    booking = await db.bookings.find_one({"_id": oid})
+    try:
+        await send_booking_email("cancelled", booking)
+    except Exception as e:
+        logger.exception("Cancellation email failed for booking=%s: %s", booking_id, e)
+
+    logger.info(
+        "Customer cancel: booking=%s user=%s restock=%s",
+        booking_id, current_email or current_user_id, restock_status,
+    )
+    return {
+        "ok": True,
+        "booking": serialize_booking(booking),
+        "restock": restock_status,
+    }
+
+
 @api_router.post("/admin/backfill-booking-taxes")
 async def backfill_booking_taxes(request: Request):
     """Recompute and persist subtotal / tax_rate / tax_amount for bookings.

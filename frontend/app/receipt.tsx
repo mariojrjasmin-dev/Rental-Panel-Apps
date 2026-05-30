@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Image, Platform, Alert, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Image, Platform, Alert, Linking, Modal } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import * as Sharing from 'expo-sharing';
 import BrandLogo from '../components/BrandLogo';
 import { taxLabel } from '../src/tax';
 import { useTheme } from '../src/theme';
+import { t as tr } from '../src/i18n';
 
 import { BACKEND_URL } from '../src/config';
 
@@ -46,7 +47,76 @@ export default function ReceiptScreen() {
   const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  // Cancel-booking flow state. The customer cancels via a confirm modal;
+  // the actual POST hits /api/bookings/{id}/cancel which restocks the car
+  // and emails a confirmation. Eligibility (≥24h before pickup) is enforced
+  // by the backend — we mirror the rule here only to show/hide the button.
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const { colors, isDark } = useTheme();
+
+  // The cancel button is rendered ONLY when:
+  //  • booking exists
+  //  • status is one of pending / pending_payment / confirmed
+  //  • pickup_date is at least 24h in the future
+  const canCancel = (() => {
+    if (!booking) return false;
+    const ok = ['pending', 'pending_payment', 'confirmed'].includes((booking.status || '').toLowerCase());
+    if (!ok) return false;
+    if (!booking.pickup_date) return ok; // server will decide
+    const t = Date.parse(booking.pickup_date);
+    if (Number.isNaN(t)) return ok;
+    const hoursLeft = (t - Date.now()) / 36e5;
+    return hoursLeft >= 24;
+  })();
+
+  const handleCancelBooking = async () => {
+    if (!booking || cancelling) return;
+    setCancelling(true);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${BACKEND_URL}/api/bookings/${booking.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = (data && typeof data.detail === 'string') ? data.detail : tr('cancelBookingFailed');
+        if (Platform.OS === 'web') {
+          // eslint-disable-next-line no-alert
+          window.alert(detail);
+        } else {
+          Alert.alert(tr('cancelBooking'), detail);
+        }
+        setCancelling(false);
+        setCancelModalVisible(false);
+        return;
+      }
+      // Success — close the modal, refresh the booking display, and confirm.
+      setCancelModalVisible(false);
+      if (data?.booking) {
+        setBooking(data.booking);
+      } else {
+        // Optimistic update.
+        setBooking({ ...booking, status: 'cancelled' });
+      }
+      if (Platform.OS === 'web') {
+        // eslint-disable-next-line no-alert
+        window.alert(tr('bookingCancelled'));
+      } else {
+        Alert.alert(tr('bookingCancelled'));
+      }
+    } catch (e: any) {
+      if (Platform.OS === 'web') {
+        // eslint-disable-next-line no-alert
+        window.alert(e?.message || tr('cancelBookingFailed'));
+      } else {
+        Alert.alert(tr('cancelBooking'), e?.message || tr('cancelBookingFailed'));
+      }
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -283,9 +353,70 @@ export default function ReceiptScreen() {
           )}
         </TouchableOpacity>
 
+        {/* Cancel Booking button — only shown when cancellation is allowed.
+            Backend enforces the actual 24h policy; this is a UI guard. */}
+        {canCancel && (
+          <TouchableOpacity
+            testID="cancel-booking-btn"
+            style={styles.cancelBtn}
+            onPress={() => setCancelModalVisible(true)}
+            disabled={cancelling}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="close-circle-outline" size={20} color="#FF3B30" />
+            <Text style={styles.cancelBtnText}>{tr('cancelBooking')}</Text>
+          </TouchableOpacity>
+        )}
+
         <Text style={[styles.footer, { color: colors.textMuted }]}>Thank you for choosing DAMS Car Rental.</Text>
         <Text style={[styles.footerSmall, { color: colors.textSubtle }]}>support@damscarrental.com</Text>
       </ScrollView>
+
+      {/* Cancel-confirmation modal */}
+      <Modal
+        visible={cancelModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !cancelling && setCancelModalVisible(false)}
+      >
+        <View style={styles.cancelModalOverlay}>
+          <View style={styles.cancelModalCard}>
+            <View style={styles.cancelModalHeader}>
+              <Ionicons name="alert-circle" size={28} color="#FF9500" />
+              <Text style={styles.cancelModalTitle}>{tr('cancelBookingTitle')}</Text>
+            </View>
+            <Text style={styles.cancelModalSub}>{tr('cancelBookingSub')}</Text>
+            <View style={styles.cancelPolicyBox}>
+              <Ionicons name="information-circle-outline" size={16} color="#0a5d2b" />
+              <Text style={styles.cancelPolicyText}>{tr('cancellationPolicy')}</Text>
+            </View>
+            <View style={styles.cancelActions}>
+              <TouchableOpacity
+                testID="cancel-modal-keep"
+                style={styles.cancelKeepBtn}
+                onPress={() => setCancelModalVisible(false)}
+                disabled={cancelling}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelKeepBtnText}>{tr('keepBooking')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="cancel-modal-confirm"
+                style={[styles.cancelConfirmBtn, cancelling && { opacity: 0.6 }]}
+                onPress={handleCancelBooking}
+                disabled={cancelling}
+                activeOpacity={0.7}
+              >
+                {cancelling ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.cancelConfirmBtnText}>{tr('confirmCancelBooking')}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -381,4 +512,22 @@ const styles = StyleSheet.create({
 
   primaryBtn: { backgroundColor: '#FF3B30', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 50, marginTop: 8 },
   primaryBtnText: { color: '#FFF', fontWeight: '700', fontSize: 15 },
+
+  // ---- Cancel Booking button ----
+  cancelBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, marginTop: 10, borderRadius: 50, backgroundColor: '#FFF', borderWidth: 1.5, borderColor: '#FFD2CE' },
+  cancelBtnText: { color: '#FF3B30', fontWeight: '800', fontSize: 15 },
+
+  // ---- Cancel-confirmation modal ----
+  cancelModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  cancelModalCard: { width: '100%', maxWidth: 420, backgroundColor: '#FFFFFF', borderRadius: 20, padding: 22 },
+  cancelModalHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+  cancelModalTitle: { fontSize: 19, fontWeight: '900', color: '#0A0A0A', flex: 1 },
+  cancelModalSub: { fontSize: 14, color: '#444', marginBottom: 14, lineHeight: 20 },
+  cancelPolicyBox: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', backgroundColor: '#e6f9ed', borderWidth: 1, borderColor: '#a4e1be', borderRadius: 10, padding: 10, marginBottom: 14 },
+  cancelPolicyText: { flex: 1, fontSize: 12, color: '#0a5d2b', fontWeight: '700' },
+  cancelActions: { flexDirection: 'row', gap: 10 },
+  cancelKeepBtn: { flex: 1, paddingVertical: 14, borderRadius: 50, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  cancelKeepBtnText: { fontSize: 15, fontWeight: '800', color: '#0A0A0A' },
+  cancelConfirmBtn: { flex: 1.3, paddingVertical: 14, borderRadius: 50, backgroundColor: '#FF3B30', alignItems: 'center', justifyContent: 'center' },
+  cancelConfirmBtnText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
 });

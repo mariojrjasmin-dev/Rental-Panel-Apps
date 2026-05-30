@@ -55,6 +55,10 @@ export default function BookingScreen() {
   const [termsText, setTermsText] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsModalVisible, setTermsModalVisible] = useState(false);
+  // Final confirmation modal — shown right before the booking is actually
+  // submitted so the customer gets one explicit chance to review the
+  // reservation summary (car, dates, locations, price, payment method).
+  const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   // Promo code state
   const [promoInput, setPromoInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number; type: string; value: number } | null>(null);
@@ -997,7 +1001,12 @@ export default function BookingScreen() {
         <TouchableOpacity
           testID="confirm-booking-btn"
           style={[styles.confirmBtn, (!termsAccepted || booking) && styles.confirmBtnDisabled]}
-          onPress={handleBooking}
+          onPress={() => {
+            // Show the review modal first. The actual booking submission runs
+            // only after the customer taps "Confirm & Book" inside the modal.
+            if (!termsAccepted || booking) return;
+            setConfirmModalVisible(true);
+          }}
           disabled={booking || !termsAccepted}
           activeOpacity={0.7}
         >
@@ -1048,6 +1057,86 @@ export default function BookingScreen() {
             </TouchableOpacity>
           </View>
         </SafeAreaView>
+      </Modal>
+
+      {/* ===== Booking Confirmation Modal =====
+          Shown AFTER the customer taps "Confirm Booking" / "Pay $X" on the
+          form but BEFORE we actually POST /api/bookings. Last clear chance
+          to review dates, locations, payment method and total. */}
+      <Modal
+        visible={confirmModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setConfirmModalVisible(false)}
+      >
+        <View style={styles.confirmModalOverlay}>
+          <View style={styles.confirmModalCard}>
+            <View style={styles.confirmModalHeader}>
+              <Ionicons name="checkmark-circle" size={28} color="#34C759" />
+              <Text style={styles.confirmModalTitle}>{tr('confirmYourBooking')}</Text>
+            </View>
+            <Text style={styles.confirmModalSub}>{tr('confirmYourBookingSub')}</Text>
+
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>🚗 {tr('vehicle') || 'Vehicle'}</Text>
+              <Text style={styles.confirmValue} numberOfLines={1}>{car?.name}</Text>
+            </View>
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>📅 {tr('pickupDate')}</Text>
+              <Text style={styles.confirmValue}>{pickupDate}</Text>
+            </View>
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>📅 {tr('dropoffDate')}</Text>
+              <Text style={styles.confirmValue}>{dropoffDate}</Text>
+            </View>
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>📍 {tr('pickupLocation')}</Text>
+              <Text style={styles.confirmValue} numberOfLines={2}>{selectedPickup?.name || '—'}</Text>
+            </View>
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>🏁 {tr('dropoffLocation')}</Text>
+              <Text style={styles.confirmValue} numberOfLines={2}>{selectedDropoff?.name || '—'}</Text>
+            </View>
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>💳 {tr('paymentMethod') || 'Payment'}</Text>
+              <Text style={styles.confirmValue}>{paymentMethod === 'stripe' ? tr('card') : tr('cash')}</Text>
+            </View>
+            <View style={styles.confirmTotalRow}>
+              <Text style={styles.confirmTotalLabel}>{tr('total') || 'Total'}</Text>
+              <Text style={styles.confirmTotalValue}>${grandTotal}</Text>
+            </View>
+
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                testID="confirm-modal-back"
+                style={styles.confirmCancelBtn}
+                onPress={() => setConfirmModalVisible(false)}
+                disabled={booking}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.confirmCancelBtnText}>{tr('backToEdit')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="confirm-modal-confirm"
+                style={[styles.confirmOkBtn, booking && { opacity: 0.6 }]}
+                onPress={async () => {
+                  // Close the modal first so the spinner state in the parent
+                  // button is visible while the request is in flight.
+                  setConfirmModalVisible(false);
+                  await handleBooking();
+                }}
+                disabled={booking}
+                activeOpacity={0.7}
+              >
+                {booking ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.confirmOkBtnText}>{tr('confirmAndBook')}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1154,4 +1243,21 @@ const styles = StyleSheet.create({
   locSummaryBold: { color: '#0a0a0a', fontWeight: '800' },
   sameCountryBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#e6f9ed', borderWidth: 1, borderColor: '#a4e1be', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
   sameCountryBannerText: { fontSize: 12, color: '#0a5d2b', fontWeight: '700', flex: 1 },
+  // ===== Booking Confirmation Modal =====
+  confirmModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  confirmModalCard: { width: '100%', maxWidth: 420, backgroundColor: '#FFFFFF', borderRadius: 20, padding: 22, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
+  confirmModalHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+  confirmModalTitle: { fontSize: 19, fontWeight: '900', color: '#0A0A0A', flex: 1 },
+  confirmModalSub: { fontSize: 13, color: '#666', marginBottom: 16, lineHeight: 18 },
+  confirmRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F0F0F0', gap: 12 },
+  confirmLabel: { fontSize: 13, color: '#666', fontWeight: '700', flexShrink: 0 },
+  confirmValue: { fontSize: 14, color: '#0A0A0A', fontWeight: '700', flex: 1, textAlign: 'right' },
+  confirmTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  confirmTotalLabel: { fontSize: 16, fontWeight: '900', color: '#0A0A0A' },
+  confirmTotalValue: { fontSize: 24, fontWeight: '900', color: '#FF3B30' },
+  confirmActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  confirmCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 50, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  confirmCancelBtnText: { fontSize: 15, fontWeight: '800', color: '#0A0A0A' },
+  confirmOkBtn: { flex: 1.4, paddingVertical: 14, borderRadius: 50, backgroundColor: '#34C759', alignItems: 'center', justifyContent: 'center' },
+  confirmOkBtnText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
 });
