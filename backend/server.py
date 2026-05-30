@@ -1377,6 +1377,199 @@ async def forgot_password(req: ForgotPasswordRequest):
     return response_payload
 
 
+# ==================== SSO USER MIGRATION (one-time admin tool) ====================
+# Apple Sign-In and Google Sign-In were removed from the customer UI in
+# v1.2.0. Users who previously authenticated via SSO no longer have a way to
+# log in. This admin-only endpoint emails them a password-reset code so
+# they can set a password and continue using their account (preserving
+# bookings, profile, and payment history).
+class SSOMigrationRequest(BaseModel):
+    dry_run: bool = False  # if true, list affected users without sending
+    providers: List[str] = ["apple", "google"]
+
+
+@api_router.post("/admin/migrate-sso-users")
+async def migrate_sso_users(req: SSOMigrationRequest, request: Request):
+    """Generate a password-reset code for every SSO-only user and email
+    them a bilingual (EN/ES) onboarding message explaining how to set a
+    password and continue signing in.
+
+    Returns: {ok, scanned, emailed, skipped, errors, users:[...]}"""
+    await require_admin(request)
+
+    providers = [p.lower().strip() for p in (req.providers or []) if p.strip()]
+    if not providers:
+        providers = ["apple", "google"]
+
+    query = {"provider": {"$in": providers}}
+    cursor = db.users.find(query, {"email": 1, "name": 1, "provider": 1, "_id": 0})
+    users = await cursor.to_list(length=10_000)
+
+    if req.dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "scanned": len(users),
+            "emailed": 0,
+            "skipped": 0,
+            "errors": 0,
+            "users": [{"email": u.get("email"), "provider": u.get("provider")} for u in users],
+        }
+
+    emailed = 0
+    skipped = 0
+    errors = 0
+    details = []
+    for u in users:
+        email = (u.get("email") or "").strip().lower()
+        name = u.get("name") or email.split("@", 1)[0]
+        if not email or "@" not in email:
+            skipped += 1
+            details.append({"email": email or "(none)", "status": "skipped_invalid_email"})
+            continue
+
+        try:
+            # 1. Generate a 6-digit code (same mechanism as forgot-password).
+            code = f"{_secrets.randbelow(1_000_000):06d}"
+            code_hash = hash_password(code)
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_TTL_MIN)
+            await db.password_resets.update_one(
+                {"email": email},
+                {"$set": {
+                    "email": email,
+                    "code_hash": code_hash,
+                    "expires_at": expires_at,
+                    "attempts": 0,
+                    "used": False,
+                    "created_at": datetime.now(timezone.utc),
+                    "migration": True,
+                }},
+                upsert=True,
+            )
+
+            # 2. Build bilingual email (EN + ES).
+            subject = "DAMS Rent a Car — Action required / Acción requerida"
+            html = (
+                f"<div style='font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width:560px; margin:0 auto; padding:24px; color:#0a0a0a;'>"
+                f"<div style='text-align:center;margin-bottom:20px'>"
+                f"<img src='{EMAIL_LOGO_URL}' alt='DAMS Rent a Car' width='180' style='display:inline-block;max-width:180px;height:auto;border:0;outline:none;text-decoration:none' />"
+                f"</div>"
+                # ---------- English block ----------
+                f"<h2 style='margin:0 0 12px;color:#FF3B30'>🇺🇸 Set up your password</h2>"
+                f"<p>Hi {name},</p>"
+                f"<p>We've simplified login in our latest app update. <strong>Apple and Google sign-in have been removed</strong>, so you'll need to set a password to keep using your account.</p>"
+                f"<p><strong>Your code:</strong></p>"
+                f"<div style='font-size:36px;font-weight:900;letter-spacing:8px;background:#f5f5f5;padding:16px;text-align:center;border-radius:12px;margin:12px 0;color:#FF3B30'>{code}</div>"
+                f"<p><strong>How to set a password:</strong></p>"
+                f"<ol style='line-height:1.7'>"
+                f"<li>Open the DAMS Rent a Car app</li>"
+                f"<li>Tap <strong>Forgot password?</strong> on the login screen</li>"
+                f"<li>Enter your email: <strong>{email}</strong></li>"
+                f"<li>Enter the 6-digit code above</li>"
+                f"<li>Choose a new password and sign in</li>"
+                f"</ol>"
+                f"<p style='color:#666;font-size:13px'>Your bookings, profile, and history are preserved. Code expires in {PASSWORD_RESET_TTL_MIN} minutes.</p>"
+                f"<hr style='border:none;border-top:1px solid #e5e5e5;margin:24px 0' />"
+                # ---------- Spanish block ----------
+                f"<h2 style='margin:0 0 12px;color:#FF3B30'>🇩🇴 Configura tu contraseña</h2>"
+                f"<p>Hola {name},</p>"
+                f"<p>Hemos simplificado el inicio de sesión en nuestra última actualización. <strong>Se eliminó el inicio de sesión con Apple y Google</strong>, por lo que necesitarás establecer una contraseña para seguir usando tu cuenta.</p>"
+                f"<p><strong>Tu código:</strong></p>"
+                f"<div style='font-size:36px;font-weight:900;letter-spacing:8px;background:#f5f5f5;padding:16px;text-align:center;border-radius:12px;margin:12px 0;color:#FF3B30'>{code}</div>"
+                f"<p><strong>Cómo establecer una contraseña:</strong></p>"
+                f"<ol style='line-height:1.7'>"
+                f"<li>Abre la aplicación DAMS Rent a Car</li>"
+                f"<li>Toca <strong>¿Olvidaste tu contraseña?</strong> en la pantalla de inicio de sesión</li>"
+                f"<li>Ingresa tu correo: <strong>{email}</strong></li>"
+                f"<li>Ingresa el código de 6 dígitos de arriba</li>"
+                f"<li>Elige una nueva contraseña e inicia sesión</li>"
+                f"</ol>"
+                f"<p style='color:#666;font-size:13px'>Tus reservas, perfil e historial están preservados. El código expira en {PASSWORD_RESET_TTL_MIN} minutos.</p>"
+                f"<p style='color:#999;font-size:11px;margin-top:24px;text-align:center'>— DAMS Rent a Car, S.R.L.</p>"
+                f"</div>"
+            )
+            text = (
+                f"Hi {name},\n\n"
+                f"Apple/Google sign-in was removed. To keep your DAMS Rent a Car account, set a password:\n"
+                f"1. Open the app, tap 'Forgot password?'\n"
+                f"2. Enter email: {email}\n"
+                f"3. Enter code: {code}\n"
+                f"4. Pick a new password.\n\n"
+                f"--- ESPAÑOL ---\n"
+                f"Hola {name},\n\n"
+                f"Se eliminó el inicio con Apple/Google. Para mantener tu cuenta DAMS Rent a Car, establece una contraseña:\n"
+                f"1. Abre la app, toca '¿Olvidaste tu contraseña?'\n"
+                f"2. Ingresa el correo: {email}\n"
+                f"3. Ingresa el código: {code}\n"
+                f"4. Elige una nueva contraseña.\n"
+            )
+            await send_email(email, subject, html, text, include_default_bcc=False)
+            emailed += 1
+            details.append({"email": email, "provider": u.get("provider"), "status": "emailed"})
+        except Exception as e:
+            errors += 1
+            logger.exception("SSO migration email failed for %s: %s", email, e)
+            details.append({"email": email, "status": "error", "error": str(e)[:200]})
+
+    return {
+        "ok": True,
+        "dry_run": False,
+        "scanned": len(users),
+        "emailed": emailed,
+        "skipped": skipped,
+        "errors": errors,
+        "users": details,
+    }
+
+
+# ==================== ADDRESS → GPS GEOCODING (admin tool) ====================
+# Uses OpenStreetMap Nominatim (free, no API key). Admin-only because we
+# don't want public users hammering the upstream API and getting us
+# rate-limited / banned. Nominatim policy requires a User-Agent header.
+@api_router.get("/admin/geocode")
+async def geocode_address(request: Request, q: str = "", country: str = "", city: str = ""):
+    """Geocode a freeform address (optionally with city/country hints) to
+    {lat, lng, display_name}. Returns 404 if no match.
+
+    Example: /api/admin/geocode?q=Aeropuerto%20Punta%20Cana&city=Punta%20Cana&country=Dominican%20Republic
+    """
+    await require_admin(request)
+    query_parts = [s.strip() for s in [q, city, country] if (s and s.strip())]
+    if not query_parts:
+        raise HTTPException(status_code=400, detail="Please provide at least an address, city or country.")
+    full_query = ", ".join(query_parts)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": full_query, "format": "json", "limit": 1, "addressdetails": 0},
+                headers={
+                    # Nominatim requires a descriptive User-Agent (their policy).
+                    "User-Agent": "DAMSRentACar-Admin/1.0 (admin@damscarrental.com)",
+                    "Accept-Language": "en,es",
+                },
+            )
+        if r.status_code != 200:
+            logger.warning("Nominatim returned %s for '%s'", r.status_code, full_query)
+            raise HTTPException(status_code=502, detail="Geocoding service unavailable. Try again in a moment.")
+        results = r.json() or []
+        if not results:
+            raise HTTPException(status_code=404, detail="No coordinates found for that address. Try a more specific address.")
+        hit = results[0]
+        return {
+            "ok": True,
+            "lat": float(hit.get("lat")),
+            "lng": float(hit.get("lon")),
+            "display_name": hit.get("display_name") or full_query,
+            "query": full_query,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Geocode failed: %s", e)
+        raise HTTPException(status_code=502, detail="Geocoding service error. Please try again.")
+
+
 @api_router.post("/auth/reset-password")
 async def reset_password(req: ResetPasswordRequest):
     """Verify the 6-digit code and update the user's password."""

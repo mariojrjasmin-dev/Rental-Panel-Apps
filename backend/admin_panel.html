@@ -2566,11 +2566,18 @@ async function showLocForm(id) {
       <div class="modal">
         <h2>${id?'Edit':'Add'} Location</h2>
         <div class="form-group"><label>Name *</label><input class="input" id="l-name" value="${loc.name||''}"></div>
-        <div class="form-group"><label>Address</label><input class="input" id="l-addr" value="${loc.address||''}"></div>
+        <div class="form-group"><label>Address</label><input class="input" id="l-addr" value="${loc.address||''}" placeholder="e.g. Aeropuerto Internacional de Punta Cana"></div>
         <div class="form-row">
           <div class="form-group"><label>City *</label><input class="input" id="l-city" value="${loc.city||''}"></div>
           <div class="form-group"><label>Country</label><input class="input" id="l-country" value="${loc.country||''}"></div>
         </div>
+        <div style="display:flex;gap:8px;align-items:center;margin:6px 0 12px">
+          <button type="button" class="btn btn-gray" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px" onclick="geocodeLocation()">
+            <span id="geo-icon">📍</span>
+            <span id="geo-label">Auto-fill coordinates from address</span>
+          </button>
+        </div>
+        <div id="geo-status" style="font-size:12px;margin:-6px 0 12px;display:none"></div>
         <div class="form-row">
           <div class="form-group"><label>Latitude *</label><input class="input" id="l-lat" value="${loc.lat||''}"></div>
           <div class="form-group"><label>Longitude *</label><input class="input" id="l-lng" value="${loc.lng||''}"></div>
@@ -2625,6 +2632,77 @@ async function saveLoc(id) {
 async function deleteLoc(id,name) {
   if (!confirm('Delete '+name+'?')) return;
   try { await api('/locations/'+id,{method:'DELETE'}); showLocations(); } catch(e) { alert(e.message); }
+}
+
+// One-time migration helper. Apple/Google SSO were removed from the
+// customer app — any user with provider='apple'|'google' can no longer
+// log in. This sends them a bilingual EN/ES email with a password-reset
+// code so they can keep their account.
+async function runSSOMigration() {
+  try {
+    const dry = await api('/admin/migrate-sso-users', {method:'POST', body: JSON.stringify({dry_run:true})});
+    if (!dry.scanned) {
+      alert('✓ No SSO users found — nothing to migrate.\n\nAll existing users already use email/password.');
+      return;
+    }
+    const ok = confirm(`Found ${dry.scanned} user(s) who previously signed in with Apple or Google.\n\nThis will email each one a bilingual (EN/ES) password-reset code so they can set a password and keep using their account. Bookings & profile data are preserved.\n\nProceed?`);
+    if (!ok) return;
+    const result = await api('/admin/migrate-sso-users', {method:'POST', body: JSON.stringify({dry_run:false})});
+    alert(`SSO migration complete.\n\n• Scanned: ${result.scanned}\n• Emailed: ${result.emailed}\n• Skipped: ${result.skipped}\n• Errors: ${result.errors}\n\nUsers should check their email and follow the "Forgot password" flow.`);
+  } catch (e) {
+    alert('Migration failed: ' + (e.message || 'Unknown error'));
+  }
+}
+
+// Geocode the (address, city, country) entered in the Location form using
+// the backend Nominatim wrapper. Auto-fills lat/lng inputs on success.
+async function geocodeLocation() {
+  const addr = (document.getElementById('l-addr')?.value || '').trim();
+  const city = (document.getElementById('l-city')?.value || '').trim();
+  const country = (document.getElementById('l-country')?.value || '').trim();
+  const status = document.getElementById('geo-status');
+  const label = document.getElementById('geo-label');
+  const icon = document.getElementById('geo-icon');
+  if (!addr && !city) {
+    if (status) {
+      status.style.display = 'block';
+      status.style.color = '#b91c1c';
+      status.textContent = '⚠️ Please enter an address or city first.';
+    }
+    return;
+  }
+  if (label) label.textContent = 'Looking up coordinates…';
+  if (icon) icon.textContent = '⏳';
+  if (status) { status.style.display = 'none'; status.textContent = ''; }
+  try {
+    const params = new URLSearchParams();
+    if (addr) params.set('q', addr);
+    if (city) params.set('city', city);
+    if (country) params.set('country', country);
+    const r = await api('/admin/geocode?' + params.toString());
+    if (r && typeof r.lat === 'number' && typeof r.lng === 'number') {
+      const latEl = document.getElementById('l-lat');
+      const lngEl = document.getElementById('l-lng');
+      if (latEl) latEl.value = r.lat.toFixed(6);
+      if (lngEl) lngEl.value = r.lng.toFixed(6);
+      if (status) {
+        status.style.display = 'block';
+        status.style.color = '#15803d';
+        status.innerHTML = '✓ Found: <span style="opacity:0.85">' + (r.display_name || '').replace(/</g,'&lt;') + '</span>';
+      }
+    } else {
+      throw new Error('No coordinates returned.');
+    }
+  } catch (e) {
+    if (status) {
+      status.style.display = 'block';
+      status.style.color = '#b91c1c';
+      status.textContent = '✗ ' + (e.message || 'Could not geocode this address. You can enter the lat/lng manually.');
+    }
+  } finally {
+    if (label) label.textContent = 'Auto-fill coordinates from address';
+    if (icon) icon.textContent = '📍';
+  }
 }
 
 // ==================== RENTAL TERMS ====================
@@ -2745,6 +2823,7 @@ async function showCustomers(page = 1, q = _custQ) {
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:8px">
         <h2 style="font-size:22px;font-weight:900">👥 Customers <span style="color:#666;font-weight:600;font-size:14px">(${data.total||0} ${_custIncludeAdmins ? 'users' : 'customers'})</span></h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-sm btn-gray" onclick="runSSOMigration()" title="Email a password-reset code to users who previously signed in with Apple or Google" style="font-size:12px">📧 Migrate SSO users</button>
           <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#444;background:#fff;padding:8px 12px;border:1px solid #e5e5e5;border-radius:50px;cursor:pointer">
             <input type="checkbox" ${_custIncludeAdmins?'checked':''} onchange="_custIncludeAdmins=this.checked;showCustomers(1,_custQ)" style="margin:0">
             Include admin accounts
