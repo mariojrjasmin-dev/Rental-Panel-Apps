@@ -1069,74 +1069,107 @@ export default function BookingScreen() {
         transparent
         onRequestClose={() => setConfirmModalVisible(false)}
       >
-        <View style={styles.confirmModalOverlay}>
-          <View style={styles.confirmModalCard}>
-            <View style={styles.confirmModalHeader}>
-              <Ionicons name="checkmark-circle" size={28} color="#34C759" />
-              <Text style={styles.confirmModalTitle}>{tr('confirmYourBooking')}</Text>
-            </View>
-            <Text style={styles.confirmModalSub}>{tr('confirmYourBookingSub')}</Text>
+        {/* Safe string conversion helpers — render NOTHING but strings.
+            Defensive against the React error "Objects are not valid as a
+            React child (found: [object Date])" that surfaced when raw
+            Date objects (pickupDate/dropoffDate) leaked into <Text>. */}
+        {(() => {
+          const safe = (v: any) => {
+            if (v == null) return '';
+            if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
+            if (v instanceof Date) {
+              if (Number.isNaN(v.getTime())) return '';
+              try { return v.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }); } catch { return v.toDateString(); }
+            }
+            if (typeof v === 'object' && 'name' in v) return String((v as any).name || '');
+            return String(v);
+          };
+          const _carName = safe(car?.name);
+          const _pickupStr = safe(pickupDate);
+          const _dropoffStr = safe(dropoffDate);
+          const _pickupLocStr = safe(selectedPickup?.name) || '—';
+          const _dropoffLocStr = safe(selectedDropoff?.name) || '—';
+          const _paymentStr = paymentMethod === 'stripe' ? String(tr('card') || 'Card') : String(tr('cash') || 'Cash');
+          const _totalStr = `$${Number(grandTotal) || 0}`;
+          const _titleStr = String(tr('confirmYourBooking') || 'Confirm your booking');
+          const _subStr = String(tr('confirmYourBookingSub') || 'Please review your reservation details before confirming.');
+          const _pickupLabelStr = String(tr('pickupDate') || 'Pickup Date');
+          const _dropoffLabelStr = String(tr('dropoffDate') || 'Drop-off Date');
+          const _pickupLocLabelStr = String(tr('pickupLocation') || 'Pickup Location');
+          const _dropoffLocLabelStr = String(tr('dropoffLocation') || 'Drop-off Location');
+          const _payLabelStr = String(tr('paymentMethod') || 'Payment');
+          const _totalLabelStr = String(tr('total') || 'Total');
+          const _backStr = String(tr('backToEdit') || 'Back to Edit');
+          const _confirmStr = String(tr('confirmAndBook') || 'Confirm & Book');
+          return (
+            <View style={styles.confirmModalOverlay}>
+              <View style={styles.confirmModalCard}>
+                <View style={styles.confirmModalHeader}>
+                  <Ionicons name="checkmark-circle" size={28} color="#34C759" />
+                  <Text style={styles.confirmModalTitle}>{_titleStr}</Text>
+                </View>
+                <Text style={styles.confirmModalSub}>{_subStr}</Text>
 
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>🚗 {tr('vehicle') || 'Vehicle'}</Text>
-              <Text style={styles.confirmValue} numberOfLines={1}>{car?.name}</Text>
-            </View>
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>📅 {tr('pickupDate')}</Text>
-              <Text style={styles.confirmValue}>{pickupDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</Text>
-            </View>
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>📅 {tr('dropoffDate')}</Text>
-              <Text style={styles.confirmValue}>{dropoffDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</Text>
-            </View>
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>📍 {tr('pickupLocation')}</Text>
-              <Text style={styles.confirmValue} numberOfLines={2}>{selectedPickup?.name || '—'}</Text>
-            </View>
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>🏁 {tr('dropoffLocation')}</Text>
-              <Text style={styles.confirmValue} numberOfLines={2}>{selectedDropoff?.name || '—'}</Text>
-            </View>
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>💳 {tr('paymentMethod') || 'Payment'}</Text>
-              <Text style={styles.confirmValue}>{paymentMethod === 'stripe' ? tr('card') : tr('cash')}</Text>
-            </View>
-            <View style={styles.confirmTotalRow}>
-              <Text style={styles.confirmTotalLabel}>{tr('total') || 'Total'}</Text>
-              <Text style={styles.confirmTotalValue}>${grandTotal}</Text>
-            </View>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>🚗 Vehicle</Text>
+                  <Text style={styles.confirmValue} numberOfLines={1}>{_carName}</Text>
+                </View>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>📅 {_pickupLabelStr}</Text>
+                  <Text style={styles.confirmValue}>{_pickupStr}</Text>
+                </View>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>📅 {_dropoffLabelStr}</Text>
+                  <Text style={styles.confirmValue}>{_dropoffStr}</Text>
+                </View>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>📍 {_pickupLocLabelStr}</Text>
+                  <Text style={styles.confirmValue} numberOfLines={2}>{_pickupLocStr}</Text>
+                </View>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>🏁 {_dropoffLocLabelStr}</Text>
+                  <Text style={styles.confirmValue} numberOfLines={2}>{_dropoffLocStr}</Text>
+                </View>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>💳 {_payLabelStr}</Text>
+                  <Text style={styles.confirmValue}>{_paymentStr}</Text>
+                </View>
+                <View style={styles.confirmTotalRow}>
+                  <Text style={styles.confirmTotalLabel}>{_totalLabelStr}</Text>
+                  <Text style={styles.confirmTotalValue}>{_totalStr}</Text>
+                </View>
 
-            <View style={styles.confirmActions}>
-              <TouchableOpacity
-                testID="confirm-modal-back"
-                style={styles.confirmCancelBtn}
-                onPress={() => setConfirmModalVisible(false)}
-                disabled={booking}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.confirmCancelBtnText}>{tr('backToEdit')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                testID="confirm-modal-confirm"
-                style={[styles.confirmOkBtn, booking && { opacity: 0.6 }]}
-                onPress={async () => {
-                  // Close the modal first so the spinner state in the parent
-                  // button is visible while the request is in flight.
-                  setConfirmModalVisible(false);
-                  await handleBooking();
-                }}
-                disabled={booking}
-                activeOpacity={0.7}
-              >
-                {booking ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={styles.confirmOkBtnText}>{tr('confirmAndBook')}</Text>
-                )}
-              </TouchableOpacity>
+                <View style={styles.confirmActions}>
+                  <TouchableOpacity
+                    testID="confirm-modal-back"
+                    style={styles.confirmCancelBtn}
+                    onPress={() => setConfirmModalVisible(false)}
+                    disabled={booking}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.confirmCancelBtnText}>{_backStr}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    testID="confirm-modal-confirm"
+                    style={[styles.confirmOkBtn, booking && { opacity: 0.6 }]}
+                    onPress={async () => {
+                      setConfirmModalVisible(false);
+                      await handleBooking();
+                    }}
+                    disabled={booking}
+                    activeOpacity={0.7}
+                  >
+                    {booking ? (
+                      <ActivityIndicator color="#FFF" />
+                    ) : (
+                      <Text style={styles.confirmOkBtnText}>{_confirmStr}</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-          </View>
-        </View>
+          );
+        })()}
       </Modal>
     </SafeAreaView>
   );
