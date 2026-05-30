@@ -1867,9 +1867,6 @@ function toggleLoc(type, name /*, lat, lng */) {
   const pill = container.querySelector(`.loc-pill[data-loc-name="${String(name||'').replace(/"/g,'\\"')}"]`);
   if (pill) toggleLocByName(type, pill);
 }
-  // Pickup OR dropoff changes affect the stock inputs (union list).
-  renderStockInputs();
-}
 
 // Build a numeric input per UNIQUE location the car is associated with
 // (pickup OR drop-off OR both) so the admin can set the initial inventory
