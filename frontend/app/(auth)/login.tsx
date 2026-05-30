@@ -41,24 +41,42 @@ export default function LoginScreen() {
   }, []);
 
   const offerBiometricEnable = (mail: string, pass: string) => {
-    if (!bioState.available || !bioState.enrolled || Platform.OS === 'web') return;
-    if (bioReady) return; // already enabled
-    Alert.alert(
-      t('enableBiometric'),
-      t('enableBiometricSub'),
-      [
-        { text: t('notNow'), style: 'cancel' },
-        {
-          text: t('yes'),
-          onPress: async () => {
-            try {
-              await enableBiometricLogin(mail, pass);
-              setBioReady(true);
-            } catch {}
+    // Defensive: this is a "nice-to-have" prompt — it MUST NEVER block or
+    // crash the login flow. Wrapped in try/catch + early returns + dynamic
+    // module access so that any unexpected issue (missing Alert binding,
+    // biometric module crash, etc.) silently no-ops instead of failing
+    // login. This guarantees a user can always reach the home screen after
+    // a successful credentials check.
+    try {
+      if (!bioState.available || !bioState.enrolled || Platform.OS === 'web') return;
+      if (bioReady) return; // already enabled
+      // Resolve Alert dynamically from react-native at call time. If the
+      // module's Alert export is unavailable for any reason, we silently
+      // skip the prompt instead of throwing "Property 'Alert' doesn't exist".
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const RN = require('react-native');
+      const NativeAlert = RN?.Alert || Alert;
+      if (!NativeAlert || typeof NativeAlert.alert !== 'function') return;
+      NativeAlert.alert(
+        t('enableBiometric'),
+        t('enableBiometricSub'),
+        [
+          { text: t('notNow'), style: 'cancel' },
+          {
+            text: t('yes'),
+            onPress: async () => {
+              try {
+                await enableBiometricLogin(mail, pass);
+                setBioReady(true);
+              } catch {}
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } catch (err) {
+      // Suppress entirely — biometric is optional and must not block login.
+      console.log('[login] biometric prompt skipped:', err);
+    }
   };
 
   const handleLogin = async () => {
@@ -67,7 +85,9 @@ export default function LoginScreen() {
     setError('');
     try {
       await login(email, password);
-      offerBiometricEnable(email, password);
+      // Wrap the biometric offer in its own try/catch so a failure here
+      // can't bubble up and mask the (successful) login result.
+      try { offerBiometricEnable(email, password); } catch {}
       router.replace('/(tabs)/home');
     } catch (e: any) {
       setError(e.message || t('invalidLogin'));
