@@ -2536,9 +2536,12 @@ async function showLocations() {
       </div>
     </div>
     <div class="container">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:8px;flex-wrap:wrap">
         <h2 style="font-size:22px;font-weight:900">📍 Locations <span style="color:#666;font-weight:600;font-size:14px">(${locs.length})</span></h2>
-        <button class="btn btn-red btn-sm" onclick="showLocForm()">+ Add Location</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-gray btn-sm" onclick="purgeOrphanLocations()" title="Remove every reference in vehicles to a location that no longer exists in the system">🧹 Purge deleted locations</button>
+          <button class="btn btn-red btn-sm" onclick="showLocForm()">+ Add Location</button>
+        </div>
       </div>
       ${locs.length === 0 ? '<div style="padding:48px 24px;text-align:center;color:#999;background:#fff;border:1px solid #eee;border-radius:14px"><div style="font-size:40px;margin-bottom:8px">📍</div><div style="font-weight:700;color:#666">No locations yet</div><div style="font-size:12px;margin-top:6px">Click "Add Location" to create your first pickup/dropoff location.</div></div>' : locs.map(l => { const isActive = l.active !== false; const activeBadge = isActive
         ? '<span style="display:inline-block;background:#e6f9ed;color:#0a5d2b;font-weight:800;font-size:10px;padding:3px 8px;border-radius:8px;margin-left:6px;letter-spacing:0.5px">✓ ACTIVE</span>'
@@ -2632,6 +2635,41 @@ async function saveLoc(id) {
 async function deleteLoc(id,name) {
   if (!confirm('Delete '+name+'?')) return;
   try { await api('/locations/'+id,{method:'DELETE'}); showLocations(); } catch(e) { alert(e.message); }
+}
+
+// One-click cleanup. Useful in PRODUCTION right after deploying the
+// cascade-delete fix, to scrub away every reference to locations that
+// were deleted BEFORE the cascade was in place (legacy stale data).
+// Runs a dry-run first so the admin sees exactly what will be removed.
+async function purgeOrphanLocations() {
+  try {
+    const dry = await api('/admin/locations/purge-orphans?dry_run=true', {method: 'POST'});
+    if (!dry.orphans || dry.orphans.length === 0) {
+      alert('✓ No orphaned location references found.\n\nEvery vehicle already points only to active locations:\n• ' + (dry.active_locations || []).join('\n• '));
+      return;
+    }
+    const summary = dry.orphans.map(o => '  • ' + o).join('\n');
+    const ok = confirm(
+      `Found ${dry.orphans.length} deleted location name(s) still referenced by ${dry.cars_affected} vehicle(s):\n\n${summary}\n\nThis will remove every reference from cars (pickup/drop-off lists, singular fields, and stock keys). Bookings are NOT modified — they keep their historical snapshot.\n\nProceed?`
+    );
+    if (!ok) return;
+    const r = await api('/admin/locations/purge-orphans', {method: 'POST'});
+    const lines = [
+      `Removed ${r.orphans.length} orphaned location name(s):`,
+      ...(r.orphans || []).map(o => '  • ' + o),
+      '',
+      `Vehicles cleaned: ${r.cars_affected}`,
+      `Pickup arrays updated: ${r.modified.pickup_arrays}`,
+      `Drop-off arrays updated: ${r.modified.dropoff_arrays}`,
+      `Singular pickup cleared: ${r.modified.singular_pickup}`,
+      `Singular drop-off cleared: ${r.modified.singular_dropoff}`,
+      `Stock keys removed: ${r.modified.stock_keys}`,
+    ];
+    alert('Cleanup complete!\n\n' + lines.join('\n'));
+    showLocations();
+  } catch (e) {
+    alert('Purge failed: ' + (e.message || 'Unknown error'));
+  }
 }
 
 // One-time migration helper. Apple/Google SSO were removed from the

@@ -4549,6 +4549,131 @@ async def repair_location_references(request: Request):
     }
 
 
+@api_router.post("/admin/locations/purge-orphans")
+async def purge_orphan_location_references(request: Request, dry_run: bool = False):
+    """Remove every reference in `cars` to a location name that does NOT
+    exist in the current `locations` collection (i.e. the location was
+    deleted at some point, leaving stale references in the car documents).
+
+    This is the user-facing equivalent of "delete these stale location
+    chips from every vehicle in production".
+
+    Cleans:
+      • cars.pickup_locations[]   → $pull entries whose name is orphaned
+      • cars.dropoff_locations[]  → $pull entries whose name is orphaned
+      • cars.pickup_location      → $unset if its name is orphaned (singular legacy)
+      • cars.dropoff_location     → $unset if its name is orphaned (singular legacy)
+      • cars.stock                → $unset stock.<orphan_name>
+
+    Bookings are deliberately UNTOUCHED — they are historical snapshots and
+    must preserve the original booked-location for receipts / audit.
+
+    Pass `?dry_run=true` to preview without writing.
+
+    Returns:
+      {
+        ok, dry_run,
+        active_locations: [...current names...],
+        orphans: [...the orphan names that were/will-be removed...],
+        modified: {pickup_arrays, dropoff_arrays, singular_pickup, singular_dropoff, stock_keys},
+        cars_affected: int
+      }
+    """
+    user = await require_permission(request, "locations.edit")
+
+    # 1. Snapshot the canonical set of active location names.
+    active_names: set[str] = set()
+    async for l in db.locations.find({}, {"_id": 0, "name": 1}):
+        n = (l.get("name") or "").strip()
+        if n:
+            active_names.add(n)
+
+    # 2. Scan cars and collect every distinct orphan location name.
+    orphan_names: set[str] = set()
+    cars_affected: set[str] = set()
+    async for c in db.cars.find({}, {"_id": 1, "pickup_locations.name": 1, "dropoff_locations.name": 1,
+                                       "pickup_location.name": 1, "dropoff_location.name": 1, "stock": 1}):
+        any_orphan = False
+        for entry in (c.get("pickup_locations") or []):
+            n = (entry.get("name") or "").strip()
+            if n and n not in active_names:
+                orphan_names.add(n); any_orphan = True
+        for entry in (c.get("dropoff_locations") or []):
+            n = (entry.get("name") or "").strip()
+            if n and n not in active_names:
+                orphan_names.add(n); any_orphan = True
+        sp = ((c.get("pickup_location") or {}).get("name") or "").strip()
+        if sp and sp not in active_names:
+            orphan_names.add(sp); any_orphan = True
+        sd = ((c.get("dropoff_location") or {}).get("name") or "").strip()
+        if sd and sd not in active_names:
+            orphan_names.add(sd); any_orphan = True
+        for k in (c.get("stock") or {}).keys():
+            if k and k not in active_names:
+                orphan_names.add(k); any_orphan = True
+        if any_orphan:
+            cars_affected.add(str(c["_id"]))
+
+    modified = {"pickup_arrays": 0, "dropoff_arrays": 0,
+                "singular_pickup": 0, "singular_dropoff": 0, "stock_keys": 0}
+
+    # 3. If just previewing, return without writing anything.
+    if dry_run or not orphan_names:
+        logger.info("Purge orphans (dry_run=%s) active=%d orphans=%s cars=%d",
+                    dry_run, len(active_names), sorted(orphan_names), len(cars_affected))
+        return {
+            "ok": True, "dry_run": True if dry_run else (len(orphan_names) == 0),
+            "active_locations": sorted(active_names),
+            "orphans": sorted(orphan_names),
+            "modified": modified,
+            "cars_affected": len(cars_affected),
+        }
+
+    # 4. Perform the cleanup. We iterate orphan names so we can use the
+    #    field-specific update path (Mongo $unset needs the exact path).
+    for orphan in orphan_names:
+        # $pull from arrays
+        r = await db.cars.update_many(
+            {"pickup_locations.name": orphan},
+            {"$pull": {"pickup_locations": {"name": orphan}}},
+        )
+        modified["pickup_arrays"] += r.modified_count
+        r = await db.cars.update_many(
+            {"dropoff_locations.name": orphan},
+            {"$pull": {"dropoff_locations": {"name": orphan}}},
+        )
+        modified["dropoff_arrays"] += r.modified_count
+        # $unset singular legacy fields
+        r = await db.cars.update_many(
+            {"pickup_location.name": orphan},
+            {"$unset": {"pickup_location": ""}},
+        )
+        modified["singular_pickup"] += r.modified_count
+        r = await db.cars.update_many(
+            {"dropoff_location.name": orphan},
+            {"$unset": {"dropoff_location": ""}},
+        )
+        modified["singular_dropoff"] += r.modified_count
+        # $unset stock key
+        r = await db.cars.update_many(
+            {f"stock.{orphan}": {"$exists": True}},
+            {"$unset": {f"stock.{orphan}": ""}},
+        )
+        modified["stock_keys"] += r.modified_count
+
+    logger.info(
+        "Purge orphans actor=%s active=%d orphans=%s cars=%d modified=%s",
+        user.get("email"), len(active_names), sorted(orphan_names), len(cars_affected), modified,
+    )
+    return {
+        "ok": True, "dry_run": False,
+        "active_locations": sorted(active_names),
+        "orphans": sorted(orphan_names),
+        "modified": modified,
+        "cars_affected": len(cars_affected),
+    }
+
+
 # Browse cars by location
 @api_router.get("/cars/by-location/{location_id}")
 async def get_cars_by_location(location_id: str):
