@@ -4187,11 +4187,85 @@ async def update_location(location_id: str, loc: LocationUpdate, request: Reques
 
 @api_router.delete("/locations/{location_id}")
 async def delete_location(location_id: str, request: Request):
+    """Delete a location and CASCADE-CLEAN every reference to it across the
+    database so the deleted location can no longer appear in customer
+    listings or the maps UI.
+
+    Cleanup performed:
+      • cars.pickup_locations[]   → remove any entry with this name
+      • cars.dropoff_locations[]  → remove any entry with this name
+      • cars.pickup_location      → clear if it pointed to this (deprecated singular)
+      • cars.dropoff_location     → clear if it pointed to this (deprecated singular)
+      • cars.stock[<name>]        → unset the stock dict key
+
+    Bookings are deliberately UNTOUCHED — they store a snapshot of the
+    location at booking time which must survive deletion for financial /
+    historical integrity (the booking map still navigates to the original
+    coordinates of where the customer actually was supposed to pick up).
+
+    Returns a small cleanup report so the admin UI can show what happened.
+    """
     user = await require_permission(request, "locations.edit")
-    result = await db.locations.delete_one({"_id": ObjectId(location_id)})
-    if result.deleted_count == 0:
+
+    # 1. Find the location first so we know its name for the cascade.
+    try:
+        oid = ObjectId(location_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid location id")
+    loc = await db.locations.find_one({"_id": oid})
+    if not loc:
         raise HTTPException(status_code=404, detail="Location not found")
-    return {"message": "Location deleted"}
+
+    name = (loc.get("name") or "").strip()
+
+    # 2. Cascade-clean cars in parallel collections.
+    cascade = {"cars_pickup_locations_removed": 0, "cars_dropoff_locations_removed": 0,
+               "cars_singular_pickup_cleared": 0, "cars_singular_dropoff_cleared": 0,
+               "cars_stock_key_removed": 0}
+    if name:
+        # Remove from pickup_locations[] arrays (matches by name).
+        r = await db.cars.update_many(
+            {"pickup_locations.name": name},
+            {"$pull": {"pickup_locations": {"name": name}}},
+        )
+        cascade["cars_pickup_locations_removed"] = r.modified_count
+        # Remove from dropoff_locations[] arrays.
+        r = await db.cars.update_many(
+            {"dropoff_locations.name": name},
+            {"$pull": {"dropoff_locations": {"name": name}}},
+        )
+        cascade["cars_dropoff_locations_removed"] = r.modified_count
+        # Clear deprecated singular fields if they referenced the deleted location.
+        r = await db.cars.update_many(
+            {"pickup_location.name": name},
+            {"$unset": {"pickup_location": ""}},
+        )
+        cascade["cars_singular_pickup_cleared"] = r.modified_count
+        r = await db.cars.update_many(
+            {"dropoff_location.name": name},
+            {"$unset": {"dropoff_location": ""}},
+        )
+        cascade["cars_singular_dropoff_cleared"] = r.modified_count
+        # Remove this location's stock key from the per-location stock dict.
+        # MongoDB requires `$unset` with the exact path; we use a dynamic
+        # field name so cars with `stock.<name>` are cleaned in one go.
+        r = await db.cars.update_many(
+            {f"stock.{name}": {"$exists": True}},
+            {"$unset": {f"stock.{name}": ""}},
+        )
+        cascade["cars_stock_key_removed"] = r.modified_count
+
+    # 3. Finally remove the location itself.
+    result = await db.locations.delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        # Race condition (already deleted in another request).
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    logger.info(
+        "Location deleted name=%s cascade=%s actor=%s",
+        name, cascade, user.get("email"),
+    )
+    return {"message": "Location deleted", "name": name, "cascade": cascade}
 
 
 @api_router.post("/admin/locations/repair-references")
