@@ -2,6 +2,12 @@ import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, Modal } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 
+// Build cache buster — bumping this when shipping a UX change ensures EAS
+// Build's server-side bundle cache treats this module as new instead of
+// reusing a stale Hermes bytecode artifact from a previous build.
+// See: https://docs.expo.dev/build-reference/caching/
+const _COMPONENT_REV = 'v3-iosmodal-2026-05-30';
+
 type Props = {
   date: Date;
   onDateChange: (date: Date) => void;
