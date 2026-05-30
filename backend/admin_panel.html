@@ -1582,6 +1582,17 @@ async function showCarForm(id) {
   if (id) { try { car = await api('/cars/'+id); } catch(e){} }
   const cats = ['Sedan','SUV','Luxury','Electric','Sports','Compact'];
 
+  // CRITICAL: refresh the `locations` global from the server every time the
+  // edit form opens. Without this refresh, any location the admin just
+  // created (e.g. "Bella Vista") wouldn't appear as a chip — and worse,
+  // the prune logic below would treat it as deleted and silently strip it
+  // from any car that already references it. This bug manifested as
+  // "chip keeps un-selecting itself" / "can't find vehicles at Bella Vista".
+  try {
+    const fresh = await api('/locations');
+    if (Array.isArray(fresh)) locations = fresh;
+  } catch (e) { /* fall back to cached `locations`; non-fatal */ }
+
   // --- Prune deleted / inactive locations from the car's saved data ---
   // The car may reference locations that have since been deleted or
   // deactivated. Filter them out so the form starts in a clean state:
@@ -2523,7 +2534,10 @@ async function runPaymentRemindersNow() {
 
 async function showLocations() {
   let locs = [];
-  try { locs = await api('/locations'); locations = locs; } catch(e) { alert(e.message); return; }
+  // Pass include_inactive=true so admins can see (and reactivate) any
+  // location that was previously deactivated. The customer-facing /locations
+  // call (without this flag) still hides inactive ones from end users.
+  try { locs = await api('/locations?include_inactive=true'); locations = (locs || []).filter(l => l.active !== false); } catch(e) { alert(e.message); return; }
   render(`
     <div class="header">
       <div style="display:flex;align-items:center;gap:14px">
