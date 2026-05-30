@@ -264,6 +264,11 @@ export default function BookingScreen() {
   // When the car loads, default the picker selection to the first allowed
   // pickup/dropoff (or the legacy singular fields for old data). Prefer pickup
   // locations that actually have stock available — never default to a 0-stock one.
+  //
+  // RULE: drop-off defaults to the SAME location as pickup whenever a
+  // matching-name entry exists in dropoff_locations. This reflects the
+  // standard "return where you picked up" rental pattern. The customer can
+  // still override the drop-off chip if a one-way return is offered.
   useEffect(() => {
     if (!car) return;
     const pickups: LocOpt[] = (car.pickup_locations && car.pickup_locations.length)
@@ -279,16 +284,44 @@ export default function BookingScreen() {
       if (!s || typeof s !== 'object') return Number(car.units_available ?? 0) || 0;
       return Math.max(0, Number(s[n] ?? 0) || 0);
     };
+    let nextPickup: LocOpt | null = selectedPickup;
     if (pickups.length && (!selectedPickup || !pickups.some(p => p.name === selectedPickup.name) || _stockOf(selectedPickup.name) <= 0)) {
       // Prefer the first pickup with stock > 0; fall back to first if none.
       const withStock = pickups.find(p => _stockOf(p.name) > 0);
-      setSelectedPickup(withStock || pickups[0]);
+      nextPickup = withStock || pickups[0];
+      setSelectedPickup(nextPickup);
     }
-    if (dropoffs.length && (!selectedDropoff || !dropoffs.some(d => d.name === selectedDropoff.name))) {
-      setSelectedDropoff(dropoffs[0]);
+    if (dropoffs.length) {
+      // Try to match the pickup name first — same-location return is the default.
+      const matchPickup = nextPickup ? dropoffs.find(d => d.name === nextPickup!.name) : undefined;
+      if (matchPickup) {
+        if (!selectedDropoff || selectedDropoff.name !== matchPickup.name) {
+          setSelectedDropoff(matchPickup);
+        }
+      } else if (!selectedDropoff || !dropoffs.some(d => d.name === selectedDropoff.name)) {
+        // No same-name entry available → fall back to the first valid dropoff.
+        setSelectedDropoff(dropoffs[0]);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [car?.id]);
+
+  // Keep drop-off in sync with pickup whenever the customer changes pickup.
+  // If a same-name drop-off exists for the new pickup, switch to it. This is
+  // a user-friendly "return to same location" auto-pair. The customer can
+  // still tap a different drop-off chip to override afterwards.
+  useEffect(() => {
+    if (!car || !selectedPickup) return;
+    const dropoffs: LocOpt[] = (car.dropoff_locations && car.dropoff_locations.length)
+      ? car.dropoff_locations
+      : (car.dropoff_location ? [car.dropoff_location] : []);
+    if (!dropoffs.length) return;
+    const match = dropoffs.find(d => d.name === selectedPickup.name);
+    if (match && (!selectedDropoff || selectedDropoff.name !== match.name)) {
+      setSelectedDropoff(match);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPickup?.name, car?.id]);
 
   // Helper: country for a given location-name (uses the prefetched map).
   const countryFor = (name?: string) => {
