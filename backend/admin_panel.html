@@ -3152,7 +3152,10 @@ async function showBookings() {
           <h2>Bookings (${bookings.length})</h2>
           <div class="pt-sub">Manage reservations, status changes, cash payments and receipts.</div>
         </div>
-        <input class="input page-search" id="bk-search" placeholder="🔎 Search by customer / car…" value="${(bookingsSearch || '').replace(/"/g, '&quot;')}" onkeydown="if(event.key==='Enter'){bookingsSearch=this.value;showBookings()}">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-sm" style="background:#34c759;color:#fff;border-color:#34c759;font-weight:700" onclick="openPosBookingModal()">🛒 + New POS Booking</button>
+          <input class="input page-search" id="bk-search" placeholder="🔎 Search by customer / car…" value="${(bookingsSearch || '').replace(/"/g, '&quot;')}" onkeydown="if(event.key==='Enter'){bookingsSearch=this.value;showBookings()}">
+        </div>
       </div>
       <div class="tabs" style="flex-wrap:wrap">
         ${statuses.map(s => `<span class="tab ${bookingsFilter===s.k?'active':''}" onclick="bookingsFilter='${s.k}';showBookings()">${s.label}</span>`).join('')}
@@ -3190,11 +3193,14 @@ function bookingCard(b) {
   const created = b.created_at ? new Date(b.created_at).toLocaleDateString() : '';
   const country = ((b.pickup_location || {}).country || '').toLowerCase();
   const taxLab = (country.indexOf('dominican') !== -1 || country === 'rd' || country === 'do') ? 'ITBIS' : 'Tax';
+  // Force-cancel button is shown for any non-cancelled booking — admin can override 24h rule
+  const canForceCancel = b.status !== 'cancelled';
+  const posBadge = b.pos_origin ? '<span class="pill" style="background:#34c759;color:#fff;font-size:10px;font-weight:700">🛒 POS</span>' : '';
   return `<div class="list-card">
     <div class="lc-head">
       <img class="lc-img" src="${b.car_image || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'}" alt="">
       <div class="col" style="flex:1">
-        <h3 class="lc-title">${b.car_name || 'Car'}</h3>
+        <h3 class="lc-title">${b.car_name || 'Car'} ${posBadge}</h3>
         <p class="lc-sub">${b.user_name || 'Customer'} · ${b.user_email || ''}</p>
         <p class="lc-hint">${pickup} → ${dropoff} · ${b.days || 0} days · ${created}</p>
       </div>
@@ -3213,6 +3219,7 @@ function bookingCard(b) {
       <div class="lc-actions">
         <button class="btn btn-sm btn-blue" onclick="downloadReceipt('${b.id}')">📄 Receipt</button>
         ${(b.payment_status !== 'paid' && (b.payment_method || 'cash') === 'cash') ? `<button class="btn btn-sm" style="background:var(--success);color:#fff;border-color:var(--success)" onclick="markCashPaid('${b.id}')">💰 Mark Cash Paid</button>` : ''}
+        ${canForceCancel ? `<button class="btn btn-sm" style="background:#ff3b30;color:#fff;border-color:#ff3b30;font-weight:700" onclick="openForceCancelModal('${b.id}', '${(b.car_name||'').replace(/'/g,'\\\'')}', '${b.status}')">⛔ Force Cancel</button>` : ''}
         <select class="select-inline" onchange="updateBookingStatus('${b.id}', this.value)">
           <option value="">Change status…</option>
           <option value="pending_payment">Pending Payment</option>
@@ -3254,6 +3261,402 @@ async function downloadReceipt(id) {
     window.open(url, '_blank');
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   } catch(e) { alert('Failed to open receipt: ' + e.message); }
+}
+
+// ==================== ADMIN FORCE-CANCEL (bypass 24h rule) ====================
+function openForceCancelModal(bookingId, carName, currentStatus) {
+  // Ensure modal-root exists
+  let root = document.getElementById('modal-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'modal-root';
+    document.body.appendChild(root);
+  }
+  const safeCar = (carName || 'this booking').replace(/</g, '&lt;');
+  const statusLabel = (currentStatus || 'unknown').replace(/_/g, ' ');
+  const isActive = currentStatus === 'active' || currentStatus === 'completed';
+  root.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="max-width:520px">
+        <h2 style="display:flex;align-items:center;gap:8px;color:#ff3b30">
+          ⛔ Force Cancel Booking
+        </h2>
+        <div style="background:#fff5f5;border:1px solid #ffd0d0;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#a02020">
+          <strong>Admin override.</strong> This bypasses the 24-hour customer cancellation rule.
+          <br><br>
+          <strong>Vehicle:</strong> ${safeCar}<br>
+          <strong>Current status:</strong> <span class="pill pill-amber" style="font-size:11px">${statusLabel.toUpperCase()}</span>
+          ${isActive ? '<br><strong>⚠ Stock auto-restock:</strong> Yes — the vehicle will be returned to inventory at its pickup location.' : ''}
+        </div>
+
+        <div class="form-group">
+          <label>Cancellation reason <span style="color:#999;font-size:12px">(optional, internal note)</span></label>
+          <textarea class="input" id="fc-reason" rows="3" placeholder="e.g. Customer requested via phone; vehicle unavailable; admin error..."></textarea>
+        </div>
+
+        <div class="form-group" style="margin-bottom:6px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="fc-send-email" checked style="width:18px;height:18px;cursor:pointer">
+            <span>📧 Notify customer by email</span>
+          </label>
+        </div>
+
+        <div class="form-group" style="margin-bottom:18px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="fc-refund-stock" checked style="width:18px;height:18px;cursor:pointer">
+            <span>📦 Restore vehicle stock at pickup location <span style="color:#999;font-size:11px">(only if previously reserved)</span></span>
+          </label>
+        </div>
+
+        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn btn-sm btn-gray" onclick="closeModal()">Keep Booking</button>
+          <button class="btn btn-sm" id="fc-submit-btn" style="background:#ff3b30;color:#fff;border-color:#ff3b30;font-weight:700" onclick="submitForceCancel('${bookingId}')">⛔ Cancel This Booking</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function submitForceCancel(bookingId) {
+  const reason = (document.getElementById('fc-reason')?.value || '').trim();
+  const send_email = !!document.getElementById('fc-send-email')?.checked;
+  const refund_stock = !!document.getElementById('fc-refund-stock')?.checked;
+  const btn = document.getElementById('fc-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
+  try {
+    const res = await api('/admin/bookings/' + bookingId + '/force-cancel', {
+      method: 'POST',
+      body: JSON.stringify({ reason, send_email, refund_stock })
+    });
+    closeModal();
+    const msg = (res && res.restock) ? `Booking cancelled.\n\nStock: ${res.restock}` : 'Booking cancelled.';
+    alert(msg);
+    showBookings();
+  } catch(e) {
+    alert('Force cancel failed: ' + (e.message || e));
+    if (btn) { btn.disabled = false; btn.textContent = '⛔ Cancel This Booking'; }
+  }
+}
+
+// ==================== POS — Admin walk-in booking creation ====================
+let posState = {
+  cars: [],
+  selectedCar: null,
+  selectedPickup: null,
+  selectedDropoff: null,
+  taxRate: 0,
+  refuelAmount: 0,
+};
+
+async function openPosBookingModal() {
+  // Ensure modal-root exists
+  let root = document.getElementById('modal-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'modal-root';
+    document.body.appendChild(root);
+  }
+  // Refresh cars + locations
+  try {
+    posState.cars = await api('/admin/cars');
+    if (!Array.isArray(posState.cars)) posState.cars = posState.cars.cars || [];
+  } catch(e) {
+    try { posState.cars = await api('/cars'); } catch(_e) { posState.cars = []; }
+  }
+  try {
+    locations = await api('/locations');
+  } catch(_e) {}
+  // Default dates: today and tomorrow
+  const today = new Date();
+  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+  const toDateStr = (d) => d.toISOString().slice(0, 10);
+  posState.selectedCar = null;
+  posState.selectedPickup = null;
+  posState.selectedDropoff = null;
+  posState.taxRate = 0;
+  posState.refuelAmount = 0;
+
+  root.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="max-width:760px">
+        <h2 style="display:flex;align-items:center;gap:8px;color:#34c759">
+          🛒 New POS Booking <span style="font-size:12px;font-weight:500;color:#666">— Walk-in / counter rental</span>
+        </h2>
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:#15803d">
+          Create a rental on behalf of an in-person customer. Stock is reserved immediately when status is "Active". Receipt PDF is generated automatically.
+        </div>
+
+        <h3 style="font-size:14px;margin:0 0 8px;color:#666;text-transform:uppercase;letter-spacing:0.5px">👤 Customer</h3>
+        <div class="form-row">
+          <div class="form-group" style="flex:1"><label>Full Name *</label><input class="input" id="pos-name" placeholder="John Doe"></div>
+          <div class="form-group" style="flex:1"><label>Email * <span style="color:#999;font-size:11px">(auto-lookup existing)</span></label><input class="input" id="pos-email" type="email" placeholder="customer@example.com" onblur="posLookupCustomer()"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1"><label>Phone</label><input class="input" id="pos-phone" placeholder="+1 809 555 1234"></div>
+          <div class="form-group" style="flex:1"><label>National ID / Cédula / Passport</label><input class="input" id="pos-id" placeholder="ID number"></div>
+          <div class="form-group" style="flex:1"><label>Driver's License *</label><input class="input" id="pos-license" placeholder="License number"></div>
+        </div>
+        <div id="pos-customer-status" style="font-size:12px;margin-bottom:14px;min-height:18px"></div>
+
+        <h3 style="font-size:14px;margin:0 0 8px;color:#666;text-transform:uppercase;letter-spacing:0.5px">🚗 Rental</h3>
+        <div class="form-group">
+          <label>Vehicle *</label>
+          <select class="input" id="pos-car" onchange="posOnCarChange()">
+            <option value="">— Select a vehicle —</option>
+            ${posState.cars.map(c => `<option value="${c.id || c._id}">${(c.name || (c.brand+' '+c.model)).replace(/</g,'&lt;')} — $${(c.price_per_day || 0).toFixed(2)}/day</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1"><label>Pickup Date *</label><input class="input" id="pos-pickup-date" type="date" value="${toDateStr(today)}" onchange="posRecalc()"></div>
+          <div class="form-group" style="flex:1"><label>Drop-off Date *</label><input class="input" id="pos-dropoff-date" type="date" value="${toDateStr(tomorrow)}" onchange="posRecalc()"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Pickup Location *</label>
+            <select class="input" id="pos-pickup-loc" onchange="posOnPickupChange()">
+              <option value="">— Select pickup —</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Drop-off Location *</label>
+            <select class="input" id="pos-dropoff-loc" onchange="posOnDropoffChange()">
+              <option value="">— Select drop-off —</option>
+            </select>
+          </div>
+        </div>
+
+        <h3 style="font-size:14px;margin:14px 0 8px;color:#666;text-transform:uppercase;letter-spacing:0.5px">➕ Extras</h3>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="pos-refuel" style="width:18px;height:18px" onchange="posRecalc()">
+              <span>⛽ Pre-paid refuel <span id="pos-refuel-amt" style="color:#666;font-size:12px"></span></span>
+            </label>
+          </div>
+          <div class="form-group" style="flex:1"><label>Promo Code <span style="color:#999;font-size:11px">(optional)</span></label><input class="input" id="pos-promo" placeholder="SAVE10" onblur="posRecalc()"></div>
+        </div>
+
+        <h3 style="font-size:14px;margin:14px 0 8px;color:#666;text-transform:uppercase;letter-spacing:0.5px">💰 Pricing</h3>
+        <div id="pos-pricing-box" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-family:monospace;font-size:13px;line-height:1.7">
+          <div style="color:#888">Select a vehicle and locations to see pricing.</div>
+        </div>
+
+        <h3 style="font-size:14px;margin:0 0 8px;color:#666;text-transform:uppercase;letter-spacing:0.5px">💳 Payment & Status</h3>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Payment Method *</label>
+            <select class="input" id="pos-pay-method">
+              <option value="cash">💵 Cash</option>
+              <option value="card">💳 Card (at counter)</option>
+              <option value="transfer">🏦 Bank Transfer</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Booking Status *</label>
+            <select class="input" id="pos-status">
+              <option value="active" selected>🟢 Active (pickup now — decrements stock)</option>
+              <option value="pending">🟡 Pending (future rental — no stock change)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;margin-top:4px">
+              <input type="checkbox" id="pos-mark-paid" checked style="width:18px;height:18px;cursor:pointer">
+              <span>✅ Mark as Paid <span style="color:#999;font-size:11px">(payment collected at counter)</span></span>
+            </label>
+          </div>
+          <div class="form-group" style="flex:1">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;margin-top:4px">
+              <input type="checkbox" id="pos-send-email" style="width:18px;height:18px;cursor:pointer">
+              <span>📧 Email confirmation to customer</span>
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Internal Notes <span style="color:#999;font-size:11px">(staff only)</span></label>
+          <textarea class="input" id="pos-notes" rows="2" placeholder="e.g. Customer paid cash + tip; deposit collected in card pre-auth"></textarea>
+        </div>
+
+        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px;border-top:1px solid #eee;padding-top:14px">
+          <button class="btn btn-sm btn-gray" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-sm" id="pos-submit-btn" style="background:#34c759;color:#fff;border-color:#34c759;font-weight:700" onclick="submitPosBooking()">🛒 Create Booking</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function posLookupCustomer() {
+  const email = (document.getElementById('pos-email')?.value || '').trim().toLowerCase();
+  const status = document.getElementById('pos-customer-status');
+  if (!email || !email.includes('@')) { if (status) status.textContent = ''; return; }
+  try {
+    // Use the admin customer search endpoint (case-insensitive partial match supported)
+    const res = await api('/admin/customers?q=' + encodeURIComponent(email));
+    const list = Array.isArray(res) ? res : (res.items || res.customers || []);
+    const match = list.find(u => (u.email || '').toLowerCase() === email);
+    if (match) {
+      const f = (k) => document.getElementById(k);
+      if (f('pos-name') && !f('pos-name').value) f('pos-name').value = match.name || '';
+      if (f('pos-phone') && !f('pos-phone').value) f('pos-phone').value = match.phone || '';
+      if (f('pos-id') && !f('pos-id').value) f('pos-id').value = match.national_id || '';
+      if (f('pos-license') && !f('pos-license').value) f('pos-license').value = match.drivers_license || '';
+      if (status) status.innerHTML = `<span style="color:#15803d">✓ Existing customer found — fields auto-filled. Will reuse this account.</span>`;
+    } else {
+      if (status) status.innerHTML = `<span style="color:#0369a1">ℹ New customer — a walk-in account will be created on save.</span>`;
+    }
+  } catch(_e) {
+    if (status) status.innerHTML = `<span style="color:#0369a1">ℹ New customer — account will be created on save.</span>`;
+  }
+}
+
+function posOnCarChange() {
+  const carId = document.getElementById('pos-car')?.value || '';
+  posState.selectedCar = posState.cars.find(c => (c.id || c._id) === carId) || null;
+  // Repopulate pickup/dropoff dropdowns from the car's pickup_locations / dropoff_locations
+  const pickupSel = document.getElementById('pos-pickup-loc');
+  const dropoffSel = document.getElementById('pos-dropoff-loc');
+  if (pickupSel) {
+    const pickups = (posState.selectedCar && posState.selectedCar.pickup_locations) || [];
+    pickupSel.innerHTML = '<option value="">— Select pickup —</option>' +
+      pickups.map(p => `<option value="${(p.name||'').replace(/"/g,'&quot;')}">${(p.name||'').replace(/</g,'&lt;')}</option>`).join('');
+  }
+  if (dropoffSel) {
+    const dropoffs = (posState.selectedCar && posState.selectedCar.dropoff_locations) || [];
+    dropoffSel.innerHTML = '<option value="">— Select drop-off —</option>' +
+      dropoffs.map(p => `<option value="${(p.name||'').replace(/"/g,'&quot;')}">${(p.name||'').replace(/</g,'&lt;')}</option>`).join('');
+  }
+  posRecalc();
+}
+
+async function posOnPickupChange() {
+  const name = document.getElementById('pos-pickup-loc')?.value || '';
+  posState.selectedPickup = name;
+  if (name) {
+    try {
+      const res = await api('/locations/tax-by-name?name=' + encodeURIComponent(name));
+      posState.taxRate = parseFloat(res.tax_rate || 0);
+      posState.refuelAmount = parseFloat(res.refuel_amount || 0);
+      const refLabel = document.getElementById('pos-refuel-amt');
+      if (refLabel) refLabel.textContent = posState.refuelAmount > 0 ? `(+$${posState.refuelAmount.toFixed(2)})` : '(not available at this location)';
+      const refChk = document.getElementById('pos-refuel');
+      if (refChk) { refChk.disabled = posState.refuelAmount <= 0; if (posState.refuelAmount <= 0) refChk.checked = false; }
+    } catch(_e) { posState.taxRate = 0; posState.refuelAmount = 0; }
+  } else { posState.taxRate = 0; posState.refuelAmount = 0; }
+  posRecalc();
+}
+
+function posOnDropoffChange() {
+  posState.selectedDropoff = document.getElementById('pos-dropoff-loc')?.value || '';
+  posRecalc();
+}
+
+function posRecalc() {
+  const box = document.getElementById('pos-pricing-box');
+  if (!box) return;
+  const car = posState.selectedCar;
+  if (!car) { box.innerHTML = '<div style="color:#888">Select a vehicle to see pricing.</div>'; return; }
+  const pricePerDay = parseFloat(car.price_per_day || 0);
+  const pickup = document.getElementById('pos-pickup-date')?.value;
+  const dropoff = document.getElementById('pos-dropoff-date')?.value;
+  if (!pickup || !dropoff) { box.innerHTML = '<div style="color:#888">Select dates.</div>'; return; }
+  const d1 = new Date(pickup), d2 = new Date(dropoff);
+  const days = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
+  if (d2 <= d1) { box.innerHTML = '<div style="color:#dc2626">Drop-off must be after pickup.</div>'; return; }
+  const subtotal = +(days * pricePerDay).toFixed(2);
+  const refuelOpt = !!document.getElementById('pos-refuel')?.checked;
+  const refuel = (refuelOpt && posState.refuelAmount > 0) ? +posState.refuelAmount.toFixed(2) : 0;
+  // Promo discount preview (best-effort; final value validated server-side)
+  const promo = (document.getElementById('pos-promo')?.value || '').trim();
+  const discountedSub = Math.max(0, subtotal); // we don't validate promo client-side; server will
+  const taxable = +(discountedSub + refuel).toFixed(2);
+  const taxRate = posState.taxRate || 0;
+  const tax = +(taxable * (taxRate / 100)).toFixed(2);
+  const total = +(taxable + tax).toFixed(2);
+  const deposit = parseFloat(car.deposit || 0);
+  const country = (posState.selectedCar && (posState.selectedCar.pickup_locations || []).find(p => p.name === posState.selectedPickup)?.country || '').toLowerCase();
+  const taxLab = (country.indexOf('dominican') !== -1 || country === 'rd' || country === 'do') ? 'ITBIS' : 'Tax';
+  box.innerHTML = `
+    <div>📅 ${days} day${days>1?'s':''} × $${pricePerDay.toFixed(2)} = <strong>$${subtotal.toFixed(2)}</strong></div>
+    ${refuel > 0 ? `<div>⛽ Refuel: <strong>+$${refuel.toFixed(2)}</strong></div>` : ''}
+    ${promo ? `<div style="color:#888">🏷️ Promo "${promo}" (validated on save)</div>` : ''}
+    <div>📊 ${taxLab} (${taxRate}%): <strong>$${tax.toFixed(2)}</strong></div>
+    <div style="margin-top:6px;padding-top:6px;border-top:1px solid #ddd;font-size:15px">💰 <strong>Total: $${total.toFixed(2)}</strong></div>
+    ${deposit > 0 ? `<div style="color:#888;font-size:11.5px;margin-top:4px">+ Refundable deposit: $${deposit.toFixed(2)} (collected separately at pickup)</div>` : ''}
+  `;
+}
+
+async function submitPosBooking() {
+  const v = (id) => (document.getElementById(id)?.value || '').trim();
+  const carId = v('pos-car');
+  const name = v('pos-name');
+  const email = v('pos-email');
+  const license = v('pos-license');
+  const pickup = v('pos-pickup-loc');
+  const dropoff = v('pos-dropoff-loc');
+  const pickupDate = v('pos-pickup-date');
+  const dropoffDate = v('pos-dropoff-date');
+
+  if (!name) return alert('Customer name is required.');
+  if (!email || !email.includes('@')) return alert('A valid customer email is required.');
+  if (!license) return alert("Driver's license is required.");
+  if (!carId) return alert('Please select a vehicle.');
+  if (!pickup) return alert('Please select a pickup location.');
+  if (!dropoff) return alert('Please select a drop-off location.');
+  if (!pickupDate || !dropoffDate) return alert('Please select pickup and drop-off dates.');
+  if (new Date(dropoffDate) <= new Date(pickupDate)) return alert('Drop-off must be after pickup.');
+
+  // Build location objects with country/lat/lng pulled from the car's location list
+  const car = posState.cars.find(c => (c.id || c._id) === carId);
+  const pickupLoc = ((car && car.pickup_locations) || []).find(l => l.name === pickup) || { name: pickup };
+  const dropoffLoc = ((car && car.dropoff_locations) || []).find(l => l.name === dropoff) || { name: dropoff };
+
+  const payload = {
+    customer_name: name,
+    customer_email: email,
+    customer_phone: v('pos-phone'),
+    customer_id_number: v('pos-id'),
+    customer_drivers_license: license,
+    car_id: carId,
+    pickup_date: pickupDate + 'T10:00:00',
+    dropoff_date: dropoffDate + 'T10:00:00',
+    pickup_location: pickupLoc,
+    dropoff_location: dropoffLoc,
+    refuel_opted_in: !!document.getElementById('pos-refuel')?.checked,
+    promo_code: v('pos-promo') || null,
+    payment_method: v('pos-pay-method') || 'cash',
+    mark_paid: !!document.getElementById('pos-mark-paid')?.checked,
+    status: v('pos-status') || 'active',
+    send_email: !!document.getElementById('pos-send-email')?.checked,
+    notes: v('pos-notes') || null,
+  };
+
+  const btn = document.getElementById('pos-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  try {
+    const res = await api('/admin/pos/bookings', { method: 'POST', body: JSON.stringify(payload) });
+    closeModal();
+    const bk = res.booking || {};
+    const lines = [
+      '✅ POS Booking created!',
+      '',
+      `Booking ID: ${bk.id || ''}`,
+      `Customer: ${name} ${res.user_created ? '(new walk-in account created)' : '(existing customer)'}`,
+      `Total: $${(bk.total_price || 0).toFixed(2)}`,
+      `Status: ${(bk.status || '').toUpperCase()}`,
+      `Payment: ${(bk.payment_status || '').toUpperCase()} via ${(bk.payment_method || '').toUpperCase()}`,
+      '',
+      'Click OK to open the receipt PDF for printing.'
+    ].join('\n');
+    if (confirm(lines)) {
+      try { await downloadReceipt(bk.id); } catch(_e) {}
+    }
+    showBookings();
+  } catch(e) {
+    alert('POS booking failed: ' + (e.message || e));
+    if (btn) { btn.disabled = false; btn.textContent = '🛒 Create Booking'; }
+  }
 }
 
 // MIGRATION

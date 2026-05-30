@@ -2655,6 +2655,470 @@ async def cancel_booking(booking_id: str, request: Request):
     }
 
 
+# ============================================================
+# ADMIN FORCE-CANCEL (bypasses 24h customer rule)
+# ============================================================
+class ForceCancelBody(BaseModel):
+    reason: Optional[str] = None
+    send_email: bool = True
+    refund_stock: bool = True
+
+
+@api_router.post("/admin/bookings/{booking_id}/force-cancel")
+async def admin_force_cancel_booking(booking_id: str, body: ForceCancelBody, request: Request):
+    """Admin override-cancel for any booking (bypasses customer 24h rule).
+
+    Differs from the user cancel endpoint:
+      • No ownership check (admin operates on any booking).
+      • No 24h lead-time check.
+      • Allows cancelling pending / pending_payment / confirmed / active /
+        completed bookings (completed is rare but allowed for accounting fixes).
+      • Smart restock — only credits +1 to the pickup location if the booking
+        previously decremented stock at pickup (stock_adjustments.pickup_decremented)
+        AND hasn't already been credited at drop-off. This prevents both phantom
+        stock inflation on pending-cancels and double-counting on completed-cancels.
+      • Records cancelled_by='admin', cancelled_by_admin_email, cancellation_reason,
+        force_cancelled=True, and writes an audit log row.
+    """
+    admin = await require_permission(request, "bookings.cancel")
+    try:
+        oid = ObjectId(booking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid booking id")
+    booking = await db.bookings.find_one({"_id": oid})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    previous_status = (booking.get("status") or "").lower()
+    if previous_status == "cancelled":
+        raise HTTPException(status_code=400, detail="This booking is already cancelled.")
+
+    # ---- Smart restock ----
+    restock_status = "skipped"
+    if body.refund_stock:
+        adjustments = booking.get("stock_adjustments") or {}
+        pickup_decremented = bool(adjustments.get("pickup_decremented"))
+        dropoff_incremented = bool(adjustments.get("dropoff_incremented"))
+        car_id = booking.get("car_id")
+        pickup_loc_name = ((booking.get("pickup_location") or {}).get("name") or "").strip()
+
+        if pickup_decremented and not dropoff_incremented and car_id and pickup_loc_name:
+            # Stock was reserved at pickup and not yet released at drop-off → release now.
+            try:
+                car_oid = ObjectId(car_id) if not isinstance(car_id, ObjectId) else car_id
+                stock_key = await _resolve_stock_key(car_id, pickup_loc_name) or pickup_loc_name
+                res = await db.cars.update_one(
+                    {"_id": car_oid}, {"$inc": {f"stock.{stock_key}": 1}}
+                )
+                restock_status = f"incremented (modified={res.modified_count}, key={stock_key})"
+                # Mark the booking so future status-change logic doesn't try to credit twice.
+                await db.bookings.update_one(
+                    {"_id": oid},
+                    {"$set": {
+                        "stock_adjustments.dropoff_incremented": True,
+                        "stock_adjustments.dropoff_at": datetime.now(timezone.utc),
+                        "stock_adjustments.dropoff_key": stock_key,
+                        "stock_adjustments.dropoff_reason": "force_cancel",
+                    }},
+                )
+            except Exception as e:
+                logger.exception("Force-cancel restock failed for booking=%s: %s", booking_id, e)
+                restock_status = f"error: {str(e)[:120]}"
+        elif not pickup_decremented:
+            restock_status = "not_needed (pickup never decremented)"
+        elif dropoff_incremented:
+            restock_status = "not_needed (already credited at dropoff)"
+
+    # ---- Persist cancellation ----
+    await db.bookings.update_one(
+        {"_id": oid},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": datetime.now(timezone.utc),
+            "cancelled_by": "admin",
+            "cancelled_by_admin_id": str(admin.get("_id") or ""),
+            "cancelled_by_admin_email": admin.get("email") or "",
+            "cancellation_reason": (body.reason or "").strip()[:500],
+            "force_cancelled": True,
+            "previous_status_before_cancel": previous_status,
+        }},
+    )
+
+    booking = await db.bookings.find_one({"_id": oid})
+
+    # ---- Email customer (optional) ----
+    email_sent = False
+    if body.send_email:
+        try:
+            await send_booking_email("cancelled", booking)
+            email_sent = True
+        except Exception as e:
+            logger.exception("Force-cancel email failed for booking=%s: %s", booking_id, e)
+
+    # ---- Audit log ----
+    await log_admin_action(
+        admin, "booking.force_cancel", booking_id,
+        {
+            "reason": (body.reason or "")[:500],
+            "previous_status": previous_status,
+            "restock": restock_status,
+            "email_sent": email_sent,
+            "send_email_requested": body.send_email,
+        },
+        request,
+    )
+
+    logger.info(
+        "Admin force-cancel: booking=%s by=%s prev_status=%s restock=%s",
+        booking_id, admin.get("email"), previous_status, restock_status,
+    )
+    return {
+        "ok": True,
+        "booking": serialize_booking(booking),
+        "restock": restock_status,
+        "email_sent": email_sent,
+    }
+
+
+# ============================================================
+# POS (POINT-OF-SALE) — Admin walk-in booking creation
+# ============================================================
+class PosBookingCreate(BaseModel):
+    # Customer information
+    customer_name: str
+    customer_email: str
+    customer_phone: Optional[str] = None
+    customer_id_number: Optional[str] = None      # National ID / Cédula / Passport
+    customer_drivers_license: Optional[str] = None
+    # Rental info
+    car_id: str
+    pickup_date: str
+    dropoff_date: str
+    pickup_location: Dict
+    dropoff_location: Dict
+    # Extras
+    refuel_opted_in: bool = False
+    promo_code: Optional[str] = None
+    # Payment & status
+    payment_method: str = "cash"   # cash | card | transfer
+    mark_paid: bool = True         # admin already collected at the counter
+    status: str = "active"         # active (pickup now) | pending (future-dated)
+    # Side effects
+    send_email: bool = False
+    notes: Optional[str] = None
+
+
+@api_router.post("/admin/pos/bookings")
+async def admin_pos_create_booking(body: PosBookingCreate, request: Request):
+    """Admin creates a walk-in booking on behalf of a customer.
+
+    Behaviour:
+      • Customer linked by email — reuse if exists, else create a new
+        "POS walk-in" user account (random password, can be reset later).
+        Driver's license & national ID are persisted on the user record.
+      • Reuses the same pricing / tax / refuel / promo / min-days logic
+        as the customer-facing /bookings endpoint.
+      • payment_method: cash | card | transfer (no Stripe processing —
+        admin collects payment at the counter and marks_paid by default).
+      • status='active' → stock is decremented immediately at pickup
+        location and stock_adjustments.pickup_decremented=true is set,
+        so the later transition to 'completed' will correctly credit the
+        drop-off location. status='pending' → stock untouched.
+      • Returns the created booking + a receipt URL for printing.
+    """
+    admin = await require_permission(request, "bookings.edit")
+
+    # --- Validate basic inputs ---
+    email = (body.customer_email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid customer email is required.")
+    if not body.customer_name or not body.customer_name.strip():
+        raise HTTPException(status_code=400, detail="Customer name is required.")
+    if not body.customer_drivers_license or not body.customer_drivers_license.strip():
+        raise HTTPException(status_code=400, detail="Driver's license is required for POS bookings.")
+
+    pm = (body.payment_method or "cash").strip().lower()
+    if pm not in {"cash", "card", "transfer"}:
+        raise HTTPException(status_code=400, detail="payment_method must be cash, card, or transfer")
+
+    desired_status = (body.status or "active").strip().lower()
+    if desired_status not in {"active", "pending"}:
+        raise HTTPException(status_code=400, detail="status must be 'active' or 'pending'")
+
+    # --- Find or create customer ---
+    user = await db.users.find_one({"email": email})
+    user_created = False
+    if not user:
+        # Generate a random password — the customer can reset later via "forgot password".
+        import secrets as _secrets
+        random_pw = _secrets.token_urlsafe(16)
+        user_doc = {
+            "email": email,
+            "password_hash": hash_password(random_pw),
+            "name": body.customer_name.strip(),
+            "phone": (body.customer_phone or "").strip() or None,
+            "role": "user",
+            "national_id": (body.customer_id_number or "").strip() or None,
+            "drivers_license": (body.customer_drivers_license or "").strip() or None,
+            "pos_walk_in": True,
+            "pos_created_by": admin.get("email") or "",
+            "created_at": datetime.now(timezone.utc),
+            "terms_accepted_at": datetime.now(timezone.utc),  # admin attests in-person
+            "adult_confirmed_at": datetime.now(timezone.utc),
+        }
+        res = await db.users.insert_one(user_doc)
+        user_doc["_id"] = res.inserted_id
+        user = user_doc
+        user_created = True
+    else:
+        # Backfill missing fields without overwriting existing data.
+        upd = {}
+        if body.customer_id_number and not user.get("national_id"):
+            upd["national_id"] = body.customer_id_number.strip()
+        if body.customer_drivers_license and not user.get("drivers_license"):
+            upd["drivers_license"] = body.customer_drivers_license.strip()
+        if body.customer_phone and not user.get("phone"):
+            upd["phone"] = body.customer_phone.strip()
+        if upd:
+            await db.users.update_one({"_id": user["_id"]}, {"$set": upd})
+            user.update(upd)
+
+    user_id = str(user.get("_id"))
+
+    # --- Validate car ---
+    try:
+        car_oid = ObjectId(body.car_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid car_id")
+    car = await db.cars.find_one({"_id": car_oid})
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+
+    pickup_name = (body.pickup_location.get("name", "") or "").strip()
+    dropoff_name = (body.dropoff_location.get("name", "") or "").strip() if isinstance(body.dropoff_location, dict) else ""
+    if not pickup_name:
+        raise HTTPException(status_code=400, detail="Pickup location name is required")
+    if not dropoff_name:
+        raise HTTPException(status_code=400, detail="Drop-off location name is required")
+
+    # --- Stock check (only relevant for active POS bookings) ---
+    if desired_status == "active":
+        serialized_for_stock = serialize_car({**car, "_id": car["_id"]})
+        stock_here = car_stock_at(serialized_for_stock, pickup_name)
+        if stock_here <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"This vehicle is out of stock at '{pickup_name}'.",
+            )
+
+    # --- Dates & days ---
+    try:
+        pickup_dt = datetime.fromisoformat(body.pickup_date)
+        dropoff_dt = datetime.fromisoformat(body.dropoff_date)
+    except Exception:
+        raise HTTPException(status_code=400, detail="pickup_date and dropoff_date must be ISO format")
+    if dropoff_dt <= pickup_dt:
+        raise HTTPException(status_code=400, detail="Drop-off must be after pickup.")
+    days = max(1, (dropoff_dt - pickup_dt).days)
+
+    # --- Resolve pickup location (tax, country, min_days, refuel_amount) ---
+    import re as _re
+    proj = {"_id": 0, "tax_rate": 1, "name": 1, "min_booking_days": 1, "country": 1, "active": 1, "refuel_amount": 1, "city": 1}
+    pickup_loc = await db.locations.find_one(
+        {"name": {"$regex": f"^{_re.escape(pickup_name)}$", "$options": "i"}}, proj
+    )
+    tax_rate = 0.0
+    min_days = 1
+    pickup_country = ""
+    available_refuel = 0.0
+    if pickup_loc:
+        tax_rate = float(pickup_loc.get("tax_rate") or 0.0)
+        min_days = int(pickup_loc.get("min_booking_days") or 1)
+        pickup_country = (pickup_loc.get("country") or "").strip()
+        available_refuel = float(pickup_loc.get("refuel_amount") or 0.0)
+        if not pickup_loc.get("active", True):
+            raise HTTPException(status_code=400, detail=f"Pickup location '{pickup_name}' is inactive.")
+
+    # --- Resolve dropoff country for cross-country check ---
+    do_loc = await db.locations.find_one(
+        {"name": {"$regex": f"^{_re.escape(dropoff_name)}$", "$options": "i"}},
+        {"_id": 0, "country": 1, "active": 1},
+    )
+    dropoff_country = ""
+    if do_loc:
+        dropoff_country = (do_loc.get("country") or "").strip()
+        if not do_loc.get("active", True):
+            raise HTTPException(status_code=400, detail=f"Drop-off location '{dropoff_name}' is inactive.")
+    if pickup_country and dropoff_country and pickup_country.lower() != dropoff_country.lower():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pickup and drop-off must be in the same country ({pickup_country} vs {dropoff_country}).",
+        )
+
+    if days < min_days:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This pickup location requires a minimum rental of {min_days} day(s).",
+        )
+
+    # --- Pricing ---
+    price_per_day = float(car.get("price_per_day") or 0.0)
+    subtotal = round(days * price_per_day, 2)
+
+    # Refuel charge
+    refuel_charge = round(available_refuel, 2) if (body.refuel_opted_in and available_refuel > 0) else 0.0
+
+    # Promo code
+    promo_code_used = None
+    discount_amount = 0.0
+    if body.promo_code:
+        normalized = body.promo_code.strip().upper()
+        promo = await db.promo_codes.find_one({"code": normalized})
+        if not promo:
+            raise HTTPException(status_code=400, detail="Invalid promo code")
+        is_valid, reason, calc = _validate_promo(promo, subtotal)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=reason)
+        discount_amount = float(calc)
+        promo_code_used = normalized
+        try:
+            await db.promo_codes.update_one(
+                {"_id": promo["_id"]}, {"$inc": {"used_count": 1}}
+            )
+        except Exception as _e:
+            logger.warning(f"POS promo code usage increment failed: {_e}")
+
+    discounted_subtotal = round(max(subtotal - discount_amount, 0.0), 2)
+    taxable_amount = round(discounted_subtotal + refuel_charge, 2)
+    tax_amount = round(taxable_amount * (tax_rate / 100), 2)
+    total = round(taxable_amount + tax_amount, 2)
+
+    # --- Enrich location dicts with country (for tax label rendering) ---
+    pickup_loc_full = dict(body.pickup_location or {})
+    if pickup_country and not pickup_loc_full.get("country"):
+        pickup_loc_full["country"] = pickup_country
+    dropoff_loc_full = dict(body.dropoff_location or {})
+    if dropoff_country and not dropoff_loc_full.get("country"):
+        dropoff_loc_full["country"] = dropoff_country
+
+    # --- Determine payment_status & stock adjustments ---
+    payment_status = "paid" if body.mark_paid else "pending"
+    stock_adjustments: Dict[str, object] = {}
+
+    booking_doc = {
+        "user_id": user_id,
+        "user_email": email,
+        "user_name": user.get("name") or body.customer_name,
+        "customer_name": body.customer_name.strip(),
+        "customer_email": email,
+        "customer_phone": (body.customer_phone or "").strip() or None,
+        "customer_id_number": (body.customer_id_number or "").strip() or None,
+        "customer_drivers_license": (body.customer_drivers_license or "").strip() or None,
+        "car_id": body.car_id,
+        "car_name": car.get("name", f"{car.get('brand', '')} {car.get('model', '')}"),
+        "car_image": car.get("image_url", ""),
+        "pickup_date": body.pickup_date,
+        "dropoff_date": body.dropoff_date,
+        "pickup_location": pickup_loc_full,
+        "dropoff_location": dropoff_loc_full,
+        "days": days,
+        "price_per_day": price_per_day,
+        "subtotal": subtotal,
+        "promo_code": promo_code_used,
+        "discount_amount": discount_amount,
+        "refuel_amount": refuel_charge,
+        "refuel_opted_in": bool(body.refuel_opted_in and refuel_charge > 0),
+        "tax_rate": tax_rate,
+        "tax_amount": tax_amount,
+        "total_price": total,
+        "payment_method": pm,
+        "payment_status": payment_status,
+        "deposit": float(car.get("deposit") or 0.0),
+        "status": desired_status,
+        # POS markers
+        "pos_origin": True,
+        "pos_created_by": admin.get("email") or "",
+        "pos_created_by_id": str(admin.get("_id") or ""),
+        "pos_notes": (body.notes or "").strip()[:1000] or None,
+        "terms_accepted_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(timezone.utc),
+        "stock_adjustments": stock_adjustments,
+    }
+
+    # --- Insert ---
+    result = await db.bookings.insert_one(booking_doc)
+    booking_id_str = str(result.inserted_id)
+    booking_doc["id"] = booking_id_str
+    del booking_doc["_id"]
+
+    # --- Stock decrement on active POS bookings ---
+    if desired_status == "active":
+        try:
+            stock_key = await _resolve_stock_key(body.car_id, pickup_name) or pickup_name
+            await db.cars.update_one(
+                {"_id": car_oid},
+                {"$inc": {f"stock.{stock_key}": -1}},
+            )
+            await db.bookings.update_one(
+                {"_id": ObjectId(booking_id_str)},
+                {"$set": {
+                    "stock_adjustments.pickup_decremented": True,
+                    "stock_adjustments.pickup_at": datetime.now(timezone.utc),
+                    "stock_adjustments.pickup_key": stock_key,
+                    "stock_adjustments.pickup_reason": "pos_active",
+                }},
+            )
+            booking_doc["stock_adjustments"] = {
+                "pickup_decremented": True,
+                "pickup_key": stock_key,
+                "pickup_reason": "pos_active",
+            }
+        except Exception as e:
+            logger.exception("POS stock decrement failed for booking=%s: %s", booking_id_str, e)
+
+    # --- Email confirmation (optional) ---
+    email_sent = False
+    if body.send_email:
+        try:
+            await send_booking_email("created", booking_doc, email)
+            email_sent = True
+        except Exception as e:
+            logger.warning(f"POS booking email failed: {e}")
+
+    # --- Audit log ---
+    await log_admin_action(
+        admin, "pos.booking_create", booking_id_str,
+        {
+            "customer_email": email,
+            "user_created": user_created,
+            "car_id": body.car_id,
+            "car_name": booking_doc["car_name"],
+            "status": desired_status,
+            "payment_method": pm,
+            "mark_paid": body.mark_paid,
+            "total": total,
+            "days": days,
+            "pickup": pickup_name,
+            "dropoff": dropoff_name,
+        },
+        request,
+    )
+
+    logger.info(
+        "POS booking created: id=%s by=%s customer=%s status=%s total=%.2f",
+        booking_id_str, admin.get("email"), email, desired_status, total,
+    )
+
+    return {
+        "ok": True,
+        "booking": booking_doc,
+        "user_created": user_created,
+        "user_id": user_id,
+        "email_sent": email_sent,
+        "receipt_url": f"/api/bookings/{booking_id_str}/receipt.pdf",
+    }
+
+
 @api_router.post("/admin/backfill-booking-taxes")
 async def backfill_booking_taxes(request: Request):
     """Recompute and persist subtotal / tax_rate / tax_amount for bookings.
@@ -5821,6 +6285,8 @@ async def admin_list_customers(request: Request, q: Optional[str] = None, role: 
             "name": u.get("name") or "",
             "email": u.get("email") or "",
             "phone": u.get("phone") or "",
+            "national_id": u.get("national_id") or "",
+            "drivers_license": u.get("drivers_license") or "",
             "role": u.get("role") or "user",
             "created_at": created_at.isoformat() if isinstance(created_at, datetime) else None,
             "terms_accepted_at": terms_at.isoformat() if isinstance(terms_at, datetime) else None,
