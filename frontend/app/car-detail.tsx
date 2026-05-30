@@ -256,27 +256,97 @@ export default function CarDetailScreen() {
               </View>
             ) : null}
 
-            {(car.pickup_location || car.dropoff_location) && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Locations</Text>
-                {car.pickup_location && (
-                  <TouchableOpacity testID="pickup-location-btn" style={styles.locationRow}
-                    onPress={() => router.push({ pathname: '/map-view', params: { pickupLat: String(car.pickup_location?.lat || 0), pickupLng: String(car.pickup_location?.lng || 0), pickupName: String(car.pickup_location?.name || 'Pickup'), dropoffLat: String(car.dropoff_location?.lat || 0), dropoffLng: String(car.dropoff_location?.lng || 0), dropoffName: String(car.dropoff_location?.name || 'Drop-off') } })}>
-                    <View style={styles.locationIcon}><Ionicons name="location" size={18} color="#34C759" /></View>
-                    <View style={{ flex: 1 }}><Text style={styles.locationLabel}>Pickup</Text><Text style={styles.locationName}>{car.pickup_location.name}</Text></View>
-                    <Ionicons name="map-outline" size={20} color="#007AFF" />
-                  </TouchableOpacity>
-                )}
-                {car.dropoff_location && (
-                  <TouchableOpacity testID="dropoff-location-btn" style={styles.locationRow}
-                    onPress={() => router.push({ pathname: '/map-view', params: { pickupLat: String(car.pickup_location?.lat || 0), pickupLng: String(car.pickup_location?.lng || 0), pickupName: String(car.pickup_location?.name || 'Pickup'), dropoffLat: String(car.dropoff_location?.lat || 0), dropoffLng: String(car.dropoff_location?.lng || 0), dropoffName: String(car.dropoff_location?.name || 'Drop-off') } })}>
-                    <View style={[styles.locationIcon, { backgroundColor: '#FFF0F0' }]}><Ionicons name="location" size={18} color="#FF3B30" /></View>
-                    <View style={{ flex: 1 }}><Text style={styles.locationLabel}>Drop-off</Text><Text style={styles.locationName}>{car.dropoff_location.name}</Text></View>
-                    <Ionicons name="map-outline" size={20} color="#007AFF" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
+            {(() => {
+              // Modern multi-location schema: car.pickup_locations / car.dropoff_locations are arrays.
+              // Legacy singular fields kept for backward compat with old DB records.
+              const pickups: Array<{name:string;lat:number;lng:number}> =
+                Array.isArray(car.pickup_locations) && car.pickup_locations.length > 0
+                  ? car.pickup_locations
+                  : (car.pickup_location ? [car.pickup_location] : []);
+              const dropoffs: Array<{name:string;lat:number;lng:number}> =
+                Array.isArray(car.dropoff_locations) && car.dropoff_locations.length > 0
+                  ? car.dropoff_locations
+                  : (car.dropoff_location ? [car.dropoff_location] : []);
+              if (pickups.length === 0 && dropoffs.length === 0) return null;
+              // Sensible default pair for the map view — first of each list.
+              const defaultPickup = pickups[0] || dropoffs[0] || { name: 'Pickup', lat: 0, lng: 0 };
+              const defaultDropoff = dropoffs[0] || pickups[0] || { name: 'Drop-off', lat: 0, lng: 0 };
+              const openMap = (focusType: 'pickup' | 'dropoff', loc: {name:string;lat:number;lng:number}) => {
+                // The map screen always receives one pickup + one dropoff. If the user
+                // tapped a pickup row, that location becomes the focused pickup; if they
+                // tapped a dropoff row, that location becomes the focused dropoff. The
+                // counterpart defaults to the first item of the other list so the
+                // route line still renders.
+                const pickup = focusType === 'pickup' ? loc : defaultPickup;
+                const dropoff = focusType === 'dropoff' ? loc : defaultDropoff;
+                router.push({
+                  pathname: '/map-view',
+                  params: {
+                    pickupLat: String(pickup.lat || 0),
+                    pickupLng: String(pickup.lng || 0),
+                    pickupName: String(pickup.name || 'Pickup'),
+                    dropoffLat: String(dropoff.lat || 0),
+                    dropoffLng: String(dropoff.lng || 0),
+                    dropoffName: String(dropoff.name || 'Drop-off'),
+                  },
+                });
+              };
+              return (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>{tr('locations')}</Text>
+
+                  {pickups.length > 0 && (
+                    <>
+                      <Text style={styles.locationGroupTitle}>{pickups.length === 1 ? tr('pickupLocation') : tr('pickupLocations')}</Text>
+                      {pickups.map((loc, idx) => (
+                        <TouchableOpacity
+                          key={`pickup-${idx}-${loc.name}`}
+                          testID={`pickup-location-btn-${idx}`}
+                          style={styles.locationRow}
+                          onPress={() => openMap('pickup', loc)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.locationIcon}>
+                            <Ionicons name="location" size={18} color="#34C759" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.locationName} numberOfLines={2}>{loc.name}</Text>
+                            <Text style={styles.locationLabel}>{tr('tapToOpenInMap')}</Text>
+                          </View>
+                          <Ionicons name="map-outline" size={20} color="#007AFF" />
+                        </TouchableOpacity>
+                      ))}
+                    </>
+                  )}
+
+                  {dropoffs.length > 0 && (
+                    <>
+                      <Text style={[styles.locationGroupTitle, { marginTop: pickups.length > 0 ? 14 : 0 }]}>
+                        {dropoffs.length === 1 ? tr('dropoffLocation') : tr('dropoffLocations')}
+                      </Text>
+                      {dropoffs.map((loc, idx) => (
+                        <TouchableOpacity
+                          key={`dropoff-${idx}-${loc.name}`}
+                          testID={`dropoff-location-btn-${idx}`}
+                          style={styles.locationRow}
+                          onPress={() => openMap('dropoff', loc)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.locationIcon, { backgroundColor: '#FFF0F0' }]}>
+                            <Ionicons name="location" size={18} color="#FF3B30" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.locationName} numberOfLines={2}>{loc.name}</Text>
+                            <Text style={styles.locationLabel}>{tr('tapToOpenInMap')}</Text>
+                          </View>
+                          <Ionicons name="map-outline" size={20} color="#007AFF" />
+                        </TouchableOpacity>
+                      ))}
+                    </>
+                  )}
+                </View>
+              );
+            })()}
 
             {/* Reviews Section */}
             <View style={styles.section}>
@@ -406,8 +476,9 @@ const styles = StyleSheet.create({
   description: { fontSize: 15, color: '#666', lineHeight: 24 },
   locationRow: { flexDirection: 'row', alignItems: 'center', padding: 14, backgroundColor: '#F5F5F5', borderRadius: 14, marginBottom: 8, gap: 12 },
   locationIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F0FFF4', justifyContent: 'center', alignItems: 'center' },
-  locationLabel: { fontSize: 11, color: '#999', textTransform: 'uppercase', fontWeight: '700', letterSpacing: 0.5 },
+  locationLabel: { fontSize: 11, color: '#999', textTransform: 'uppercase', fontWeight: '700', letterSpacing: 0.5, marginTop: 2 },
   locationName: { fontSize: 15, fontWeight: '600', color: '#0A0A0A' },
+  locationGroupTitle: { fontSize: 12, color: '#666', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 8, marginTop: 4 },
   // Reviews
   reviewsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   writeReviewBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 50, backgroundColor: '#FFF0F0' },
