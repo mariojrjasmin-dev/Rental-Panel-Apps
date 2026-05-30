@@ -914,7 +914,12 @@ APPLE_ISSUER = "https://appleid.apple.com"
 APPLE_ALLOWED_AUDIENCES = [
     a.strip() for a in os.environ.get(
         "APPLE_ALLOWED_AUDIENCES",
-        "com.damsrentacar.app,com.damscarrental.app,com.damscarrental,host.exp.Exponent",
+        # Bundle IDs that may appear as the JWT `aud` claim from Apple.
+        #   - com.damsrentacar.app: production iOS bundle (declared in app.json)
+        #   - com.damscarrental.app / com.damscarrental: legacy / alternate
+        #   - host.exp.Exponent: Expo Go (development)
+        #   - app.emergent.rentalroutes8c25bea5: Emergent EAS-managed TestFlight build
+        "com.damsrentacar.app,com.damscarrental.app,com.damscarrental,host.exp.Exponent,app.emergent.rentalroutes8c25bea5",
     ).split(",") if a.strip()
 ]
 _apple_jwk_client: Optional[jwt.PyJWKClient] = None
